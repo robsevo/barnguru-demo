@@ -21,7 +21,6 @@ data/*.parquet
 
 # Frontend
 dashboard/frontend/node_modules/
-dashboard/frontend/.vercel/
 
 # Environment / secrets
 .env
@@ -34,6 +33,4 @@ dashboard/frontend/.vercel/
 .vscode/
 *.swp
 *.swo
-dashboard/frontend/package-lock.jsont
-dashboard/frontend/tsconfig.tsbuildinfo
-dashboard/frontend/.next/
+dashboard/frontend/
