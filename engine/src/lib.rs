@@ -1,4 +1,7 @@
+pub mod tracker;
+
 use pyo3::prelude::*;
+use tracker::Tracker;
 
 #[pyfunction]
 pub fn gretzky_version() -> &'static str {
@@ -8,6 +11,7 @@ pub fn gretzky_version() -> &'static str {
 #[pymodule]
 fn gretzky_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(gretzky_version, m)?)?;
+    m.add_class::<Tracker>()?;
     Ok(())
 }
 

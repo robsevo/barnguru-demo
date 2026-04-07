@@ -1,1 +1,1 @@
-"""GRETZKY FastAPI backend."""
+"""GRTZKY FastAPI backend."""

@@ -1,1 +1,1 @@
-"""GRETZKY dashboard: FastAPI backend + React frontend."""
+"""GRTZKY dashboard: FastAPI backend + React frontend."""
