@@ -38,6 +38,23 @@ dashboard/frontend/.env.*.local
 .env.local
 .env.*.local
 
+# CV training data (large, regeneratable via build-cv-dataset)
+data/cv_training/raw/
+data/cv_training/aug_images/
+data/cv_training/frames/
+data/cv_training/aug_labels/
+data/cv_training/yolo_split/
+data/cv_training/jersey_crops/
+data/cv_training/labels/
+
+# Trained model weights (regeneratable via train-* commands)
+runs/
+yolov8n.pt
+models/cv/*.pt
+
+# Serena MCP (machine-local config)
+.serena/
+
 # Editor / OS
 .DS_Store
 .idea/

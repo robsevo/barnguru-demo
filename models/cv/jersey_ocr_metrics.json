@@ -1,0 +1,8 @@
+{
+  "top1_acc": 1.0,
+  "epochs": 20,
+  "batch": 64,
+  "lr": 0.001,
+  "device": "cpu",
+  "gate": 0.85
+}

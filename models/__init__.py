@@ -1,1 +1,1 @@
-"""GRETZKY player/team/coaching/fatigue models."""
+"""GRTZKY player/team/coaching/fatigue models."""
