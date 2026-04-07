@@ -1,0 +1,6 @@
+{
+  "name": "gretzky-dashboard",
+  "version": "0.1.0",
+  "dependencies": { "react": "^19.0.0", "recharts": "^2.12.0" },
+  "devDependencies": { "typescript": "^5.5.0" }
+}

@@ -1,0 +1,10 @@
+/target/
+engine/target/
+*.so
+*.pyd
+.venv/
+__pycache__/
+dist/
+dashboard/frontend/node_modules/
+data/*.db
+data/*.parquet
