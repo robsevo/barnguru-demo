@@ -1,0 +1,811 @@
+"use client";
+
+import React, { useEffect, useState, useCallback, useRef } from "react";
+import Link from "next/link";
+import { logoUrl, TEAM_COLORS } from "@/utils/nhl";
+
+interface StandingRow {
+  team: string;
+  team_name: string;
+  division: string;
+  conference: string;
+  gp: number;
+  w: number;
+  l: number;
+  otl: number;
+  pts: number;
+  div_rank: number;
+  wildcard_rank: number;
+  conf_rank: number;
+  league_rank: number;
+  pts_pct: number;
+  streak_code: string;
+  streak_count: number;
+  gf: number;
+  ga: number;
+  goal_diff: number;
+  home_w: number;
+  home_l: number;
+  home_otl: number;
+  away_w: number;
+  away_l: number;
+  away_otl: number;
+  l10_w: number;
+  l10_l: number;
+  l10_otl: number;
+  so_w: number;
+  so_l: number;
+  clinch_indicator: string;
+  regulation_wins: number;
+}
+
+type SortKey = "pts" | "gp" | "w" | "l" | "otl" | "pts_pct" | "gf" | "ga" | "goal_diff" | "regulation_wins";
+type TabFilter = "League" | "East" | "West" | "Atlantic" | "Metropolitan" | "Central" | "Pacific";
+type ViewMode = "table" | "hunt" | "tree";
+
+const DIVISIONS = ["Atlantic", "Metropolitan", "Central", "Pacific"];
+const EAST_DIVS = ["Atlantic", "Metropolitan"];
+const WEST_DIVS = ["Central", "Pacific"];
+
+function playoffStatus(row: StandingRow): "division" | "wildcard" | "bubble" | "out" {
+  if (row.div_rank <= 3) return "division";
+  if (row.wildcard_rank > 0 && row.wildcard_rank <= 2) return "wildcard";
+  if (row.wildcard_rank > 0 && row.wildcard_rank <= 4) return "bubble";
+  return "out";
+}
+
+function TeamLogoImg({ abbrev, size = 20 }: { abbrev: string; size?: number }) {
+  const [err, setErr] = useState(false);
+  if (err) return <span className="text-[10px] font-black text-white/30" style={{ width: size }}>{abbrev}</span>;
+  return (
+    <img src={logoUrl(abbrev)} alt={abbrev} width={size} height={size}
+      style={{ width: size, height: size, filter: "drop-shadow(0 0 4px rgba(255,255,255,0.22))" }}
+      className="object-contain shrink-0"
+      onError={() => setErr(true)} />
+  );
+}
+
+function ClinchBadge({ indicator }: { indicator: string }) {
+  if (!indicator) return null;
+  const colors: Record<string, string> = {
+    x: "bg-[#4ade80]/20 text-[#4ade80] border-[#4ade80]/30",
+    y: "bg-[#f472b6]/15 text-[#f472b6]/90 border-[#f472b6]/25",
+    z: "bg-[#a78bfa]/20 text-[#a78bfa] border-[#a78bfa]/30",
+    p: "bg-[#fbbf24]/20 text-[#fbbf24] border-[#fbbf24]/30",
+  };
+  return (
+    <span className={`text-[8px] font-black uppercase px-1 py-0.5 rounded border ${colors[indicator] ?? "bg-white/10 text-white/40 border-white/10"}`}>
+      {indicator}
+    </span>
+  );
+}
+
+function WcBadge({ rank }: { rank: number }) {
+  if (rank < 1 || rank > 2) return null;
+  return (
+    <span className={`text-[8px] font-black uppercase px-1 py-0.5 rounded border ${
+      rank === 1
+        ? "bg-[#4ade80]/20 text-[#4ade80] border-[#4ade80]/30"
+        : "bg-[#38bdf8]/15 text-[#38bdf8]/90 border-[#38bdf8]/25"
+    }`}>
+      WC{rank}
+    </span>
+  );
+}
+
+function PlayoffDot({ status }: { status: ReturnType<typeof playoffStatus> }) {
+  if (status === "division") return <span className="w-1.5 h-1.5 rounded-full bg-[#4ade80] shadow-[0_0_4px_rgba(74,222,128,0.8)] shrink-0" />;
+  if (status === "wildcard") return <span className="w-1.5 h-1.5 rounded-full bg-[#fbbf24] shadow-[0_0_4px_rgba(251,191,36,0.8)] shrink-0" />;
+  return <span className="w-1.5 h-1.5 rounded-full border border-white/[0.18] shrink-0" title="Not in a playoff spot" />;
+}
+
+function SortHeader({ label, col, sortKey, sortDir, onSort, hideMobile }: {
+  label: string; col: SortKey; sortKey: SortKey; sortDir: "asc" | "desc"; onSort: (c: SortKey) => void; hideMobile?: boolean;
+}) {
+  const active = sortKey === col;
+  return (
+    <th
+      className={`px-2 py-2.5 text-right cursor-pointer select-none transition-colors whitespace-nowrap ${hideMobile ? "hidden sm:table-cell" : ""} ${active ? "text-white/70" : "text-white/28 hover:text-white/50"}`}
+      onClick={() => onSort(col)}
+    >
+      <span className="text-[9px] font-black uppercase tracking-wider">{label}</span>
+      {active && <span className="ml-0.5 text-[8px]">{sortDir === "desc" ? "↓" : "↑"}</span>}
+    </th>
+  );
+}
+
+// ── Playoff Race View ─────────────────────────────────────────────────────────
+
+function PlayoffRaceConference({ name, rows }: { name: string; rows: StandingRow[] }) {
+  const conf = name === "East" ? EAST_DIVS : WEST_DIVS;
+  const confRows = rows
+    .filter(r => conf.includes(r.division))
+    .sort((a, b) => a.conf_rank - b.conf_rank);
+
+  const divTeams = (div: string) => confRows
+    .filter(r => r.division === div && r.div_rank <= 3)
+    .sort((a, b) => a.div_rank - b.div_rank);
+
+  const wcTeams  = confRows.filter(r => r.wildcard_rank > 0 && r.wildcard_rank <= 2).sort((a, b) => a.wildcard_rank - b.wildcard_rank);
+  const huntRows = confRows.filter(r => r.conf_rank > 8 && r.conf_rank <= 13);
+  const wc2pts   = wcTeams.find(r => r.wildcard_rank === 2)?.pts ?? 0;
+
+  function badge(row: StandingRow) {
+    if (row.div_rank === 1) return { label: `1st ${row.division.slice(0, 3).toUpperCase()}`, cls: "text-white/50 border-white/10 bg-white/[0.03]" };
+    if (row.div_rank === 2) return { label: `2nd ${row.division.slice(0, 3).toUpperCase()}`, cls: "text-white/35 border-white/10 bg-white/[0.02]" };
+    if (row.div_rank === 3) return { label: `3rd ${row.division.slice(0, 3).toUpperCase()}`, cls: "text-white/35 border-white/10 bg-white/[0.02]" };
+    return null;
+  }
+
+  function TeamRow({ row, idx }: { row: StandingRow; idx: number }) {
+    const color = TEAM_COLORS[row.team] ?? "#666";
+    const b = badge(row);
+    const streakColor = row.streak_code === "W" ? "text-[#4ade80]" : row.streak_code === "L" ? "text-[#ef4444]/70" : "text-white/35";
+    return (
+      <div className="flex items-center gap-2.5 px-3 py-2 border-b border-white/[0.04] hover:bg-white/[0.03] transition-colors">
+        <span className="text-[11px] font-black text-white/20 w-4 shrink-0 tabular-nums">{idx + 1}</span>
+        <div className="w-1 h-5 rounded-full shrink-0" style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}99, 0 0 2px ${color}` }} />
+        <TeamLogoImg abbrev={row.team} size={30} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[14px] font-bold text-white/85">{row.team}</span>
+            <span className="text-[11px] text-white/30 hidden sm:inline truncate">{row.team_name}</span>
+            {row.clinch_indicator && <ClinchBadge indicator={row.clinch_indicator} />}
+          </div>
+          <div className="text-[10px] text-white/35 font-mono">{row.w}-{row.l}-{row.otl}</div>
+        </div>
+        {b && <span className={`hidden sm:inline text-[8px] font-black uppercase px-1.5 py-0.5 rounded border whitespace-nowrap ${b.cls}`}>{b.label}</span>}
+        <span className={`text-[11px] font-bold font-mono hidden sm:inline ${streakColor}`}>{row.streak_code}{row.streak_count}</span>
+        <div className="text-right">
+          <div className="text-[9px] text-white/20 font-mono">{row.gp}gp</div>
+          <div className="text-[9px] text-white/20">{82 - row.gp} left</div>
+        </div>
+        <span className="text-[15px] font-black text-white tabular-nums w-8 text-right">{row.pts}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 min-w-0">
+      <div className="flex items-center justify-between mb-3 px-1">
+        <h2 className="text-[11px] font-black uppercase tracking-[0.25em] text-white/50">{name}ern</h2>
+        <span className="text-[9px] text-white/20 font-semibold">PLAYOFF PICTURE</span>
+      </div>
+
+      <div className="rounded-xl border border-[#C9A84C]/[0.15] bg-gradient-to-b from-white/[0.015] via-white/[0.005] to-transparent overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.7),0_2px_8px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(220,228,240,0.05),inset_0_-1px_0_rgba(0,0,0,0.35),0_0_0_1px_rgba(190,198,205,0.04)]">
+        {/* Division teams — 3 per division, labelled */}
+        {conf.map((div, dIdx) => {
+          const teams = divTeams(div);
+          return (
+            <div key={div}>
+              <div className={`px-3 py-1 ${dIdx > 0 ? "border-t border-white/[0.07]" : ""}`}>
+                <span className="text-[8px] font-black uppercase tracking-[0.25em] text-white/30">{div}</span>
+              </div>
+              {teams.map((row, i) => <TeamRow key={row.team} row={row} idx={i} />)}
+            </div>
+          );
+        })}
+
+        {/* Main separator — after 6 division spots */}
+        <div className="border-t-2 border-[#C9A84C]/25 mx-0" />
+
+        {/* Wild Cards */}
+        <div className="px-3 py-1.5 bg-[#fbbf24]/[0.04]">
+          <span className="text-[8px] font-black uppercase tracking-[0.25em] text-[#fbbf24]/60">Wild Cards</span>
+        </div>
+        {wcTeams.map((row) => {
+          const color = TEAM_COLORS[row.team] ?? "#666";
+          const streakColor = row.streak_code === "W" ? "text-[#4ade80]" : row.streak_code === "L" ? "text-[#ef4444]/70" : "text-white/35";
+          return (
+            <div key={row.team} className="flex items-center gap-2.5 px-3 py-2 border-b border-white/[0.04] hover:bg-white/[0.03] transition-colors">
+              <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded border ${row.wildcard_rank === 1 ? "text-[#C9A84C]/90 border-[#C9A84C]/30 bg-[#C9A84C]/10" : "text-[#38bdf8]/80 border-[#38bdf8]/25 bg-[#38bdf8]/8"}`}>WC{row.wildcard_rank}</span>
+              <div className="w-1 h-5 rounded-full shrink-0" style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}99, 0 0 2px ${color}` }} />
+              <TeamLogoImg abbrev={row.team} size={30} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[14px] font-bold text-white/85">{row.team}</span>
+                  <span className="text-[11px] text-white/30 hidden sm:inline">{row.team_name}</span>
+                </div>
+                <div className="text-[10px] text-white/35 font-mono">{row.w}-{row.l}-{row.otl}</div>
+              </div>
+              <span className={`text-[11px] font-bold font-mono hidden sm:inline ${streakColor}`}>{row.streak_code}{row.streak_count}</span>
+              <div className="text-right">
+                <div className="text-[9px] text-white/20 font-mono">{row.gp}gp</div>
+                <div className="text-[9px] text-white/20">{82 - row.gp} left</div>
+              </div>
+              <span className="text-[15px] font-black text-white tabular-nums w-8 text-right">{row.pts}</span>
+            </div>
+          );
+        })}
+
+        {/* In the Hunt section */}
+        {huntRows.length > 0 && (
+          <>
+            <div className="px-3 py-1.5 bg-[#fbbf24]/[0.03] border-t border-[#fbbf24]/15">
+              <span className="text-[8px] font-black uppercase tracking-[0.25em] text-[#fbbf24]/40">In the Hunt</span>
+            </div>
+            {huntRows.map(row => {
+              const color = TEAM_COLORS[row.team] ?? "#666";
+              const ptsBehind = wc2pts - row.pts;
+              const gamesLeft = 82 - row.gp;
+              return (
+                <div key={row.team} className="flex items-center gap-2.5 px-3 py-2 border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors opacity-70">
+                  <span className="text-[11px] font-black text-white/15 w-4 shrink-0">—</span>
+                  <div className="w-1 h-5 rounded-full shrink-0" style={{ backgroundColor: color, opacity: 0.5, boxShadow: `0 0 4px ${color}80` }} />
+                  <TeamLogoImg abbrev={row.team} size={30} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[14px] font-bold text-white/60">{row.team}</div>
+                    <div className="text-[10px] text-white/38 font-mono">{row.w}-{row.l}-{row.otl}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[10px] font-bold text-[#fbbf24]/60">{ptsBehind > 0 ? `${ptsBehind} back` : "—"}</div>
+                    <div className="text-[9px] text-white/20">{gamesLeft} left</div>
+                  </div>
+                  <span className="text-[13px] font-black text-white/40 tabular-nums w-8 text-right">{row.pts}</span>
+                </div>
+              );
+            })}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Playoff Tree / Bracket ─────────────────────────────────────────────────────
+
+function PlayoffBracket({ rows }: { rows: StandingRow[] }) {
+
+  function SeedBadge({ seed }: { seed: number | string }) {
+    return (
+      <span className={`text-[8px] font-black w-7 h-[18px] flex items-center justify-center rounded shrink-0 border tabular-nums ${
+        seed === "WC1"
+          ? "bg-[#C9A84C]/10 text-[#C9A84C]/75 border-[#C9A84C]/22"
+          : seed === "WC2"
+            ? "bg-[#38bdf8]/10 text-[#38bdf8]/75 border-[#38bdf8]/22"
+          : seed === "D1"
+            ? "bg-[#fbbf24]/10 text-[#fbbf24]/75 border-[#fbbf24]/20"
+            : seed === "D2"
+              ? "bg-[#C0C0C0]/10 text-[#C0C0C0]/75 border-[#C0C0C0]/20"
+              : seed === "D3"
+                ? "bg-[#CD7F32]/10 text-[#CD7F32]/75 border-[#CD7F32]/20"
+                : "bg-white/[0.04] text-white/38 border-white/[0.08]"
+      }`}>{seed}</span>
+    );
+  }
+
+  function BracketTeamRow({ row, seed, divider }: { row: StandingRow | undefined; seed: number | string; divider?: boolean }) {
+    if (!row) return (
+      <div className={`flex items-center gap-2 px-3 py-3 min-h-[52px] ${divider ? "border-b border-[#C9A84C]/[0.15]" : ""}`}>
+        <SeedBadge seed={seed} />
+        <div className="w-0.5 h-6 rounded-full bg-white/[0.07] shrink-0" />
+        <span className="text-[11px] text-white/18 italic flex-1">TBD</span>
+        <span className="text-[13px] font-black text-white/15">—</span>
+      </div>
+    );
+    const color = TEAM_COLORS[row.team] ?? "#666";
+    return (
+      <div className={`flex items-center gap-2.5 px-3 py-2.5 min-h-[52px] ${divider ? "border-b border-[#C9A84C]/[0.15]" : ""}`}>
+        <SeedBadge seed={seed} />
+        <div className="w-0.5 h-7 rounded-full shrink-0" style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}bb` }} />
+        <TeamLogoImg abbrev={row.team} size={32} />
+        <div className="flex-1 min-w-0">
+          <div className="text-[13px] font-bold text-white/90 leading-none">{row.team}</div>
+          <div className="text-[9px] text-white/30 font-mono mt-0.5">{row.w}-{row.l}-{row.otl}</div>
+        </div>
+        <div className="text-right shrink-0">
+          <div className="text-[14px] font-black text-white tabular-nums">{row.pts}</div>
+          <div className="text-[7px] text-white/15 font-mono">pts</div>
+        </div>
+      </div>
+    );
+  }
+
+  function MatchupCard({ top, topSeed, bottom, bottomSeed }: {
+    top: StandingRow | undefined; topSeed: number | string;
+    bottom: StandingRow | undefined; bottomSeed: number | string;
+  }) {
+    return (
+      <div className="rounded-xl border border-[#C9A84C]/[0.18] bg-gradient-to-b from-white/[0.018] via-white/[0.006] to-transparent overflow-hidden shadow-[0_8px_28px_rgba(0,0,0,0.72),inset_0_1px_0_rgba(220,228,240,0.07)]">
+        <BracketTeamRow row={top} seed={topSeed} divider />
+        <div className="flex items-center gap-2 px-3 py-0.5">
+          <div className="flex-1 h-px bg-white/[0.04]" />
+          <span className="text-[7px] font-black tracking-[0.3em] text-white/10 uppercase">vs</span>
+          <div className="flex-1 h-px bg-white/[0.04]" />
+        </div>
+        <BracketTeamRow row={bottom} seed={bottomSeed} />
+      </div>
+    );
+  }
+
+  // Two matchup cards stacked with bracket connector lines on the right
+  function BracketGroup({ top, bottom, label }: {
+    top: React.ReactNode;
+    bottom: React.ReactNode;
+    label: string;
+  }) {
+    return (
+      <div>
+        <div className="text-[8px] font-black uppercase tracking-[0.28em] text-white/22 mb-2 px-0.5">{label}</div>
+        <div className="flex items-stretch">
+          {/* Cards */}
+          <div className="flex-1 flex flex-col gap-3 min-w-0">
+            {top}
+            {bottom}
+          </div>
+          {/* Bracket arm */}
+          <div className="w-5 shrink-0 ml-2 relative self-stretch">
+            {/* Horizontal line out of top card center (~24% from top) */}
+            <div className="absolute left-0 right-0 h-px bg-white/[0.16]" style={{ top: "24%" }} />
+            {/* Horizontal line out of bottom card center (~76% from top) */}
+            <div className="absolute left-0 right-0 h-px bg-white/[0.16]" style={{ top: "76%" }} />
+            {/* Vertical bar connecting them on right edge */}
+            <div className="absolute right-0 w-px bg-white/[0.16]" style={{ top: "24%", bottom: "24%" }} />
+            {/* Output dot at midpoint */}
+            <div className="absolute right-0 w-2 h-2 rounded-full bg-white/[0.22] -translate-y-1/2 -mr-[3px]" style={{ top: "50%" }} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function ConferenceBracket({ name }: { name: "East" | "West" }) {
+    const divNames = name === "East" ? EAST_DIVS : WEST_DIVS;
+    const confRows = rows.filter(r => divNames.includes(r.division));
+    const inRows = confRows.filter(r => r.conf_rank <= 8);
+
+    const seed1 = inRows.find(r => r.conf_rank === 1);
+    const leaderDiv = seed1?.division ?? divNames[0];
+    const otherDiv  = divNames.find(d => d !== leaderDiv) ?? divNames[1];
+
+    const divTeams = (div: string) => inRows.filter(r => r.division === div).sort((a, b) => a.div_rank - b.div_rank);
+    const leaderTeams = divTeams(leaderDiv);
+    const otherTeams  = divTeams(otherDiv);
+    const wc1 = inRows.find(r => r.wildcard_rank === 1);
+    const wc2 = inRows.find(r => r.wildcard_rank === 2);
+
+    return (
+      <div>
+        {/* Conference header */}
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-0.5 h-4 rounded-full bg-white/25" />
+          <h2 className="text-[13px] font-black uppercase tracking-[0.22em] text-white/55">{name}ern Conference</h2>
+          <div className="flex-1 h-px bg-white/[0.06]" />
+          <span className="text-[7px] font-black uppercase tracking-[0.22em] text-white/18 border border-white/[0.07] px-2 py-0.5 rounded-full">Round 1</span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <BracketGroup
+            label={leaderDiv}
+            top={<MatchupCard top={leaderTeams[0]} topSeed={`D${leaderTeams[0]?.div_rank ?? 1}`} bottom={wc2} bottomSeed="WC2" />}
+            bottom={<MatchupCard top={leaderTeams[1]} topSeed={`D${leaderTeams[1]?.div_rank ?? 2}`} bottom={leaderTeams[2]} bottomSeed={`D${leaderTeams[2]?.div_rank ?? 3}`} />}
+          />
+          <BracketGroup
+            label={otherDiv}
+            top={<MatchupCard top={otherTeams[0]} topSeed={`D${otherTeams[0]?.div_rank ?? 1}`} bottom={wc1} bottomSeed="WC1" />}
+            bottom={<MatchupCard top={otherTeams[1]} topSeed={`D${otherTeams[1]?.div_rank ?? 2}`} bottom={otherTeams[2]} bottomSeed={`D${otherTeams[2]?.div_rank ?? 3}`} />}
+          />
+        </div>
+
+        {/* Conference Final placeholder */}
+        <div className="mt-5 flex items-center gap-3">
+          <div className="flex-1 h-px bg-white/[0.05]" />
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#C9A84C]/[0.15] bg-white/[0.015]">
+            <span className="text-[7px] font-black uppercase tracking-[0.25em] text-white/18">Conf Final</span>
+            <span className="text-white/10 text-[10px]">·</span>
+            <span className="text-[8px] text-white/12 italic">Winner advances to SCF</span>
+          </div>
+          <div className="flex-1 h-px bg-white/[0.05]" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-10">
+      <ConferenceBracket name="East" />
+      <div className="border-t border-white/[0.07]" />
+      <ConferenceBracket name="West" />
+
+      {/* Stanley Cup Final */}
+      <div className="flex items-center justify-center pt-2 pb-1">
+        <div className="rounded-2xl border border-[#fbbf24]/18 bg-[#fbbf24]/[0.025] px-6 py-4 text-center shadow-[0_0_40px_rgba(251,191,36,0.06)]">
+          {/* Stanley Cup SVG */}
+          <div className="flex justify-center mb-2">
+            <svg width="60" height="82" viewBox="0 0 60 82" fill="none" xmlns="http://www.w3.org/2000/svg">
+              {/* Glow */}
+              <ellipse cx="30" cy="80" rx="18" ry="2" fill="#cbd5e1" opacity="0.18"/>
+              {/* Base — two stepped levels */}
+              <rect x="4"  y="74" width="52" height="5"   rx="1.5" fill="#e2e8f0" opacity="0.65"/>
+              <rect x="8"  y="70" width="44" height="4.5" rx="1"   fill="#d1d5db" opacity="0.55"/>
+              <rect x="4"  y="74" width="52" height="1.5" rx="0.5" fill="white"   opacity="0.18"/>
+              {/* 5 name bands — uniform width cylinder (real Cup bands are wide) */}
+              <rect x="9"  y="62" width="42" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.52"/>
+              <rect x="9"  y="53" width="42" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.47"/>
+              <rect x="9"  y="44" width="42" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.42"/>
+              <rect x="10" y="35" width="40" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.38"/>
+              <rect x="11" y="26" width="38" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.33"/>
+              {/* Band separators */}
+              <line x1="9"  y1="62" x2="51" y2="62" stroke="white" strokeWidth="0.8" opacity="0.30"/>
+              <line x1="9"  y1="53" x2="51" y2="53" stroke="white" strokeWidth="0.8" opacity="0.26"/>
+              <line x1="9"  y1="44" x2="51" y2="44" stroke="white" strokeWidth="0.8" opacity="0.22"/>
+              <line x1="10" y1="35" x2="50" y2="35" stroke="white" strokeWidth="0.8" opacity="0.20"/>
+              {/* Metallic sheen on each band */}
+              <rect x="9"  y="62" width="42" height="2.5" rx="0.3" fill="white" opacity="0.12"/>
+              <rect x="9"  y="53" width="42" height="2.5" rx="0.3" fill="white" opacity="0.10"/>
+              <rect x="9"  y="44" width="42" height="2.5" rx="0.3" fill="white" opacity="0.09"/>
+              <rect x="10" y="35" width="40" height="2.5" rx="0.3" fill="white" opacity="0.08"/>
+              <rect x="11" y="26" width="38" height="2.5" rx="0.3" fill="white" opacity="0.07"/>
+              {/* Collar — narrow neck connecting bands to bowl */}
+              <rect x="22" y="18" width="16" height="9"   rx="1"   fill="#cbd5e1" opacity="0.55"/>
+              <line x1="22" y1="22.5" x2="38" y2="22.5"  stroke="white" strokeWidth="0.6" opacity="0.22"/>
+              {/* Bowl — wide shallow */}
+              <path d="M13 5 C11 5 9 18 30 18 C51 18 49 5 47 5 Z" fill="#cbd5e1" opacity="0.42"/>
+              <path d="M18 7 C16 7 15 17 30 17 C45 17 44 7 42 7 Z" fill="white"   opacity="0.08"/>
+              {/* Rim */}
+              <rect x="11" y="2" width="38" height="5"   rx="2"   fill="#e2e8f0" opacity="0.78"/>
+              <rect x="14" y="2.5" width="32" height="2" rx="0.8" fill="white"   opacity="0.22"/>
+            </svg>
+          </div>
+          <div className="text-[7px] font-black uppercase tracking-[0.35em] text-[#fbbf24]/50 mb-1">Stanley Cup Final</div>
+          <div className="text-[11px] font-bold text-white/25 italic">East Champion vs West Champion</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Table Rows ─────────────────────────────────────────────────────────────────
+
+function StandingTableRow({ row, rank, showRank }: { row: StandingRow; rank?: number; showRank?: boolean }) {
+  const status = playoffStatus(row);
+  const color = TEAM_COLORS[row.team] ?? "#666";
+  const diffSign = row.goal_diff > 0 ? "+" : "";
+  const streakColor = row.streak_code === "W" ? "text-[#4ade80]" : row.streak_code === "L" ? "text-[#ef4444]/70" : "text-white/35";
+  const showWc = row.div_rank > 3 && row.wildcard_rank >= 1 && row.wildcard_rank <= 2;
+
+  return (
+    <tr className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
+      {showRank && (
+        <td className="px-2 py-2 text-[10px] font-mono text-white/30 text-right w-6 tabular-nums">{rank}</td>
+      )}
+      {/* Team */}
+      <td className="px-2 py-1.5">
+        <div className="flex items-center gap-1.5">
+          <PlayoffDot status={status} />
+          <div className="w-1 h-4 rounded-full shrink-0" style={{ backgroundColor: color, boxShadow: `0 0 5px ${color}80` }} />
+          <span className="block sm:hidden"><TeamLogoImg abbrev={row.team} size={26} /></span>
+          <span className="hidden sm:block"><TeamLogoImg abbrev={row.team} size={28} /></span>
+          <span className="text-[12px] font-bold text-white/85 whitespace-nowrap">{row.team}</span>
+          <span className="text-[10px] text-white/30 hidden sm:inline truncate max-w-[90px]">{row.team_name}</span>
+          {row.div_rank <= 3 && (
+            <span className={`text-[8px] font-black px-1 py-0.5 rounded border whitespace-nowrap ${
+              row.div_rank === 1
+                ? "text-[#fbbf24]/75 border-[#fbbf24]/20 bg-[#fbbf24]/10"
+                : row.div_rank === 2
+                  ? "text-[#C0C0C0]/75 border-[#C0C0C0]/20 bg-[#C0C0C0]/10"
+                  : "text-[#CD7F32]/75 border-[#CD7F32]/20 bg-[#CD7F32]/10"
+            }`}>
+              {row.div_rank === 1 ? "D1" : row.div_rank === 2 ? "D2" : "D3"}
+            </span>
+          )}
+          {showWc && <WcBadge rank={row.wildcard_rank} />}
+          {row.clinch_indicator && <ClinchBadge indicator={row.clinch_indicator} />}
+        </div>
+      </td>
+      <td className="hidden sm:table-cell px-2 py-2 text-right text-[12px] font-mono tabular-nums text-white/45">{row.gp}</td>
+      <td className="px-1.5 py-1.5 text-right text-[12px] font-mono tabular-nums font-bold text-white/80">{row.w}</td>
+      <td className="px-1.5 py-1.5 text-right text-[12px] font-mono tabular-nums text-white/45">{row.l}</td>
+      <td className="px-1.5 py-1.5 text-right text-[12px] font-mono tabular-nums text-white/45">{row.otl}</td>
+      <td className="px-1.5 py-1.5 text-right text-[13px] font-black tabular-nums text-white">{row.pts}</td>
+      <td className="px-1.5 py-1.5 text-right text-[12px] font-mono tabular-nums text-white/40">{82 - row.gp}</td>
+      <td className="hidden sm:table-cell px-2 py-2 text-right text-[11px] font-mono tabular-nums text-white/35">{(row.pts_pct * 100).toFixed(1)}%</td>
+      <td className="hidden sm:table-cell px-2 py-2 text-right text-[12px] font-mono tabular-nums text-white/40 whitespace-nowrap">{row.l10_w}-{row.l10_l}-{row.l10_otl}</td>
+      <td className={`hidden sm:table-cell px-2 py-2 text-right text-[12px] font-mono tabular-nums font-bold whitespace-nowrap ${streakColor}`}>{row.streak_code}{row.streak_count}</td>
+      <td className="hidden sm:table-cell px-2 py-2 text-right text-[11px] font-mono tabular-nums text-white/35 whitespace-nowrap">{row.home_w}-{row.home_l}-{row.home_otl}</td>
+      <td className="hidden sm:table-cell px-2 py-2 text-right text-[11px] font-mono tabular-nums text-white/35 whitespace-nowrap">{row.away_w}-{row.away_l}-{row.away_otl}</td>
+      <td className="hidden sm:table-cell px-2 py-2 text-right text-[12px] font-mono tabular-nums text-white/45">{row.gf}</td>
+      <td className="hidden sm:table-cell px-2 py-2 text-right text-[12px] font-mono tabular-nums text-white/45">{row.ga}</td>
+      <td className={`hidden sm:table-cell px-2 py-2 text-right text-[12px] font-mono tabular-nums font-semibold ${row.goal_diff > 0 ? "text-[#4ade80]/80" : row.goal_diff < 0 ? "text-[#ef4444]/70" : "text-white/38"}`}>
+        {diffSign}{row.goal_diff}
+      </td>
+      <td className="hidden sm:table-cell px-2 py-2 text-right text-[12px] font-mono tabular-nums text-white/30">{row.regulation_wins}</td>
+    </tr>
+  );
+}
+
+function DivisionSection({ division, rows }: { division: string; rows: StandingRow[] }) {
+  const divRows = rows.filter(r => r.division === division).sort((a, b) => a.div_rank - b.div_rank);
+  if (divRows.length === 0) return null;
+
+  return (
+    <>
+      <tr>
+        <td colSpan={16} className="px-3 pt-3 pb-1">
+          <span className="text-[9px] font-black uppercase tracking-[0.25em] text-white/38">{division}</span>
+        </td>
+      </tr>
+      {divRows.map((row, idx) => {
+        const isPlayoffCutoff = row.div_rank === 3 && divRows[idx + 1]?.div_rank === 4;
+        return (
+          <React.Fragment key={row.team}>
+            <StandingTableRow row={row} rank={idx + 1} showRank />
+            {isPlayoffCutoff && (
+              <tr>
+                <td colSpan={16} className="p-0"><div className="border-b border-[#C9A84C]/20 mx-3" /></td>
+              </tr>
+            )}
+          </React.Fragment>
+        );
+      })}
+    </>
+  );
+}
+
+function LeagueSection({ rows }: { rows: StandingRow[] }) {
+  const isInPlayoff = (r: StandingRow) => r.div_rank <= 3 || (r.wildcard_rank >= 1 && r.wildcard_rank <= 2);
+  const inPlayoff  = [...rows].filter(r =>  isInPlayoff(r)).sort((a, b) => a.league_rank - b.league_rank);
+  const outPlayoff = [...rows].filter(r => !isInPlayoff(r)).sort((a, b) => a.league_rank - b.league_rank);
+  const allSorted  = [...inPlayoff, ...outPlayoff];
+  const cutoff     = inPlayoff.length;
+
+  return (
+    <>
+      {allSorted.map((row, idx) => (
+        <React.Fragment key={row.team}>
+          {idx === cutoff && (
+            <tr>
+              <td colSpan={16} className="p-0">
+                <div className="relative border-b-2 border-[#C9A84C]/25 mx-3">
+                  <span className="absolute right-0 -top-2.5 text-[7px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/35 pr-1">Playoff line</span>
+                </div>
+              </td>
+            </tr>
+          )}
+          <StandingTableRow row={row} rank={idx + 1} showRank />
+        </React.Fragment>
+      ))}
+    </>
+  );
+}
+
+// ── Main Page ──────────────────────────────────────────────────────────────────
+
+export default function StandingsPage() {
+  const [standings, setStandings] = useState<StandingRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<TabFilter>("League");
+  const [view, setView] = useState<ViewMode>("table");
+  const [sortKey, setSortKey] = useState<SortKey>("pts");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const tabScrollRef = useRef<HTMLDivElement>(null);
+  const [tabCanLeft, setTabCanLeft] = useState(false);
+  const [tabCanRight, setTabCanRight] = useState(false);
+
+  const fetchStandings = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const res = await fetch("/api/standings");
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setStandings(data.standings ?? []);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load standings");
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchStandings(); }, [fetchStandings]);
+
+  useEffect(() => {
+    const el = tabScrollRef.current;
+    if (!el) return;
+    const update = () => {
+      setTabCanLeft(el.scrollLeft > 0);
+      setTabCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    return () => el.removeEventListener("scroll", update);
+  }, []);
+
+  function handleSort(col: SortKey) {
+    if (sortKey === col) setSortDir(d => d === "desc" ? "asc" : "desc");
+    else { setSortKey(col); setSortDir("desc"); }
+  }
+
+  const TABS: TabFilter[] = ["League", "East", "West", "Atlantic", "Metropolitan", "Central", "Pacific"];
+  const filteredRows =
+    tab === "League" ? standings :
+    tab === "East"   ? standings.filter(r => EAST_DIVS.includes(r.division)) :
+    tab === "West"   ? standings.filter(r => WEST_DIVS.includes(r.division)) :
+    standings.filter(r => r.division === tab);
+
+  const TableHeader = ({ showRank }: { showRank?: boolean }) => (
+    <thead>
+      <tr className="border-b border-white/[0.07]">
+        {showRank && <th className="px-2 py-2.5 w-6" />}
+        <th className="px-2 py-2 text-left text-[9px] font-black uppercase tracking-wider text-white/28">Team</th>
+        <SortHeader label="GP"   col="gp"              sortKey={sortKey} sortDir={sortDir} onSort={handleSort} hideMobile />
+        <SortHeader label="W"    col="w"               sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+        <SortHeader label="L"    col="l"               sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+        <SortHeader label="OTL"  col="otl"             sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+        <SortHeader label="PTS"  col="pts"             sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+        <th className="px-1.5 py-2.5 text-right text-[9px] font-black uppercase tracking-wider text-white/28 whitespace-nowrap">REM</th>
+        <th className="hidden sm:table-cell px-2 py-2.5 text-right text-[9px] font-black uppercase tracking-wider text-white/28">PTS%</th>
+        <th className="hidden sm:table-cell px-2 py-2.5 text-right text-[9px] font-black uppercase tracking-wider text-white/28">L10</th>
+        <th className="hidden sm:table-cell px-2 py-2.5 text-right text-[9px] font-black uppercase tracking-wider text-white/28">STRK</th>
+        <th className="hidden sm:table-cell px-2 py-2.5 text-right text-[9px] font-black uppercase tracking-wider text-white/28">HOME</th>
+        <th className="hidden sm:table-cell px-2 py-2.5 text-right text-[9px] font-black uppercase tracking-wider text-white/28">AWAY</th>
+        <SortHeader label="GF"   col="gf"              sortKey={sortKey} sortDir={sortDir} onSort={handleSort} hideMobile />
+        <SortHeader label="GA"   col="ga"              sortKey={sortKey} sortDir={sortDir} onSort={handleSort} hideMobile />
+        <SortHeader label="DIFF" col="goal_diff"       sortKey={sortKey} sortDir={sortDir} onSort={handleSort} hideMobile />
+        <SortHeader label="ROW"  col="regulation_wins" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} hideMobile />
+      </tr>
+    </thead>
+  );
+
+  return (
+    <main className="min-h-screen flex flex-col px-3 pt-6 pb-12 max-w-[1300px] mx-auto w-full">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <Link href="/" className="text-[9px] font-black uppercase tracking-[0.3em] text-white/20 hover:text-white/40 transition-colors mb-1.5 block">
+            ← GRTZKY
+          </Link>
+          <h1 className="text-[22px] sm:text-[34px] font-black tracking-[0.08em] uppercase text-white leading-none">Standings</h1>
+          <p className="text-[10px] text-white/38 mt-1">2025–26 NHL Season</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-lg border border-white/[0.07] overflow-hidden">
+            <button onClick={() => setView("table")} className={`px-2 py-1 text-[9px] font-bold uppercase tracking-wide transition-colors ${view === "table" ? "bg-white/[0.08] text-white/80" : "text-white/30 hover:text-white/50"}`}>Table</button>
+            <button onClick={() => setView("hunt")}  className={`px-2 py-1 text-[9px] font-bold uppercase tracking-wide transition-colors border-l border-white/[0.07] ${view === "hunt"  ? "bg-white/[0.08] text-white/80" : "text-white/30 hover:text-white/50"}`}>Race</button>
+            <button onClick={() => setView("tree")}  className={`px-2 py-1 text-[9px] font-bold uppercase tracking-wide transition-colors border-l border-white/[0.07] ${view === "tree"  ? "bg-[#C9A84C]/10 text-[#C9A84C]/80" : "text-white/30 hover:text-white/50"}`}>Bracket</button>
+          </div>
+          <button onClick={fetchStandings} className="text-[13px] font-bold text-white/38 hover:text-white/50 transition-colors px-1.5 py-1">↻</button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="rounded-xl border border-[#ef4444]/20 bg-[#ef4444]/[0.04] p-4 mb-5 text-[12px] text-[#ef4444]/70">{error}</div>
+      )}
+
+      {/* Legend */}
+      <div className="flex flex-col gap-2 mb-4">
+        {/* Row 1: dot indicators */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#4ade80] shadow-[0_0_4px_rgba(74,222,128,0.8)]" />
+            <span className="text-[9px] text-white/38 uppercase tracking-wide">In</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#fbbf24] shadow-[0_0_4px_rgba(251,191,36,0.8)]" />
+            <span className="text-[9px] text-white/38 uppercase tracking-wide">Wild Card</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full border border-white/[0.18]" />
+            <span className="text-[9px] text-white/38 uppercase tracking-wide">Out</span>
+          </div>
+        </div>
+        {/* Row 2: division seeds */}
+        <div className="flex items-center gap-2.5">
+          {[
+            { badge: "D1", cls: "border-[#fbbf24]/20 bg-[#fbbf24]/10 text-[#fbbf24]/75", label: "Div 1st" },
+            { badge: "D2", cls: "border-[#C0C0C0]/20 bg-[#C0C0C0]/10 text-[#C0C0C0]/75", label: "Div 2nd" },
+            { badge: "D3", cls: "border-[#CD7F32]/20 bg-[#CD7F32]/10 text-[#CD7F32]/75", label: "Div 3rd" },
+          ].map(({ badge, cls, label }) => (
+            <div key={badge} className="flex items-center gap-1">
+              <span className={`px-1 py-0.5 rounded border text-[8px] font-black ${cls}`}>{badge}</span>
+              <span className="text-[9px] text-white/25">{label}</span>
+            </div>
+          ))}
+        </div>
+        {/* Row 3: wild card + clinch badges */}
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+          {[
+            { badge: "WC1", cls: "border-[#C9A84C]/30 bg-[#C9A84C]/10 text-[#C9A84C]",     label: "1st wild card" },
+            { badge: "WC2", cls: "border-[#38bdf8]/25 bg-[#38bdf8]/10 text-[#38bdf8]/80",  label: "2nd wild card" },
+            { badge: "x",   cls: "border-[#4ade80]/30 bg-[#4ade80]/10 text-[#4ade80]",      label: "clinched" },
+            { badge: "y",   cls: "border-[#f472b6]/25 bg-[#f472b6]/15 text-[#f472b6]/90",   label: "div winner" },
+            { badge: "z",   cls: "border-[#a78bfa]/30 bg-[#a78bfa]/20 text-[#a78bfa]",      label: "Presidents'" },
+            { badge: "E",   cls: "border-white/15 bg-white/[0.04] text-white/35",            label: "eliminated" },
+          ].map(({ badge, cls, label }) => (
+            <div key={badge} className="flex items-center gap-1">
+              <span className={`px-1 py-0.5 rounded border text-[8px] font-black ${cls}`}>{badge}</span>
+              <span className="text-[9px] text-white/25">{label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {view === "hunt" ? (
+        /* ── Playoff Race ── */
+        <div className={`flex flex-col sm:flex-row gap-4 ${loading ? "opacity-50 pointer-events-none" : ""}`}>
+          {loading ? (
+            <>
+              <div className="flex-1 h-96 rounded-xl border border-white/[0.10] bg-white/[0.02] animate-pulse" />
+              <div className="flex-1 h-96 rounded-xl border border-white/[0.10] bg-white/[0.02] animate-pulse" />
+            </>
+          ) : (
+            <>
+              <PlayoffRaceConference name="East" rows={standings} />
+              <div className="hidden sm:block w-px bg-white/[0.06]" />
+              <PlayoffRaceConference name="West" rows={standings} />
+            </>
+          )}
+        </div>
+      ) : view === "tree" ? (
+        /* ── Playoff Bracket ── */
+        <div className={loading ? "opacity-50 pointer-events-none" : ""}>
+          {loading ? (
+            <div className="h-[500px] rounded-xl border border-white/[0.10] bg-white/[0.02] animate-pulse" />
+          ) : (
+            <PlayoffBracket rows={standings} />
+          )}
+        </div>
+      ) : (
+        /* ── Table View ── */
+        <>
+          <div className="relative flex items-center mb-3">
+            {tabCanLeft && (
+              <button onClick={() => tabScrollRef.current?.scrollBy({ left: -160, behavior: "smooth" })}
+                className="absolute left-0 z-10 h-full px-1 flex items-center bg-gradient-to-r from-[#0a0b0d] to-transparent text-white/40 hover:text-white/80 transition-colors">
+                ❮
+              </button>
+            )}
+            <div ref={tabScrollRef} className="overflow-x-auto pb-1 flex-1" style={{ scrollbarWidth: "none" }}>
+              <div className="flex gap-1 min-w-max">
+                {TABS.map(t => (
+                  <button key={t} onClick={() => setTab(t)}
+                    className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide whitespace-nowrap transition-all ${
+                      tab === t ? "bg-white/[0.08] text-white/85 border border-white/[0.07]" : "text-white/30 hover:text-white/50 border border-transparent"
+                    }`}
+                  >{t}</button>
+                ))}
+              </div>
+            </div>
+            {tabCanRight && (
+              <button onClick={() => tabScrollRef.current?.scrollBy({ left: 160, behavior: "smooth" })}
+                className="absolute right-0 z-10 h-full px-1 flex items-center bg-gradient-to-l from-[#0a0b0d] to-transparent text-white/40 hover:text-white/80 transition-colors">
+                ❯
+              </button>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-[#C9A84C]/[0.15] bg-gradient-to-b from-white/[0.015] via-white/[0.005] to-transparent overflow-x-auto shadow-[0_8px_32px_rgba(0,0,0,0.7),0_2px_8px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(220,228,240,0.05),inset_0_-1px_0_rgba(0,0,0,0.35),0_0_0_1px_rgba(190,198,205,0.04)]">
+            <table className="w-full border-collapse">
+              <TableHeader showRank />
+              <tbody>
+                {loading ? (
+                  Array.from({ length: 8 }).map((_, i) => (
+                    <tr key={i} className="border-b border-white/[0.04]">
+                      {Array.from({ length: 10 }).map((__, j) => (
+                        <td key={j} className="px-2 py-2.5">
+                          <div className="h-3 rounded bg-white/[0.06] animate-pulse" style={{ width: j === 0 ? 100 : 24 }} />
+                        </td>
+                      ))}
+                    </tr>
+                  ))
+                ) : tab === "League" ? (
+                  <LeagueSection rows={filteredRows} />
+                ) : tab === "East" ? (
+                  EAST_DIVS.map(div => <DivisionSection key={div} division={div} rows={filteredRows} />)
+                ) : tab === "West" ? (
+                  WEST_DIVS.map(div => <DivisionSection key={div} division={div} rows={filteredRows} />)
+                ) : (
+                  DIVISIONS.filter(d => d === tab).map(div => (
+                    <DivisionSection key={div} division={div} rows={filteredRows} />
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {!loading && standings.length > 0 && (
+            <p className="mt-3 text-[9px] text-white/15 text-center">ROW = Regulation + OT Wins</p>
+          )}
+        </>
+      )}
+    </main>
+  );
+}

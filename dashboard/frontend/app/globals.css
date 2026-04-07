@@ -1,0 +1,106 @@
+@import "tailwindcss";
+
+:root {
+  --bg-base:         #090a0c;
+  --bg-card:         rgba(255,255,255,0.05);
+  --bg-card-header:  rgba(255,255,255,0.06);
+  --border-dim:      rgba(201,168,76,0.12);
+  --border-default:  rgba(201,168,76,0.22);
+  --border-bright:   rgba(201,168,76,0.38);
+  --text-primary:    #f1f5f9;
+  --text-secondary:  #94a3b8;
+  --text-muted:      #475569;
+  --green:           #C9A84C;
+  --gold:            #C9A84C;
+  --amber:           #fbbf24;
+  --red:             #f87171;
+  --blue:            #38bdf8;
+  --foreground:      #f1f5f9;
+  /* glossy card shadow — top-edge highlight + depth */
+  --shadow-glass:    0 4px 28px rgba(0,0,0,0.70), inset 0 1px 0 rgba(255,255,255,0.13), inset 0 0 0 1px rgba(255,255,255,0.03);
+}
+
+body {
+  background:
+    /* top frost — arena overhead flood on fresh ice */
+    radial-gradient(ellipse 85% 45% at 50% -5%, rgba(228,232,238,0.14) 0%, rgba(210,214,218,0.04) 45%, transparent 62%),
+    /* silver metallic ambient — lower-left */
+    radial-gradient(ellipse 58% 50% at 16% 68%, rgba(188,194,210,0.07) 0%, transparent 70%),
+    /* cold dark corners */
+    radial-gradient(ellipse 55% 40% at -5% 10%,  rgba(150,156,166,0.06) 0%, transparent 50%),
+    radial-gradient(ellipse 50% 38% at 106% 8%,  rgba(150,156,166,0.05) 0%, transparent 45%),
+    radial-gradient(ellipse 60% 42% at 106% 96%, rgba(122,128,138,0.06) 0%, transparent 50%),
+    radial-gradient(ellipse 50% 38% at -4% 98%,  rgba(122,128,138,0.05) 0%, transparent 45%),
+    /* center silver polish */
+    radial-gradient(ellipse 120% 75% at 50% 50%, rgba(190,195,202,0.015) 0%, transparent 70%),
+    #090a0c;
+  background-attachment: fixed;
+  color: var(--foreground);
+  font-family: var(--font-sans), "Barlow", system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+}
+
+/* ─── Glass utility classes ──────────────────────────────────────────────── */
+
+/* Standard glass card */
+.glass {
+  background: linear-gradient(180deg, rgba(20,16,10,0.80) 0%, rgba(7,6,4,0.92) 100%);
+  border: 1px solid rgba(201,168,76,0.20);
+  border-radius: 0.75rem;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 28px rgba(0,0,0,0.70), inset 0 1px 0 rgba(201,168,76,0.08);
+}
+
+/* Smaller glass pill / inset */
+.glass-sm {
+  background: linear-gradient(180deg, rgba(16,13,8,0.70) 0%, rgba(6,5,3,0.85) 100%);
+  border: 1px solid rgba(201,168,76,0.14);
+  border-radius: 0.5rem;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 2px 14px rgba(0,0,0,0.60), inset 0 1px 0 rgba(201,168,76,0.06);
+}
+
+/* Card header divider */
+.glass-header {
+  background: rgba(201,168,76,0.03);
+  border-bottom: 1px solid rgba(201,168,76,0.10);
+}
+
+/* Inset well (inputs, code blocks, inner boxes) */
+.glass-inset {
+  background: rgba(0,0,0,0.35);
+  border: 1px solid rgba(201,168,76,0.10);
+  border-radius: 0.5rem;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.40);
+}
+
+/* Mobile-only nav arrows — guaranteed to override JIT scanning gaps */
+.mobile-nav-arrows { display: flex; }
+@media (min-width: 640px) { .mobile-nav-arrows { display: none; } }
+
+/* Game grid — fixed column widths, content can never affect sizing */
+.game-grid {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(2, 175px);
+  justify-content: center;
+  gap: 0.75rem;
+}
+@media (min-width: 1024px) {
+  .game-grid {
+    grid-template-columns: repeat(3, 175px);
+  }
+}
+
+/* Hide all scrollbars globally */
+* { scrollbar-width: none; }
+*::-webkit-scrollbar { display: none; }
+
+/* White calendar icon on dark inputs */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: 0.6;
+  cursor: pointer;
+}
