@@ -35,3 +35,4 @@ dashboard/frontend/.vercel/
 *.swp
 *.swo
 dashboard/frontend/package-lock.jsont
+dashboard/frontend/tsconfig.tsbuildinfo
