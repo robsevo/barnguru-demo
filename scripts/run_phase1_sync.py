@@ -222,13 +222,9 @@ def main() -> None:
     # --- Evolving Hockey — PAYWALL: site moved behind subscription ---
     print(f"  · {'evolving_hockey':20s} [not_run     ] paywall — use internal RAPM (gretzky train-rapm)")
 
-    # --- Historical ingest (PBP + shifts — required for RAPM) ---
-    try:
-        from scripts.run_historical_ingest import _ingest_season as _hist
-        print(f"  · historical_ingest    [running...  ] season={args.season} — this may take 10–30 min")
-        asyncio.run(_hist(base, args.season, concurrency=5, force=args.force))
-    except Exception as exc:
-        print(f"  ✗ historical_ingest     [error       ] {exc}")
+    # Historical ingest (PBP + shifts) is NOT run here — use `gretzky ingest` separately.
+    # Running it inside sync caused OOM on the VPS (1300 games × PBP = too much RAM).
+    print(f"  · {'historical_ingest':20s} [skipped     ] run `gretzky ingest` separately")
 
     # --- Not yet built ---
     print(f"  · {'morning_skate':20s} [not_run     ] requires LLM fetcher (not yet built)")
