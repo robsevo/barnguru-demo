@@ -37,6 +37,15 @@ dev = [
     "respx>=0.21",
 ]
 
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests/python", "tests/integration", "tests/calibration"]
 asyncio_mode = "auto"
