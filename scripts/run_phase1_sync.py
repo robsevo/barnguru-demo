@@ -37,8 +37,7 @@ sys.path.insert(0, str(_REPO))
 
 
 def _data_dir() -> Path:
-    default = Path.home() / ".gretzky" / "data"
-    return Path(os.environ.get("GRETZKY_DATA_DIR", str(default)))
+    return Path(os.environ.get("GRETZKY_DATA_DIR", str(Path.home() / ".gretzky" / "data")))
 
 
 def _current_nhl_season() -> int:

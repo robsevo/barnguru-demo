@@ -31,6 +31,7 @@ import sys
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
+import os
 
 # ---------------------------------------------------------------------------
 # Repo root on sys.path
@@ -46,7 +47,7 @@ import polars as pl
 # Config
 # ---------------------------------------------------------------------------
 
-_DEFAULT_DATA_DIR = Path.home() / ".gretzky" / "data"
+_DEFAULT_DATA_DIR = Path(os.environ.get("GRETZKY_DATA_DIR", str(Path.home() / ".gretzky" / "data")))
 
 
 def _current_nhl_season() -> int:

@@ -30,7 +30,7 @@ from models.defensive_rating import CompositeDefensiveRating, write_cdr
 
 
 def _data_dir() -> Path:
-    default = Path.home() / ".gretzky" / "data"
+    default = Path(os.environ.get("GRETZKY_DATA_DIR", str(Path.home() / ".gretzky" / "data")))
     return Path(os.environ.get("GRETZKY_DATA_DIR", str(default)))
 
 

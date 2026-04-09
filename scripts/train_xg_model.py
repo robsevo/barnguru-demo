@@ -50,7 +50,7 @@ def _default_seasons() -> list[int]:
 
 
 def _data_dir() -> Path:
-    default = Path.home() / ".gretzky" / "data"
+    default = Path(os.environ.get("GRETZKY_DATA_DIR", str(Path.home() / ".gretzky" / "data")))
     return Path(os.environ.get("GRETZKY_DATA_DIR", str(default)))
 
 

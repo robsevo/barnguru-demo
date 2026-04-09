@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+import os
 
 _REPO = Path(__file__).parents[1]
 if str(_REPO) not in sys.path:
@@ -40,7 +41,7 @@ from models.former_team_boost import (
 # Defaults
 # ---------------------------------------------------------------------------
 
-DEFAULT_DATA_DIR       = Path.home() / ".gretzky" / "data"
+DEFAULT_DATA_DIR       = Path(os.environ.get("GRETZKY_DATA_DIR", str(Path.home() / ".gretzky" / "data")))
 DEFAULT_SEASONS        = [2022, 2023, 2024, 2025]
 TRANSACTIONS_SUBDIR    = "raw"
 PLAYER_STATS_SUBDIR    = "raw"

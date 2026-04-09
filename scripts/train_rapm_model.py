@@ -23,6 +23,7 @@ import argparse
 import sys
 import warnings
 from pathlib import Path
+import os
 
 from datetime import datetime, timezone
 
@@ -32,7 +33,7 @@ import polars as pl
 # Paths
 # ---------------------------------------------------------------------------
 
-_DEFAULT_DATA_DIR = Path.home() / ".gretzky" / "data"
+_DEFAULT_DATA_DIR = Path(os.environ.get("GRETZKY_DATA_DIR", str(Path.home() / ".gretzky" / "data")))
 
 
 def _current_nhl_season() -> int:
