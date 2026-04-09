@@ -18,7 +18,7 @@ export const maxDuration = 15;
  *   the detection code is already gone), killing popunders dead.
  */
 
-const AD_DOMAINS = "aclib\\.net|popads\\.net|popcash\\.net|propellerads\\.com|exoclick\\.com|trafficjunky\\.net|tsyndicate\\.com|adspyglass\\.com|adtelligent\\.com|newcpmagate\\.com|realsrv\\.com|trafficstars\\.com|hilltopads\\.net|plugrush\\.com|adcash\\.com|juicyads\\.com|bidvertiser\\.com|adsterra\\.com|doubleclick\\.net|googlesyndication\\.com|amazon-adsystem\\.com|adnxs\\.com|rubiconproject\\.com|pubmatic\\.com|openx\\.net|criteo\\.com";
+const AD_DOMAINS = "aclib\\.net|popads\\.net|popcash\\.net|propellerads\\.com|exoclick\\.com|trafficjunky\\.net|tsyndicate\\.com|adspyglass\\.com|adtelligent\\.com|newcpmagate\\.com|realsrv\\.com|trafficstars\\.com|hilltopads\\.net|plugrush\\.com|adcash\\.com|juicyads\\.com|bidvertiser\\.com|adsterra\\.com|doubleclick\\.net|googlesyndication\\.com|amazon-adsystem\\.com|adnxs\\.com|rubiconproject\\.com|pubmatic\\.com|openx\\.net|criteo\\.com|moonicorn\\.com|seedr\\.cc|trafficforce\\.com|smartadserver\\.com|advertising\\.com|media\\.net|taboola\\.com|outbrain\\.com|revcontent\\.com|mgid\\.com|content\\.ad|sharethrough\\.com|triplelift\\.com|33across\\.com|sovrn\\.com|lijit\\.com|appnexus\\.com|indexexchange\\.com|spotxchange\\.com|spotx\\.tv|springserve\\.com|adskeeper\\.co\\.uk|adblade\\.com|conversantmedia\\.com|undertone\\.com|rhythmone\\.com|yieldmo\\.com";
 const AD_SRC_RE = new RegExp(`src=(["'])(https?:)?//[^"']*(?:${AD_DOMAINS})[^"']*\\1`, "gi");
 
 const AD_INLINE_RE = [
@@ -73,7 +73,11 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Invalid url", { status: 400 });
   }
 
-  const cors = { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-cache" };
+  const cors = {
+    "Access-Control-Allow-Origin": "*",
+    "Cache-Control": "no-cache",
+    "Permissions-Policy": "geolocation=(), camera=(), microphone=(), payment=(), interest-cohort=()",
+  };
   const ua = request.headers.get("user-agent") ?? "";
 
   // ── DESKTOP: wrapper — direct iframe at native origin, browser popup blocker ──
@@ -82,8 +86,10 @@ export async function GET(request: NextRequest) {
     const html = `<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Permissions-Policy" content="geolocation=(), camera=(), microphone=(), payment=()">
 <style>*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;background:#000;overflow:hidden}iframe{position:absolute;inset:0;width:100%;height:100%;border:0}</style>
 <script>(function(){try{window.open=function(){return{closed:true,focus:function(){}};}}catch(e){}window.addEventListener('blur',function(){setTimeout(function(){window.focus&&window.focus();},0);},true);})();</script>
+${MOBILE_INJECT}
 </head><body>
 <iframe src="${safeUrl}" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen referrerpolicy="no-referrer-when-downgrade"></iframe>
 </body></html>`;
