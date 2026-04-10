@@ -206,16 +206,31 @@ def main() -> None:
 
     model = RAPMModel()
 
-    # Build a cross-season player name lookup from seasons that have shooter_id
-    # populated (2024+). Used as fallback for 2021-2023 where MoneyPuck shooter_id
-    # is null and names would otherwise display as "player_8478007".
+    # Build a cross-season player name lookup. Priority:
+    #   1. EDGE skating parquets (cover all skaters including non-shooters)
+    #   2. MoneyPuck shot data (shooters only, 2024+)
     name_fallback: dict[int, str] = {}
-    for _ns in (2024, 2025):
+
+    # Layer 1: shots (shooters only)
+    for _ns in (2023, 2024, 2025):
         _shots_path = data_dir / "shots" / f"shots_{_ns}.parquet"
         if _shots_path.exists():
             _s = pl.read_parquet(_shots_path, columns=["shooter_id", "shooter_name"])
             for _r in _s.drop_nulls("shooter_id").unique("shooter_id").to_dicts():
                 name_fallback[int(_r["shooter_id"])] = str(_r["shooter_name"])
+
+    # Layer 2: EDGE skating (all skaters; overwrites shooters with cleaner full names)
+    edge_dir = data_dir / "edge"
+    if edge_dir.exists():
+        for _ep in sorted(edge_dir.glob("edge_skating_*.parquet")):
+            try:
+                _e = pl.read_parquet(_ep, columns=["player_id", "player_name"])
+                for _r in _e.drop_nulls("player_id").unique("player_id").to_dicts():
+                    if _r["player_name"]:
+                        name_fallback[int(_r["player_id"])] = str(_r["player_name"])
+            except Exception:
+                pass
+
     model.name_fallback = name_fallback
 
     def loader(season: int) -> tuple[pl.DataFrame, pl.DataFrame]:
