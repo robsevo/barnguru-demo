@@ -133,13 +133,16 @@ export async function GET(request: NextRequest) {
   //     don't check for sandbox, and they're the ones most worth protecting
   //   desktop priority 2-3 (aggregators, iframe-only): no sandbox — these providers
   //     actively detect and refuse to load under sandbox
-  const useSandbox = isMobile(ua) || priority <= 1;
+  const mobile = isMobile(ua);
+  const useSandbox = mobile || priority <= 1;
   const sandboxAttr = useSandbox
     ? `sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-orientation-lock allow-modals" `
     : "";
 
   // Inject sandbox flag + stream URL so WRAPPER_INJECT can detect sandbox failures
-  const bgVars = useSandbox
+  // and auto-switch after 3s. Disabled on mobile — auto-switching is disruptive
+  // on small screens where users may still be interacting with the player.
+  const bgVars = useSandbox && !mobile
     ? `<script>var _BG_SANDBOX=1,_BG_URL=${JSON.stringify(safeUrl)};</script>`
     : "";
 

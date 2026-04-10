@@ -39,7 +39,7 @@ export default function LoginPage() {
 
   return (
     <div
-      className="fixed inset-0 flex items-start justify-center pt-[5vh]"
+      className="fixed inset-0 flex items-center justify-center overflow-y-auto sm:pb-[25vh]"
       style={{
         backgroundImage:    "url('/gretz.jpg')",
         backgroundSize:     "cover",
@@ -64,7 +64,7 @@ export default function LoginPage() {
           >
             <div className="flex items-center gap-3">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/logo-circle.png" alt="GRTZKY" className="h-8 w-auto" />
+              <img src="/logo-circle.png" alt="GRTZKY" className="h-14 w-auto" />
               <span className="text-white/15 font-thin text-lg">|</span>
               <div className="text-left">
                 <div className="text-[22px] font-semibold tracking-[0.14em] uppercase bg-gradient-to-r from-white via-[#e8eaec] to-[#b0b8c2] bg-clip-text text-transparent leading-none">
@@ -88,7 +88,7 @@ export default function LoginPage() {
           </button>
 
           {/* Collapsible form */}
-          <div className={`overflow-hidden transition-all duration-300 ease-in-out ${open ? "max-h-[520px] opacity-100" : "max-h-0 opacity-0"}`}>
+          <div className={`overflow-hidden transition-all duration-300 ease-in-out ${open ? "max-h-[900px] opacity-100" : "max-h-0 opacity-0"}`}>
             <div className="h-px w-full bg-gradient-to-r from-transparent via-white/[0.04] to-transparent" />
 
             <form onSubmit={handleSubmit} className="px-6 py-5 space-y-3.5">
@@ -153,6 +153,25 @@ export default function LoginPage() {
               >
                 {loading ? "Authenticating…" : "Enter"}
               </button>
+
+              {/* Update notice */}
+              <div className="rounded-xl border border-[#C9A84C]/[0.12] bg-[#C9A84C]/[0.04] px-3.5 py-3">
+                <p className="text-[8px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/50 mb-2">Update — Apr 9</p>
+                <ul className="space-y-1.5">
+                  <li className="text-[10px] text-white/30 leading-relaxed flex gap-2">
+                    <span className="text-[#C9A84C]/40 shrink-0">·</span>
+                    <span>Security upgrade — you may need to sign in again.</span>
+                  </li>
+                  <li className="text-[10px] text-white/30 leading-relaxed flex gap-2">
+                    <span className="text-[#C9A84C]/40 shrink-0">·</span>
+                    <span>Stream ads are virtually eliminated on all devices.</span>
+                  </li>
+                  <li className="text-[10px] text-white/30 leading-relaxed flex gap-2">
+                    <span className="text-[#C9A84C]/40 shrink-0">·</span>
+                    <span>Streams that fail to load now auto-switch to the next source in 3 seconds (desktop only).</span>
+                  </li>
+                </ul>
+              </div>
 
               {/* Home screen tip */}
               <div className="rounded-xl border border-white/[0.05] bg-white/[0.02] px-3.5 py-3">
