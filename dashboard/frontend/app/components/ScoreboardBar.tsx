@@ -423,7 +423,7 @@ export default function ScoreboardBar() {
             ? "bg-[#4ade80]/80 border-[#4ade80]/60 shadow-[0_0_7px_rgba(74,222,128,0.75)] animate-pulse"
             : "bg-[#ef4444]/70 border-[#ef4444]/50 shadow-[0_0_5px_rgba(239,68,68,0.45)]"
         }`} />
-        <span className="text-[10px] font-semibold uppercase tracking-[0.25em] text-[#c8cdd2]/40">Live Scores</span>
+        <span className="text-[10px] font-semibold uppercase tracking-[0.25em] text-[#c8cdd2]/40">Live Games</span>
         {hasLive && (
           <button
             onClick={toggleHideAll}
