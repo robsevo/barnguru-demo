@@ -206,12 +206,14 @@ def main() -> None:
 
     model = RAPMModel()
 
-    # Build a cross-season player name lookup. Priority:
-    #   1. EDGE skating parquets (cover all skaters including non-shooters)
-    #   2. MoneyPuck shot data (shooters only, 2024+)
+    # Build a cross-season player name lookup. Priority (highest to lowest):
+    #   1. NHL Stats API bulk skater summary — covers every skater with ≥1 GP
+    #   2. EDGE skating parquets — all skaters with EDGE qualifying minutes
+    #   3. Goalie ratings parquets — goalies (not in EDGE)
+    #   4. MoneyPuck shot data — shooters only fallback
     name_fallback: dict[int, str] = {}
 
-    # Layer 1: shots (shooters only)
+    # Layer 1: shots (cheapest, load first so higher-quality sources overwrite)
     for _ns in (2023, 2024, 2025):
         _shots_path = data_dir / "shots" / f"shots_{_ns}.parquet"
         if _shots_path.exists():
@@ -219,7 +221,7 @@ def main() -> None:
             for _r in _s.drop_nulls("shooter_id").unique("shooter_id").to_dicts():
                 name_fallback[int(_r["shooter_id"])] = str(_r["shooter_name"])
 
-    # Layer 2: EDGE skating (all skaters; overwrites shooters with cleaner full names)
+    # Layer 2: EDGE skating
     edge_dir = data_dir / "edge"
     if edge_dir.exists():
         for _ep in sorted(edge_dir.glob("edge_skating_*.parquet")):
@@ -238,10 +240,46 @@ def main() -> None:
             try:
                 _g = pl.read_parquet(_gp, columns=["player_id", "player_name"])
                 for _r in _g.drop_nulls("player_id").unique("player_id").to_dicts():
-                    if _r["player_name"] and int(_r["player_id"]) not in name_fallback:
+                    if _r["player_name"]:
                         name_fallback[int(_r["player_id"])] = str(_r["player_name"])
             except Exception:
                 pass
+
+    # Layer 4: NHL Stats API bulk skater summary — highest quality, covers all skaters
+    # incl. low-TOI players not in EDGE. Overwrites everything above.
+    try:
+        import asyncio as _asyncio
+        from data.nhl_client import NHLClient as _NHLClient
+
+        async def _fetch_names() -> dict[int, str]:
+            result: dict[int, str] = {}
+            async with _NHLClient() as _c:
+                for _season_id in ("20232024", "20242025"):
+                    start = 0
+                    while True:
+                        _r = await _c._get(_c._stats, "/stats/rest/en/skater/summary", params={
+                            "isAggregate": "false", "isGame": "false",
+                            "factCayenneExp": "gamesPlayed>=1",
+                            "cayenneExp": f"gameTypeId=2 and seasonId={_season_id}",
+                            "start": start, "limit": 100,
+                        })
+                        rows = _r.get("data", [])
+                        for row in rows:
+                            pid = row.get("playerId")
+                            name = row.get("skaterFullName") or ""
+                            if pid and name:
+                                result[int(pid)] = name
+                        total = _r.get("total", 0)
+                        start += len(rows)
+                        if start >= total or not rows:
+                            break
+            return result
+
+        _api_names = _asyncio.run(_fetch_names())
+        name_fallback.update(_api_names)
+        print(f"  [rapm] NHL API name lookup: {len(_api_names)} players")
+    except Exception as _e:
+        print(f"  [rapm] NHL API name lookup failed (non-fatal): {_e}")
 
     model.name_fallback = name_fallback
 
