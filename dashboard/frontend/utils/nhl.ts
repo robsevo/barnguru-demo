@@ -55,7 +55,7 @@ export const TEAM_COLORS: Record<string, string> = {
   OTT: "#C52032", PHI: "#F74902", PIT: "#FCB514", SEA: "#99D9D9",
   SJS: "#006D75", STL: "#002F87", TBL: "#002868", TOR: "#003E7E",
   VAN: "#00843D", VGK: "#B4975A", WSH: "#C8102E", WPG: "#004C97",
-  UTA: "#010101", UTH: "#010101",
+  UTA: "#6B6B6B", UTH: "#6B6B6B",
   // short-code aliases
   LA: "#A2AAAD", NJ: "#CE1126", SJ: "#006D75", TB: "#002868",
 };
