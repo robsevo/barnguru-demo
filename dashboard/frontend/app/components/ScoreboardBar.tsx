@@ -175,13 +175,13 @@ function GameCard({ g }: { g: Game }) {
   const homeWins     = isScored && g.home_score! > g.away_score!;
   const live         = isLive && !isFinal;
 
-  const gcColor  = isLive ? "#C9A84C" : isFinal ? "#f87171" : "#fbbf24";
-  const gcShadow = isLive ? "rgba(201,168,76,0.35)" : isFinal ? "rgba(248,113,113,0.35)" : "rgba(251,191,36,0.35)";
-  const gcBorder = isLive ? "rgba(201,168,76,0.45)" : isFinal ? "rgba(248,113,113,0.45)" : "rgba(251,191,36,0.45)";
+  const gcColor  = isLive ? "#4ade80" : isFinal ? "#f87171" : "#fbbf24";
+  const gcShadow = isLive ? "rgba(74,222,128,0.35)" : isFinal ? "rgba(248,113,113,0.35)" : "rgba(251,191,36,0.35)";
+  const gcBorder = isLive ? "rgba(74,222,128,0.45)" : isFinal ? "rgba(248,113,113,0.45)" : "rgba(251,191,36,0.45)";
 
   // Glossy glass cards — deep shadows, bright inner edge, gradient pop
   const cardCls = live
-    ? "border-[1.5px] border-white/[0.32] bg-gradient-to-b from-white/[0.20] via-white/[0.09] to-transparent backdrop-blur-sm shadow-[0_10px_40px_rgba(0,0,0,0.85),0_0_24px_rgba(201,168,76,0.14),0_2px_6px_rgba(0,0,0,0.60),inset_0_1px_0_rgba(255,255,255,0.30),inset_0_-1px_0_rgba(0,0,0,0.35),inset_1px_0_0_rgba(255,255,255,0.10),inset_-1px_0_0_rgba(255,255,255,0.10)]"
+    ? "border-[1.5px] border-white/[0.32] bg-gradient-to-b from-white/[0.20] via-white/[0.09] to-transparent backdrop-blur-sm shadow-[0_10px_40px_rgba(0,0,0,0.85),0_0_24px_rgba(74,222,128,0.10),0_2px_6px_rgba(0,0,0,0.60),inset_0_1px_0_rgba(255,255,255,0.30),inset_0_-1px_0_rgba(0,0,0,0.35),inset_1px_0_0_rgba(255,255,255,0.10),inset_-1px_0_0_rgba(255,255,255,0.10)]"
     : "border-[1.5px] border-white/[0.22] bg-gradient-to-b from-white/[0.13] via-white/[0.05] to-transparent backdrop-blur-sm shadow-[0_8px_32px_rgba(0,0,0,0.80),0_2px_6px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-1px_0_rgba(0,0,0,0.35),inset_1px_0_0_rgba(255,255,255,0.07),inset_-1px_0_0_rgba(255,255,255,0.07)]";
 
   const homeClr = TEAM_COLORS[g.home_team] ?? "#C9A84C";
@@ -420,7 +420,7 @@ export default function ScoreboardBar() {
       <div className="flex items-center justify-center gap-2 border-b border-[#c8cdd2]/[0.12] h-8 relative">
         <span className={`h-2 w-2 rounded-full shrink-0 border transition-all duration-300 ${
           hasLive
-            ? "bg-[#C9A84C]/80 border-[#C9A84C]/60 shadow-[0_0_7px_rgba(201,168,76,0.75)] animate-pulse"
+            ? "bg-[#4ade80]/80 border-[#4ade80]/60 shadow-[0_0_7px_rgba(74,222,128,0.75)] animate-pulse"
             : "bg-[#ef4444]/70 border-[#ef4444]/50 shadow-[0_0_5px_rgba(239,68,68,0.45)]"
         }`} />
         <span className="text-[10px] font-semibold uppercase tracking-[0.25em] text-[#c8cdd2]/40">Live Scores</span>

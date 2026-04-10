@@ -55,7 +55,7 @@ export const TEAM_COLORS: Record<string, string> = {
   OTT: "#C52032", PHI: "#F74902", PIT: "#FCB514", SEA: "#99D9D9",
   SJS: "#006D75", STL: "#002F87", TBL: "#002868", TOR: "#003E7E",
   VAN: "#00843D", VGK: "#B4975A", WSH: "#C8102E", WPG: "#004C97",
-  UTH: "#006D3D",
+  UTA: "#010101", UTH: "#010101",
   // short-code aliases
   LA: "#A2AAAD", NJ: "#CE1126", SJ: "#006D75", TB: "#002868",
 };
@@ -69,7 +69,7 @@ export const TEAM_SECONDARY: Record<string, string> = {
   OTT: "#C2912C", PHI: "#000000", PIT: "#000000", SEA: "#001628",
   SJS: "#EA7200", STL: "#FCB514", TBL: "#FFFFFF", TOR: "#FFFFFF",
   VAN: "#001F5B", VGK: "#333F42", WSH: "#041E42", WPG: "#AC162C",
-  UTH: "#010101",
+  UTA: "#6B6B6B", UTH: "#6B6B6B",
   // short-code aliases
   LA: "#111111", NJ: "#000000", SJ: "#EA7200", TB: "#FFFFFF",
 };
