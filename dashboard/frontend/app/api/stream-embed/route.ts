@@ -76,6 +76,26 @@ const WRAPPER_INJECT = `<script>
     obs.observe(document.body,{childList:true,subtree:false});
     run();
     setTimeout(run,300);setTimeout(run,800);
+
+    // 6. Sandbox failure detection — only when _BG_SANDBOX flag is set.
+    // If the stream player sends no postMessage within 6s of iframe load,
+    // it likely detected the sandbox and refused to start. Tell the parent
+    // frame so it can remove this stream from the list.
+    if(typeof _BG_SANDBOX!=='undefined'&&_BG_SANDBOX&&streamIframe){
+      var _playerActive=false;
+      window.addEventListener('message',function(e){
+        if(streamIframe&&e.source===streamIframe.contentWindow)_playerActive=true;
+      });
+      // Any user interaction also counts (e.g. player that doesn't postMessage but accepts clicks)
+      document.addEventListener('click',function(){_playerActive=true;},{once:true});
+      streamIframe.addEventListener('load',function(){
+        setTimeout(function(){
+          if(!_playerActive){
+            try{window.parent.postMessage({type:'Origin-sandbox-fail',url:typeof _BG_URL!=='undefined'?_BG_URL:''},'*');}catch(e){}
+          }
+        },6000);
+      });
+    }
   }
 
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){init();});
@@ -118,12 +138,17 @@ export async function GET(request: NextRequest) {
     ? `sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-orientation-lock allow-modals" `
     : "";
 
+  // Inject sandbox flag + stream URL so WRAPPER_INJECT can detect sandbox failures
+  const bgVars = useSandbox
+    ? `<script>var _BG_SANDBOX=1,_BG_URL=${JSON.stringify(safeUrl)};</script>`
+    : "";
+
   const html = `<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Permissions-Policy" content="geolocation=(), camera=(), microphone=(), payment=()">
 <style>*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;background:#000;overflow:hidden}iframe{position:absolute;inset:0;width:100%;height:100%;border:0}</style>
-${WRAPPER_INJECT}
+${bgVars}${WRAPPER_INJECT}
 </head><body>
 <iframe src="${safeUrl}" ${sandboxAttr}allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen referrerpolicy="no-referrer-when-downgrade"></iframe>
 </body></html>`;
