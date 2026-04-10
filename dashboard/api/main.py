@@ -2345,9 +2345,26 @@ async def game_centre(game_id: int) -> dict:
             })
 
     # ── Team stats ────────────────────────────────────────────────────────────
+    # NHL API no longer populates teamGameStats. Aggregate from playerByGameStats.
+    def _sum_player_stats(side_key: str) -> dict:
+        pgs = (boxscore_raw.get("playerByGameStats") or {}).get(side_key, {})
+        totals: dict[str, int | float] = {"sog": 0, "hits": 0, "blockedShots": 0,
+                                           "giveaways": 0, "takeaways": 0}
+        for group in ("forwards", "defense"):
+            for p in pgs.get(group) or []:
+                for k in totals:
+                    totals[k] += p.get(k) or 0
+        return totals
+
+    _away_raw = _sum_player_stats("awayTeam")
+    _home_raw = _sum_player_stats("homeTeam")
+
+    # sog on awayTeam/homeTeam top-level is authoritative (includes goals)
+    _away_raw["sog"] = (boxscore_raw.get("awayTeam") or {}).get("sog") or _away_raw["sog"]
+    _home_raw["sog"] = (boxscore_raw.get("homeTeam") or {}).get("sog") or _home_raw["sog"]
+
+    # Also check legacy teamGameStats (populated in older game data)
     team_stats_raw: dict[str, dict] = {}
-    # Landing has teamGameStats inside summary; boxscore has it at top level.
-    # Use whichever is non-empty (boxscore is more reliably populated mid-game).
     _raw_tgs = (
         (landing.get("summary") or {}).get("teamGameStats")
         or boxscore_raw.get("teamGameStats")
@@ -2360,8 +2377,8 @@ async def game_centre(game_id: int) -> dict:
         team_stats_raw.setdefault("away", {})[cat] = a_val
         team_stats_raw.setdefault("home", {})[cat] = h_val
 
-    away_stats = _gc_team_stats(team_stats_raw.get("away") or {})
-    home_stats = _gc_team_stats(team_stats_raw.get("home") or {})
+    away_stats = _gc_team_stats(team_stats_raw.get("away") or _away_raw)
+    home_stats = _gc_team_stats(team_stats_raw.get("home") or _home_raw)
 
     # ── PBP-based stat fallback (fills gaps when API summary is absent/empty) ──
     # Count directly from play events so live games early in a period always
