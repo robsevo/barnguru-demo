@@ -272,7 +272,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
           ${open ? "ml-64" : "ml-0"}`}
       >
         {/* Top bar */}
-        <header className="sticky top-0 z-30 flex items-center gap-1 px-2 sm:px-3 h-12
+        <header className="sticky top-0 z-30 flex items-center gap-3 px-2 sm:px-3 h-12
           bg-gradient-to-r from-[#070809]/96 via-[#090a0d]/94 to-[#070809]/96 backdrop-blur-2xl
           border-b border-[#C9A84C]/[0.18]
           shadow-[0_1px_0_rgba(201,168,76,0.10),0_4px_28px_rgba(0,0,0,0.60),inset_0_1px_0_rgba(201,168,76,0.06)]
