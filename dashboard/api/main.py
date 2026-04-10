@@ -3075,14 +3075,28 @@ async def game_streams(game_id: int) -> dict:
         return 3       # general aggregator or iframe fallback
 
     streams.sort(key=_stream_priority)
-    # Strip internal metadata field before sending to client
+    # Annotate priority + strip internal metadata before sending to client
     for s in streams:
+        s["priority"] = _stream_priority(s)
         s.pop("_direct", None)
 
     # Cache result to avoid re-scraping on every page load
     import time as _t2
     _streams_cache[game_id] = (streams, _t2.monotonic())
     _streams_cache[-game_id] = (away_abbr, home_abbr)  # type: ignore[assignment]
+
+    # Pre-warm the resolve cache for the first stream that needs extraction.
+    # Fires in the background so the response returns immediately; by the time
+    # the frontend calls /stream-resolve (~200ms later), the result is cached.
+    import asyncio as _aio_pre
+    _pre_candidate = next(
+        (s for s in streams
+         if not s.get("embed_only")
+         and not (s.get("url", "").lower().endswith(".m3u8") or ".m3u8?" in s.get("url", "").lower())),
+        None,
+    )
+    if _pre_candidate:
+        _aio_pre.create_task(_resolve_embed(_pre_candidate["url"]))
 
     return {"streams": streams, "game_id": game_id, "away": away_abbr, "home": home_abbr}
 

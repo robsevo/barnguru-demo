@@ -381,6 +381,52 @@ def main() -> None:
     model = ClutchIndexModel()
     validated_seasons = args.validated_seasons or []
 
+    # ── Build player name lookup from NHL Stats API ───────────────────────────
+    name_lookup: dict[int, str] = {}
+    try:
+        import asyncio as _asyncio
+        from data.nhl_client import NHLClient as _NHLClient
+
+        async def _fetch_names() -> dict[int, str]:
+            result: dict[int, str] = {}
+            async with _NHLClient() as _c:
+                for _season_id in ("20222023", "20232024", "20242025"):
+                    for _endpoint, _name_key in [
+                        ("/stats/rest/en/skater/summary", "skaterFullName"),
+                        ("/stats/rest/en/goalie/summary",  "goalieFullName"),
+                    ]:
+                        start = 0
+                        while True:
+                            try:
+                                _r = await _c._get(_c._stats, _endpoint, params={
+                                    "isAggregate": "false", "isGame": "false",
+                                    "factCayenneExp": "gamesPlayed>=1",
+                                    "cayenneExp": f"gameTypeId=2 and seasonId={_season_id}",
+                                    "start": start, "limit": 100,
+                                })
+                            except Exception:
+                                break
+                            rows = _r.get("data", [])
+                            for row in rows:
+                                pid = row.get("playerId")
+                                name = row.get(_name_key) or ""
+                                if pid and name:
+                                    result[int(pid)] = name
+                            total = _r.get("total", 0)
+                            start += len(rows)
+                            if start >= total or not rows:
+                                break
+            return result
+
+        name_lookup = _asyncio.run(_fetch_names())
+        print(f"  [clutch-index] NHL API name lookup: {len(name_lookup)} players")
+    except Exception as _e:
+        print(f"  [clutch-index] NHL API name lookup failed (non-fatal): {_e}")
+
+    player_meta_df = pl.DataFrame(
+        [{"player_id": pid, "player_name": name} for pid, name in name_lookup.items()]
+    ) if name_lookup else None
+
     # ── Process each season ───────────────────────────────────────────────────
     season_dfs: list[pl.DataFrame] = []
 
@@ -425,6 +471,7 @@ def main() -> None:
                 goals_df=goals_df,
                 toi_df=toi_df,
                 season=season,
+                player_meta_df=player_meta_df,
                 validated_seasons=validated_seasons if season == target_season else None,
             )
         except Exception as e:

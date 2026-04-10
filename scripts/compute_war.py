@@ -136,6 +136,26 @@ def main() -> None:
         sys.exit(1)
     print(f"  {len(rapm_df):,} player-season rows loaded")
 
+    # ── Strip goalies from skater WAR ─────────────────────────────────────
+    # Goalies appear in the RAPM parquet because they share ice time, but their
+    # "EV TOI" is 40-60 min/game (vs ~15-20 for skaters), which wildly inflates
+    # their WAR.  Identify goalies from the goalie_ratings parquet and exclude.
+    goalie_dir = data_dir / "goalie_ratings"
+    goalie_ids: set[int] = set()
+    if goalie_dir.exists():
+        for gp in sorted(goalie_dir.glob("goalie_ratings_*.parquet")):
+            try:
+                gdf = pl.read_parquet(gp, columns=["player_id"])
+                goalie_ids.update(int(x) for x in gdf["player_id"].drop_nulls().to_list())
+            except Exception:
+                pass
+    if goalie_ids:
+        before = len(rapm_df)
+        rapm_df = rapm_df.filter(~pl.col("player_id").is_in(list(goalie_ids)))
+        print(f"  Excluded {before - len(rapm_df)} goalie-season rows ({len(goalie_ids)} unique goalies)")
+    else:
+        print("  [warn] No goalie_ratings data found; goalies may inflate WAR leaderboard.")
+
     # ── Load finishing (optional) ─────────────────────────────────────────
     finishing_dir = data_dir / FINISHING_SUBDIR
     finishing_df  = None
@@ -158,10 +178,19 @@ def main() -> None:
     else:
         print("[war] No cap directory — contract efficiency will be null.")
 
-    # ── Compute WAR ───────────────────────────────────────────────────────
+    # ── Compute WAR — target season only ─────────────────────────────────
+    # Use multi-season RAPM for replacement-level calibration, but only output
+    # WAR for the target (most recent) season.
     print(f"\n[war] Computing WAR for season {target_season}…")
     model = WARModel()
-    war_df = model.fit(rapm_df, finishing_df=finishing_df, cap_df=cap_df)
+    target_rapm_df = (
+        rapm_df.filter(pl.col("season") == target_season)
+        if "season" in rapm_df.columns
+        else rapm_df
+    )
+    # Pass full multi-season rapm_df to fit() for replacement-level computation,
+    # but restrict output rows via the season filter in the model itself.
+    war_df = model.fit(target_rapm_df, finishing_df=finishing_df, cap_df=cap_df)
 
     n_players = len(war_df)
     print(f"  WAR computed for {n_players:,} player(s).")

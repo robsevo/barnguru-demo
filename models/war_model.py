@@ -97,10 +97,27 @@ MODEL_VERSION = "war_v1"
 GOALS_PER_WIN     = 5.0     # Pythagorean goals/win for typical NHL season
 WAR_DOLLAR_RATE   = 1.2     # $M per WAR — open-market free-agent rate (2024)
 
-# Replacement level: marginal NHL player (≈ −2.0 goals/60 below average)
-REPLACEMENT_RAPM_EV   = -2.0   # goals/60 below average at EV
-REPLACEMENT_RAPM_PP   = -0.5
-REPLACEMENT_RAPM_PK   = -0.5
+# Replacement level: computed from data each season (see _compute_replacement_level).
+# These fallbacks are used when there are too few players to compute from data.
+REPLACEMENT_RAPM_EV_FALLBACK = -2.0   # goals/60 below average at EV
+REPLACEMENT_RAPM_PP_FALLBACK = -0.5
+REPLACEMENT_RAPM_PK_FALLBACK = -0.5
+
+# Roster depth: number of skater slots before replacement tier.
+# 30 teams × ~20 active skaters = 600; we use 630 (a 7-man D + 13-forward roster).
+# Players ranked below this EV-TOI cutoff ARE the replacement tier.
+ROSTER_SLOTS_SKATERS = 630
+
+# Minimum EV TOI to compute WAR — below this the RAPM estimate is too noisy.
+# ~200 min EV ≈ 25 games at 8 min/game for a 4th liner, or 15 games for a top-6.
+MIN_TOI_EV_MINUTES_OUTPUT = 200  # exclude from WAR output
+MIN_TOI_EV_MINUTES_REPL   = 100  # for replacement-level calculation
+
+# RAPM sanity clamps — physically, no skater can be ±5 goals/60 EV;
+# PP/PK have higher leverage but ±4 is a hard ceiling.
+RAPM_EV_CLAMP = 4.0
+RAPM_PP_CLAMP = 4.0
+RAPM_PK_CLAMP = 4.0
 
 # GAR scaling: RAPM values are goals/60; multiply by (TOI/60) to get total goals
 # For finishing: delta is already in goals (seasonal total)
@@ -134,6 +151,81 @@ WAR_SCHEMA: dict[str, pl.DataType] = {
 # Low-level helpers
 # ---------------------------------------------------------------------------
 
+def _compute_replacement_level(
+    rapm_df: pl.DataFrame,
+    roster_slots: int = ROSTER_SLOTS_SKATERS,
+    min_toi_ev: float = MIN_TOI_EV_MINUTES_REPL,
+) -> tuple[float, float, float]:
+    """Derive replacement RAPM from the actual player pool for this season(s).
+
+    Method:
+      1. Keep only skaters with ≥ min_toi_ev minutes of EV ice time (excludes
+         goalies and micro-sample callups from the reference pool).
+      2. Sort by EV TOI descending (more ice = more trusted player).
+      3. The replacement tier starts at rank ``roster_slots + 1``.  We take the
+         mean RAPM of the players just below that cut (ranks roster_slots+1 →
+         roster_slots+30) as the replacement level.  Averaging a small band
+         rather than using a single player is more stable.
+      4. Falls back to the static constant if there aren't enough players.
+
+    Returns:
+        (repl_ev, repl_pp, repl_pk) replacement RAPM values (goals/60).
+    """
+    if rapm_df.is_empty():
+        return REPLACEMENT_RAPM_EV_FALLBACK, REPLACEMENT_RAPM_PP_FALLBACK, REPLACEMENT_RAPM_PK_FALLBACK
+
+    # Normalise TOI to minutes (detect unit from column max)
+    toi_col = "toi_ev" if "toi_ev" in rapm_df.columns else "toi_ev_min"
+    if toi_col not in rapm_df.columns:
+        return REPLACEMENT_RAPM_EV_FALLBACK, REPLACEMENT_RAPM_PP_FALLBACK, REPLACEMENT_RAPM_PK_FALLBACK
+
+    max_toi = float(rapm_df[toi_col].drop_nulls().max() or 0.0)
+    scale   = 1.0 / 60.0 if max_toi > 1800.0 else 1.0
+
+    df = rapm_df.with_columns(
+        (pl.col(toi_col).cast(pl.Float64) * scale).alias("_toi_ev_min")
+    )
+
+    # Filter to qualifying skaters
+    df = df.filter(pl.col("_toi_ev_min") >= min_toi_ev)
+
+    # If multiple seasons present, sum TOI and average RAPM per player
+    if "season" in df.columns and df["season"].n_unique() > 1:
+        agg_exprs = [pl.col("_toi_ev_min").sum()]
+        for col in ("rapm_ev_off", "rapm_ev_def", "rapm_pp", "rapm_pk"):
+            if col in df.columns:
+                agg_exprs.append(pl.col(col).mean())
+        df = df.group_by("player_id").agg(agg_exprs)
+
+    # Sort by EV TOI descending
+    df = df.sort("_toi_ev_min", descending=True)
+    n = len(df)
+
+    if n <= roster_slots:
+        # Not enough players to define a replacement tier; use fallback
+        return REPLACEMENT_RAPM_EV_FALLBACK, REPLACEMENT_RAPM_PP_FALLBACK, REPLACEMENT_RAPM_PK_FALLBACK
+
+    # Replacement band: players just below the roster cut
+    band_size = min(30, n - roster_slots)
+    repl_band = df.slice(roster_slots, band_size)
+
+    def _mean(col: str) -> float:
+        if col not in repl_band.columns:
+            return 0.0
+        vals = repl_band[col].drop_nulls().cast(pl.Float64)
+        return float(vals.mean()) if len(vals) > 0 else 0.0
+
+    repl_ev  = _mean("rapm_ev_off") + _mean("rapm_ev_def")
+    # PP/PK replacement levels from the band are unreliable because:
+    #   - Many players in the band have ~0 PP/PK time → extreme small-sample RAPM
+    #   - The EV-ranked band isn't a good proxy for PP/PK replacement
+    # Use fixed fallbacks for PP and PK.
+    repl_pp  = REPLACEMENT_RAPM_PP_FALLBACK
+    repl_pk  = REPLACEMENT_RAPM_PK_FALLBACK
+
+    return repl_ev, repl_pp, repl_pk
+
+
 def gar_from_rapm(
     rapm_ev_off: float | None,
     rapm_ev_def: float | None,
@@ -142,6 +234,9 @@ def gar_from_rapm(
     toi_ev_min:  float,
     toi_pp_min:  float,
     toi_pk_min:  float,
+    replacement_ev: float = REPLACEMENT_RAPM_EV_FALLBACK,
+    replacement_pp: float = REPLACEMENT_RAPM_PP_FALLBACK,
+    replacement_pk: float = REPLACEMENT_RAPM_PK_FALLBACK,
 ) -> tuple[float, float, float]:
     """Convert RAPM values (goals/60) to total goals above average (GAA).
 
@@ -160,15 +255,22 @@ def gar_from_rapm(
     Returns:
         (gar_ev, gar_pp, gar_pk) in goals.
     """
-    ev_off = rapm_ev_off if rapm_ev_off is not None else 0.0
-    ev_def = rapm_ev_def if rapm_ev_def is not None else 0.0
-    pp     = rapm_pp     if rapm_pp is not None else 0.0
-    pk     = rapm_pk     if rapm_pk is not None else 0.0
+    # Clamp RAPM values to physically plausible ranges before computing GAR.
+    # Small-sample players can have extreme ridge-regression values.
+    def _clamp(v: float | None, limit: float) -> float:
+        if v is None:
+            return 0.0
+        return float(np.clip(v, -limit, limit))
 
-    # Above-average contribution in goals
-    gaa_ev = (ev_off + ev_def - REPLACEMENT_RAPM_EV) * (toi_ev_min / 60.0)
-    gaa_pp = (pp - REPLACEMENT_RAPM_PP) * (toi_pp_min / 60.0)
-    gaa_pk = (pk - REPLACEMENT_RAPM_PK) * (toi_pk_min / 60.0)
+    ev_off = _clamp(rapm_ev_off, RAPM_EV_CLAMP)
+    ev_def = _clamp(rapm_ev_def, RAPM_EV_CLAMP)
+    pp     = _clamp(rapm_pp, RAPM_PP_CLAMP)
+    pk     = _clamp(rapm_pk, RAPM_PK_CLAMP)
+
+    # Above-replacement contribution in goals
+    gaa_ev = (ev_off + ev_def - replacement_ev) * (toi_ev_min / 60.0)
+    gaa_pp = (pp - replacement_pp) * (toi_pp_min / 60.0)
+    gaa_pk = (pk - replacement_pk) * (toi_pk_min / 60.0)
 
     return float(gaa_ev), float(gaa_pp), float(gaa_pk)
 
@@ -262,6 +364,14 @@ class WARModel:
                 {col: pl.Series([], dtype=dt) for col, dt in WAR_SCHEMA.items()}
             )
 
+        # Compute data-driven replacement level from actual player pool
+        repl_ev, repl_pp, repl_pk = _compute_replacement_level(rapm_df)
+        print(
+            f"  [war] Replacement level (data-driven): "
+            f"EV={repl_ev:+.3f}  PP={repl_pp:+.3f}  PK={repl_pk:+.3f}  "
+            f"(fallback: {REPLACEMENT_RAPM_EV_FALLBACK}/60)"
+        )
+
         # Build lookup tables from optional inputs
         finishing_map: dict[tuple[int, int], float] = {}
         if finishing_df is not None and len(finishing_df) > 0:
@@ -281,21 +391,35 @@ class WARModel:
                 if pid and val is not None:
                     cap_map[(pid, sea)] = float(val)
 
+        # Detect TOI unit (seconds vs minutes) from the column maximum.
+        # We check per-column because PP/PK TOI can be very small (< 600 s) even
+        # when stored in seconds — a per-row heuristic would misidentify them.
+        # If max(col) > 1800 (30 min expressed in seconds), it's in seconds.
+        def _toi_scale(col: str) -> float:
+            """Return 1/60 if column is in seconds, else 1.0 (already minutes)."""
+            if col not in rapm_df.columns:
+                return 1.0
+            max_val = float(rapm_df[col].drop_nulls().max() or 0.0)
+            return 1.0 / 60.0 if max_val > 1800.0 else 1.0
+
+        ev_scale = _toi_scale("toi_ev") or _toi_scale("toi_ev_min")
+        pp_scale = _toi_scale("toi_pp") or _toi_scale("toi_pp_min")
+        pk_scale = _toi_scale("toi_pk") or _toi_scale("toi_pk_min")
+
         output: list[dict[str, Any]] = []
 
         for row in rapm_df.to_dicts():
             pid     = int(row["player_id"])
             season  = int(row.get("season") or 0)
 
-            # TOI — accept both "toi_ev" and "toi_ev_min" column names.
-            # RAPM output stores TOI in seconds; convert to minutes for GAR formula.
-            # Auto-detect: if toi_ev > 600 it is almost certainly in seconds
-            # (600 min of EV TOI in one season is impossible even for a top forward).
-            def _toi_to_min(val: float) -> float:
-                return val / 60.0 if val > 600.0 else val
-            toi_ev  = _toi_to_min(float(row.get("toi_ev") or row.get("toi_ev_min") or 0.0))
-            toi_pp  = _toi_to_min(float(row.get("toi_pp") or row.get("toi_pp_min") or 0.0))
-            toi_pk  = _toi_to_min(float(row.get("toi_pk") or row.get("toi_pk_min") or 0.0))
+            toi_ev  = float(row.get("toi_ev") or row.get("toi_ev_min") or 0.0) * ev_scale
+            toi_pp  = float(row.get("toi_pp") or row.get("toi_pp_min") or 0.0) * pp_scale
+            toi_pk  = float(row.get("toi_pk") or row.get("toi_pk_min") or 0.0) * pk_scale
+
+            # Skip micro-sample players — RAPM is too noisy below the TOI threshold.
+            # These players are by definition replacement-level or worse.
+            if toi_ev < MIN_TOI_EV_MINUTES_OUTPUT:
+                continue
 
             rapm_ev_off = row.get("rapm_ev_off")
             rapm_ev_def = row.get("rapm_ev_def")
@@ -309,10 +433,13 @@ class WARModel:
                     stacklevel=2,
                 )
 
-            # GAR components
+            # GAR components (against data-driven replacement level)
             gar_ev, gar_pp, gar_pk = gar_from_rapm(
                 rapm_ev_off, rapm_ev_def, rapm_pp, rapm_pk,
                 toi_ev, toi_pp, toi_pk,
+                replacement_ev=repl_ev,
+                replacement_pp=repl_pp,
+                replacement_pk=repl_pk,
             )
 
             gar_finishing = finishing_map.get((pid, season), 0.0) * FINISHING_SCALE
@@ -321,9 +448,9 @@ class WARModel:
             war_val       = war_from_gar(gar_total, self._goals_per_win)
 
             # Replacement level war (what you'd get from a replacement-level player)
-            repl_gar = (REPLACEMENT_RAPM_EV * (toi_ev / 60.0)
-                        + REPLACEMENT_RAPM_PP * (toi_pp / 60.0)
-                        + REPLACEMENT_RAPM_PK * (toi_pk / 60.0))
+            repl_gar = (repl_ev * (toi_ev / 60.0)
+                        + repl_pp * (toi_pp / 60.0)
+                        + repl_pk * (toi_pk / 60.0))
             repl_war = war_from_gar(repl_gar, self._goals_per_win)
 
             cap_hit   = cap_map.get((pid, season))

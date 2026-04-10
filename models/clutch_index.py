@@ -651,6 +651,22 @@ class ClutchIndexModel:
             ).to_dicts():
                 career_gp_lookup.setdefault(int(r["player_id"]), int(r["career_gp"] or 0))
 
+        # Fallback: estimate season GP from game_id count in toi_df, or from
+        # toi_seconds (avg ~17 min/game in NHL).  This prevents shrinkage from
+        # collapsing to 0 when career_gp data is unavailable.
+        season_gp_lookup: dict[int, int] = {}
+        if "game_id" in toi_df.columns:
+            for r in toi_df.group_by("player_id").agg(
+                pl.col("game_id").n_unique().alias("season_gp")
+            ).to_dicts():
+                season_gp_lookup[int(r["player_id"])] = int(r["season_gp"] or 1)
+        else:
+            # Estimate GP from toi_seconds: NHL average ~17 min/game EV+PP+PK
+            _avg_toi_per_game_sec = 17 * 60
+            for pid, toi_sec in toi_lookup.items():
+                estimated_gp = max(1, round(toi_sec / _avg_toi_per_game_sec))
+                season_gp_lookup[pid] = estimated_gp
+
         # team lookup
         team_lookup: dict[int, str] = {}
         if "team" in toi_df.columns:
@@ -690,6 +706,10 @@ class ClutchIndexModel:
             career_gp = career_gp_lookup.get(pid, 0)
             if pid in meta:
                 career_gp = int(meta[pid].get("career_gp", career_gp))
+            # When career_gp is unavailable (0), use season GP as the minimum
+            # so shrinkage never collapses the signal to exactly 0.
+            if career_gp == 0:
+                career_gp = season_gp_lookup.get(pid, 1)
             shrink = min(float(career_gp) / float(self._full_signal), 1.0)
 
             clutch_shrunk = raw_clutch * shrink
