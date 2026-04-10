@@ -38,19 +38,20 @@ export default function LoginPage() {
   }
 
   return (
-    <div
-      className="fixed inset-0 flex items-center justify-center overflow-y-auto sm:pb-[25vh]"
-      style={{
-        backgroundImage:    "url('/gretz.jpg')",
-        backgroundSize:     "cover",
-        backgroundPosition: "center 60%",
-        backgroundRepeat:   "no-repeat",
-      }}
-    >
-      {/* Overlays */}
-      <div className="absolute inset-0 bg-[#07080a]/75 backdrop-blur-[2px]" />
-      <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 70% 50% at 50% 0%, rgba(210,215,225,0.06) 0%, transparent 65%)" }} />
-      <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 60% 40% at 50% 100%, rgba(0,0,0,0.5) 0%, transparent 70%)" }} />
+    <div className="relative min-h-dvh flex items-center justify-center overflow-y-auto py-6 sm:pb-[25vh]">
+      {/* Background — fixed so it doesn't scroll with content */}
+      <div className="fixed inset-0 -z-10"
+        style={{
+          backgroundImage:    "url('/gretz.jpg')",
+          backgroundSize:     "cover",
+          backgroundPosition: "center 60%",
+          backgroundRepeat:   "no-repeat",
+        }}
+      />
+      {/* Overlays — also fixed */}
+      <div className="fixed inset-0 -z-10 bg-[#07080a]/75 backdrop-blur-[2px]" />
+      <div className="fixed inset-0 -z-10" style={{ background: "radial-gradient(ellipse 70% 50% at 50% 0%, rgba(210,215,225,0.06) 0%, transparent 65%)" }} />
+      <div className="fixed inset-0 -z-10" style={{ background: "radial-gradient(ellipse 60% 40% at 50% 100%, rgba(0,0,0,0.5) 0%, transparent 70%)" }} />
 
       {/* Card */}
       <div className="relative z-10 w-full max-w-sm mx-4">

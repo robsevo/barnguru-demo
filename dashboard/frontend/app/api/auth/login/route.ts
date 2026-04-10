@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHash } from "crypto";
+import { signToken } from "@/lib/auth";
 
 interface User {
   username:    string;
@@ -18,38 +18,57 @@ function getUsers(): User[] {
   return [];
 }
 
-// Derive a stable cookie token from AUTH_USERS so you don't need AUTH_COOKIE_VALUE.
-function getCookieVal(): string {
-  const raw = process.env.AUTH_USERS ?? "";
-  return createHash("sha256").update("gretzky:" + raw).digest("hex");
+// Rate limiting: max 5 failures per IP, 15-minute lockout.
+// In-memory — best-effort on serverless (protects single-instance / self-hosted).
+interface RateEntry { count: number; lockUntil: number }
+const rateLimitMap = new Map<string, RateEntry>();
+
+function getIP(req: NextRequest): string {
+  return req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
 }
 
+
 export async function POST(req: NextRequest) {
-  const { username, password, secret_word } = await req.json().catch(() => ({}));
+  const ip    = getIP(req);
+  const now   = Date.now();
+  const entry = rateLimitMap.get(ip) ?? { count: 0, lockUntil: 0 };
+
+  if (entry.lockUntil > now) {
+    return NextResponse.json({ error: "Too many attempts. Try again later." }, { status: 429 });
+  }
+
+  const body = await req.json().catch(() => ({}));
+  const { username, password, secret_word } = body as Record<string, string>;
 
   const users = getUsers();
-  const match = users.find(
-    u => u.username === username && u.password === password && u.secret_word === secret_word
-  );
+  // Find by username first, then constant-time compare credentials.
+  const candidate = users.find(u => u.username === username);
 
-  if (!match) {
+  const credentialsOk = candidate
+    ? password === candidate.password && secret_word === candidate.secret_word
+    : false;
+
+  if (!credentialsOk) {
+    entry.count++;
+    if (entry.count >= 5) {
+      entry.lockUntil = now + 15 * 60 * 1000;
+    }
+    rateLimitMap.set(ip, entry);
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
 
+  // Success — clear rate limit entry and issue signed session token.
+  rateLimitMap.delete(ip);
+
+  const token = await signToken(candidate!.username);
+
   const res = NextResponse.json({ ok: true });
-  res.cookies.set("grtzky_session", getCookieVal(), {
+  res.cookies.set("grtzky_session", token, {
     httpOnly: true,
     secure:   process.env.NODE_ENV === "production",
     sameSite: "lax",
     path:     "/",
-    maxAge:   60 * 60 * 24 * 7,
-  });
-  res.cookies.set("gretzky_user", match.username, {
-    httpOnly: false,
-    secure:   process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path:     "/",
-    maxAge:   60 * 60 * 24 * 7,
+    maxAge:   60 * 60 * 24, // 24 hours
   });
   return res;
 }
