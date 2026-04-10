@@ -231,6 +231,18 @@ def main() -> None:
             except Exception:
                 pass
 
+    # Layer 3: goalie ratings (goalies aren't in EDGE skating)
+    goalie_dir = data_dir / "goalie_ratings"
+    if goalie_dir.exists():
+        for _gp in sorted(goalie_dir.glob("goalie_ratings_*.parquet")):
+            try:
+                _g = pl.read_parquet(_gp, columns=["player_id", "player_name"])
+                for _r in _g.drop_nulls("player_id").unique("player_id").to_dicts():
+                    if _r["player_name"] and int(_r["player_id"]) not in name_fallback:
+                        name_fallback[int(_r["player_id"])] = str(_r["player_name"])
+            except Exception:
+                pass
+
     model.name_fallback = name_fallback
 
     def loader(season: int) -> tuple[pl.DataFrame, pl.DataFrame]:
