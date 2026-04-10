@@ -93,7 +93,7 @@ const WRAPPER_INJECT = `<script>
           if(!_playerActive){
             try{window.parent.postMessage({type:'Origin-sandbox-fail',url:typeof _BG_URL!=='undefined'?_BG_URL:''},'*');}catch(e){}
           }
-        },6000);
+        },3000);
       });
     }
   }
