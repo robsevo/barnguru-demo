@@ -245,8 +245,8 @@ def main() -> None:
             except Exception:
                 pass
 
-    # Layer 4: NHL Stats API bulk skater summary — highest quality, covers all skaters
-    # incl. low-TOI players not in EDGE. Overwrites everything above.
+    # Layer 4: NHL Stats API bulk skater + goalie summary — highest quality,
+    # covers all players incl. low-TOI players not in EDGE. Overwrites above.
     try:
         import asyncio as _asyncio
         from data.nhl_client import NHLClient as _NHLClient
@@ -254,25 +254,32 @@ def main() -> None:
         async def _fetch_names() -> dict[int, str]:
             result: dict[int, str] = {}
             async with _NHLClient() as _c:
-                for _season_id in ("20232024", "20242025"):
-                    start = 0
-                    while True:
-                        _r = await _c._get(_c._stats, "/stats/rest/en/skater/summary", params={
-                            "isAggregate": "false", "isGame": "false",
-                            "factCayenneExp": "gamesPlayed>=1",
-                            "cayenneExp": f"gameTypeId=2 and seasonId={_season_id}",
-                            "start": start, "limit": 100,
-                        })
-                        rows = _r.get("data", [])
-                        for row in rows:
-                            pid = row.get("playerId")
-                            name = row.get("skaterFullName") or ""
-                            if pid and name:
-                                result[int(pid)] = name
-                        total = _r.get("total", 0)
-                        start += len(rows)
-                        if start >= total or not rows:
-                            break
+                for _season_id in ("20222023", "20232024", "20242025"):
+                    for _endpoint, _name_key in [
+                        ("/stats/rest/en/skater/summary", "skaterFullName"),
+                        ("/stats/rest/en/goalie/summary",  "goalieFullName"),
+                    ]:
+                        start = 0
+                        while True:
+                            try:
+                                _r = await _c._get(_c._stats, _endpoint, params={
+                                    "isAggregate": "false", "isGame": "false",
+                                    "factCayenneExp": "gamesPlayed>=1",
+                                    "cayenneExp": f"gameTypeId=2 and seasonId={_season_id}",
+                                    "start": start, "limit": 100,
+                                })
+                            except Exception:
+                                break
+                            rows = _r.get("data", [])
+                            for row in rows:
+                                pid = row.get("playerId")
+                                name = row.get(_name_key) or ""
+                                if pid and name:
+                                    result[int(pid)] = name
+                            total = _r.get("total", 0)
+                            start += len(rows)
+                            if start >= total or not rows:
+                                break
             return result
 
         _api_names = _asyncio.run(_fetch_names())
