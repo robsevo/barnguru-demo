@@ -124,8 +124,9 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { theme, clearTheme } = useTheme();
 
-  const brandHex = theme?.primaryColor ?? "#C9A84C";
-  const brandHex2 = theme ? lightenHex(theme.primaryColor) : "#E8D090";
+  const isCortexPage = pathname.startsWith("/players");
+  const brandHex = theme?.primaryColor ?? (isCortexPage ? "#a78bfa" : "#C9A84C");
+  const brandHex2 = theme ? lightenHex(theme.primaryColor) : (isCortexPage ? "#c4b5fd" : "#E8D090");
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -371,10 +372,33 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
             </button>
 
             {/* Logo + name */}
-            <Link href="/" className="inline-flex items-center shrink-0 pr-1">
+            <Link href={isCortexPage ? "/players" : "/"} className="inline-flex items-center shrink-0 pr-1">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               {theme ? (
                 <img src={theme.logoUrl} alt={theme.abbrev} className="h-8 sm:h-9 w-auto object-contain block" />
+              ) : isCortexPage ? (
+                <svg width="36" height="36" viewBox="0 0 48 48" fill="none" aria-hidden="true" className="shrink-0">
+                  <path d="M24 2 L42 12 L42 36 L24 46 L6 36 L6 12 Z" stroke="#a78bfa" strokeWidth="0.9" strokeOpacity="0.28" fill="#a78bfa" fillOpacity="0.03"/>
+                  <circle cx="24" cy="24" r="17" stroke="#a78bfa" strokeWidth="0.6" strokeOpacity="0.12" fill="none"/>
+                  <path d="M24 10 C18 10 11 14 9 20 C7 25 9 31 13 34 C17 37 21 37 24 37" stroke="#a78bfa" strokeWidth="1.8" strokeLinecap="round" fill="rgba(167,139,250,0.07)"/>
+                  <path d="M24 10 C30 10 37 14 39 20 C41 25 39 31 35 34 C31 37 27 37 24 37" stroke="#a78bfa" strokeWidth="1.8" strokeLinecap="round" fill="rgba(167,139,250,0.07)"/>
+                  <line x1="24" y1="10" x2="24" y2="37" stroke="#c4b5fd" strokeWidth="0.9" strokeOpacity="0.18" strokeDasharray="2.5,3.5"/>
+                  <path d="M11 19 C14 18 17 19 17 22" stroke="#c4b5fd" strokeWidth="1.2" fill="none" strokeOpacity="0.55" strokeLinecap="round"/>
+                  <path d="M10 27 C13 26 16 27 16 30" stroke="#c4b5fd" strokeWidth="1.1" fill="none" strokeOpacity="0.40" strokeLinecap="round"/>
+                  <path d="M37 19 C34 18 31 19 31 22" stroke="#c4b5fd" strokeWidth="1.2" fill="none" strokeOpacity="0.55" strokeLinecap="round"/>
+                  <path d="M38 27 C35 26 32 27 32 30" stroke="#c4b5fd" strokeWidth="1.1" fill="none" strokeOpacity="0.40" strokeLinecap="round"/>
+                  <line x1="15" y1="22" x2="24" y2="24" stroke="#a78bfa" strokeWidth="0.8" strokeOpacity="0.28"/>
+                  <line x1="33" y1="22" x2="24" y2="24" stroke="#a78bfa" strokeWidth="0.8" strokeOpacity="0.28"/>
+                  <circle cx="15" cy="22" r="2.2" fill="#a78bfa" fillOpacity="0.88"/>
+                  <circle cx="33" cy="22" r="2.2" fill="#a78bfa" fillOpacity="0.88"/>
+                  <circle cx="14" cy="30" r="1.8" fill="#7c3aed" fillOpacity="0.75"/>
+                  <circle cx="34" cy="30" r="1.8" fill="#7c3aed" fillOpacity="0.75"/>
+                  <circle cx="18" cy="14" r="1.3" fill="#c4b5fd" fillOpacity="0.60"/>
+                  <circle cx="30" cy="14" r="1.3" fill="#c4b5fd" fillOpacity="0.60"/>
+                  <circle cx="24" cy="24" r="5.0" fill="#a78bfa" fillOpacity="0.10"/>
+                  <circle cx="24" cy="24" r="3.2" fill="#a78bfa" fillOpacity="0.95"/>
+                  <circle cx="24" cy="24" r="1.6" fill="white"   fillOpacity="0.72"/>
+                </svg>
               ) : (
                 <img src="/logo-circle.png" alt="GRTZKY" className="h-9 sm:h-10 w-auto block" />
               )}
@@ -386,10 +410,12 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                 className="font-black italic tracking-[0.06em] text-[11px] sm:text-[17px] bg-clip-text text-transparent leading-none pr-1.5"
                 style={{
                   fontFamily: "var(--font-condensed)",
-                  backgroundImage: `linear-gradient(to right, #fff, ${brandHex2}, ${brandHex})`,
+                  backgroundImage: isCortexPage && !theme
+                    ? `linear-gradient(to right, #fff, #c4b5fd, #a78bfa)`
+                    : `linear-gradient(to right, #fff, ${brandHex2}, ${brandHex})`,
                 }}
               >
-                {theme ? theme.abbrev : "GRTZKY"}
+                {theme ? theme.abbrev : isCortexPage ? "CORTEX" : "GRTZKY"}
               </span>
             </Link>
 
@@ -398,7 +424,7 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
               className="text-[9px] font-medium tracking-[0.16em] uppercase hidden lg:block"
               style={{ color: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.30)` }}
             >
-              {theme ? "Team Theme Active" : "Bayesian Analytics and Rating Network"}
+              {theme ? "Team Theme Active" : isCortexPage ? "Player Intelligence · Neural Models" : "Bayesian Analytics and Rating Network"}
             </span>
 
             {/* Quick-nav buttons */}
