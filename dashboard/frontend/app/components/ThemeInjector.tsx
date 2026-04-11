@@ -1,7 +1,19 @@
 "use client";
 
 import { useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { useTheme } from "@/utils/themeContext";
+
+// Cortex auto-theme — applied when on /players pages with no team theme active
+const CORTEX = {
+  brandHex: "#a78bfa",
+  br: 167, bg: 139, bb: 250,
+  // dark purple body/card/header values
+  bodyR: 22,  bodyG: 14,  bodyB: 39,
+  cardR: 27,  cardG: 15,  cardB: 49,
+  midR:  16,  midG:  12,  midB:  26,
+  headR: 19,  headG: 13,  headB: 32,
+};
 
 function hexToRgb(hex: string | undefined | null): [number, number, number] {
   if (!hex) return [9, 10, 12];
@@ -29,20 +41,43 @@ function luminance([r, g, b]: [number, number, number]): number {
 
 export default function ThemeInjector() {
   const { theme } = useTheme();
+  const pathname = usePathname();
+  const isCortexPage = pathname.startsWith("/players");
 
   useEffect(() => {
     const root = document.documentElement;
 
     if (!theme) {
-      root.removeAttribute("data-team-theme");
-      const vars = [
-        "--brand-hex", "--brand-r", "--brand-g", "--brand-b",
-        "--body-base-r", "--body-base-g", "--body-base-b",
-        "--card-base-r", "--card-base-g", "--card-base-b",
-        "--card-mid-r",  "--card-mid-g",  "--card-mid-b",
-        "--header-r",    "--header-g",    "--header-b",
-      ];
-      vars.forEach(v => root.style.removeProperty(v));
+      if (isCortexPage) {
+        // Auto-apply cortex purple theme on /players pages
+        root.setAttribute("data-team-theme", "cortex");
+        root.style.setProperty("--brand-hex", CORTEX.brandHex);
+        root.style.setProperty("--brand-r", String(CORTEX.br));
+        root.style.setProperty("--brand-g", String(CORTEX.bg));
+        root.style.setProperty("--brand-b", String(CORTEX.bb));
+        root.style.setProperty("--body-base-r", String(CORTEX.bodyR));
+        root.style.setProperty("--body-base-g", String(CORTEX.bodyG));
+        root.style.setProperty("--body-base-b", String(CORTEX.bodyB));
+        root.style.setProperty("--card-base-r", String(CORTEX.cardR));
+        root.style.setProperty("--card-base-g", String(CORTEX.cardG));
+        root.style.setProperty("--card-base-b", String(CORTEX.cardB));
+        root.style.setProperty("--card-mid-r",  String(CORTEX.midR));
+        root.style.setProperty("--card-mid-g",  String(CORTEX.midG));
+        root.style.setProperty("--card-mid-b",  String(CORTEX.midB));
+        root.style.setProperty("--header-r", String(CORTEX.headR));
+        root.style.setProperty("--header-g", String(CORTEX.headG));
+        root.style.setProperty("--header-b", String(CORTEX.headB));
+      } else {
+        root.removeAttribute("data-team-theme");
+        const vars = [
+          "--brand-hex", "--brand-r", "--brand-g", "--brand-b",
+          "--body-base-r", "--body-base-g", "--body-base-b",
+          "--card-base-r", "--card-base-g", "--card-base-b",
+          "--card-mid-r",  "--card-mid-g",  "--card-mid-b",
+          "--header-r",    "--header-g",    "--header-b",
+        ];
+        vars.forEach(v => root.style.removeProperty(v));
+      }
       return;
     }
 
@@ -90,7 +125,7 @@ export default function ThemeInjector() {
     root.style.setProperty("--header-r", String(hr));
     root.style.setProperty("--header-g", String(hg));
     root.style.setProperty("--header-b", String(hb));
-  }, [theme]);
+  }, [theme, isCortexPage]);
 
   return null;
 }

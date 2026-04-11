@@ -917,37 +917,44 @@ function CortexAbout() {
 // Neural-network / brain icon — radiating nodes connected by axons
 function CortexIcon({ size = 32 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" aria-hidden="true" className="shrink-0">
-      {/* Outer glow ring */}
-      <circle cx="18" cy="18" r="16" stroke="#a78bfa" strokeOpacity="0.12" strokeWidth="1" />
-      {/* Axon lines between nodes */}
-      <line x1="18" y1="4"  x2="30" y2="12" stroke="#a78bfa" strokeOpacity="0.35" strokeWidth="1.2" strokeLinecap="round"/>
-      <line x1="18" y1="4"  x2="6"  y2="12" stroke="#a78bfa" strokeOpacity="0.35" strokeWidth="1.2" strokeLinecap="round"/>
-      <line x1="30" y1="12" x2="32" y2="24" stroke="#7c3aed" strokeOpacity="0.40" strokeWidth="1.2" strokeLinecap="round"/>
-      <line x1="6"  y1="12" x2="4"  y2="24" stroke="#7c3aed" strokeOpacity="0.40" strokeWidth="1.2" strokeLinecap="round"/>
-      <line x1="32" y1="24" x2="22" y2="32" stroke="#a78bfa" strokeOpacity="0.35" strokeWidth="1.2" strokeLinecap="round"/>
-      <line x1="4"  y1="24" x2="14" y2="32" stroke="#a78bfa" strokeOpacity="0.35" strokeWidth="1.2" strokeLinecap="round"/>
-      <line x1="22" y1="32" x2="14" y2="32" stroke="#a78bfa" strokeOpacity="0.25" strokeWidth="1.2" strokeLinecap="round"/>
-      {/* Cross connections */}
-      <line x1="18" y1="4"  x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.20" strokeWidth="1" strokeLinecap="round"/>
-      <line x1="30" y1="12" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.20" strokeWidth="1" strokeLinecap="round"/>
-      <line x1="6"  y1="12" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.20" strokeWidth="1" strokeLinecap="round"/>
-      <line x1="32" y1="24" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.20" strokeWidth="1" strokeLinecap="round"/>
-      <line x1="4"  y1="24" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.20" strokeWidth="1" strokeLinecap="round"/>
-      <line x1="22" y1="32" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.20" strokeWidth="1" strokeLinecap="round"/>
-      <line x1="14" y1="32" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.20" strokeWidth="1" strokeLinecap="round"/>
-      {/* Outer nodes */}
-      <circle cx="18" cy="4"  r="2.8" fill="#a78bfa" opacity="0.90"/>
-      <circle cx="30" cy="12" r="2.4" fill="#7c3aed" opacity="0.85"/>
-      <circle cx="6"  cy="12" r="2.4" fill="#7c3aed" opacity="0.85"/>
-      <circle cx="32" cy="24" r="2.4" fill="#a78bfa" opacity="0.80"/>
-      <circle cx="4"  cy="24" r="2.4" fill="#a78bfa" opacity="0.80"/>
-      <circle cx="22" cy="32" r="2.4" fill="#7c3aed" opacity="0.85"/>
-      <circle cx="14" cy="32" r="2.4" fill="#7c3aed" opacity="0.85"/>
-      {/* Central hub — brightest node */}
-      <circle cx="18" cy="18" r="4"   fill="#a78bfa" opacity="0.15"/>
-      <circle cx="18" cy="18" r="2.8" fill="#a78bfa" opacity="0.95"/>
-      <circle cx="18" cy="18" r="1.4" fill="white"   opacity="0.60"/>
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" aria-hidden="true" className="shrink-0">
+      {/* Hexagonal badge border */}
+      <path d="M24 2 L42 12 L42 36 L24 46 L6 36 L6 12 Z"
+            stroke="#a78bfa" strokeWidth="0.9" strokeOpacity="0.28" fill="#a78bfa" fillOpacity="0.03"/>
+      {/* Inner subtle ring */}
+      <circle cx="24" cy="24" r="17" stroke="#a78bfa" strokeWidth="0.6" strokeOpacity="0.12" fill="none"/>
+      {/* LEFT hemisphere */}
+      <path d="M24 10 C18 10 11 14 9 20 C7 25 9 31 13 34 C17 37 21 37 24 37"
+            stroke="#a78bfa" strokeWidth="1.8" strokeLinecap="round" fill="rgba(167,139,250,0.07)"/>
+      {/* RIGHT hemisphere */}
+      <path d="M24 10 C30 10 37 14 39 20 C41 25 39 31 35 34 C31 37 27 37 24 37"
+            stroke="#a78bfa" strokeWidth="1.8" strokeLinecap="round" fill="rgba(167,139,250,0.07)"/>
+      {/* Central sulcus */}
+      <line x1="24" y1="10" x2="24" y2="37" stroke="#c4b5fd" strokeWidth="0.9" strokeOpacity="0.18" strokeDasharray="2.5,3.5"/>
+      {/* Left gyri (fold lines) */}
+      <path d="M11 19 C14 18 17 19 17 22" stroke="#c4b5fd" strokeWidth="1.2" fill="none" strokeOpacity="0.55" strokeLinecap="round"/>
+      <path d="M10 27 C13 26 16 27 16 30" stroke="#c4b5fd" strokeWidth="1.1" fill="none" strokeOpacity="0.40" strokeLinecap="round"/>
+      <path d="M15 33 C17 32 19 33 19 35" stroke="#c4b5fd" strokeWidth="0.9" fill="none" strokeOpacity="0.30" strokeLinecap="round"/>
+      {/* Right gyri (mirror) */}
+      <path d="M37 19 C34 18 31 19 31 22" stroke="#c4b5fd" strokeWidth="1.2" fill="none" strokeOpacity="0.55" strokeLinecap="round"/>
+      <path d="M38 27 C35 26 32 27 32 30" stroke="#c4b5fd" strokeWidth="1.1" fill="none" strokeOpacity="0.40" strokeLinecap="round"/>
+      <path d="M33 33 C31 32 29 33 29 35" stroke="#c4b5fd" strokeWidth="0.9" fill="none" strokeOpacity="0.30" strokeLinecap="round"/>
+      {/* Neural spokes to center */}
+      <line x1="15" y1="22" x2="24" y2="24" stroke="#a78bfa" strokeWidth="0.8" strokeOpacity="0.28"/>
+      <line x1="33" y1="22" x2="24" y2="24" stroke="#a78bfa" strokeWidth="0.8" strokeOpacity="0.28"/>
+      <line x1="14" y1="30" x2="24" y2="24" stroke="#a78bfa" strokeWidth="0.7" strokeOpacity="0.20"/>
+      <line x1="34" y1="30" x2="24" y2="24" stroke="#a78bfa" strokeWidth="0.7" strokeOpacity="0.20"/>
+      {/* Neural nodes */}
+      <circle cx="15" cy="22" r="2.2" fill="#a78bfa" fillOpacity="0.88"/>
+      <circle cx="33" cy="22" r="2.2" fill="#a78bfa" fillOpacity="0.88"/>
+      <circle cx="14" cy="30" r="1.8" fill="#7c3aed" fillOpacity="0.75"/>
+      <circle cx="34" cy="30" r="1.8" fill="#7c3aed" fillOpacity="0.75"/>
+      <circle cx="18" cy="14" r="1.3" fill="#c4b5fd" fillOpacity="0.60"/>
+      <circle cx="30" cy="14" r="1.3" fill="#c4b5fd" fillOpacity="0.60"/>
+      {/* Central hub — brightest point */}
+      <circle cx="24" cy="24" r="5.0" fill="#a78bfa" fillOpacity="0.10"/>
+      <circle cx="24" cy="24" r="3.2" fill="#a78bfa" fillOpacity="0.95"/>
+      <circle cx="24" cy="24" r="1.6" fill="white"   fillOpacity="0.72"/>
     </svg>
   );
 }
@@ -1139,14 +1146,15 @@ export default function PlayersPage() {
       >
         <div className="px-6 py-3 border-b border-[#a78bfa]/[0.08] flex items-center justify-center gap-3">
           <div className="h-px flex-1 bg-gradient-to-r from-transparent to-[#a78bfa]/20" />
-          <CortexIcon size={28} />
-          <p
-            className="font-black italic tracking-[0.10em] text-[22px] sm:text-[26px] bg-gradient-to-r from-white via-[#c4b5fd] to-[#a78bfa] bg-clip-text text-transparent leading-none"
-            style={{ fontFamily: "var(--font-condensed)" }}
-          >
-            CORTEX
-          </p>
-          <CortexIcon size={28} />
+          <div className="flex items-center gap-2.5">
+            <p
+              className="font-black italic tracking-[0.10em] text-[22px] sm:text-[26px] bg-gradient-to-r from-white via-[#c4b5fd] to-[#a78bfa] bg-clip-text text-transparent leading-none"
+              style={{ fontFamily: "var(--font-condensed)" }}
+            >
+              CORTEX
+            </p>
+            <CortexIcon size={36} />
+          </div>
           <div className="h-px flex-1 bg-gradient-to-l from-transparent to-[#a78bfa]/20" />
         </div>
         <div className="px-6 py-2.5 text-center">
@@ -1161,6 +1169,9 @@ export default function PlayersPage() {
 
       {/* Search bar */}
       <div className="relative mb-5">
+        <div className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none z-10">
+          <CortexIcon size={20} />
+        </div>
         <input
           ref={inputRef}
           value={query}
@@ -1169,15 +1180,29 @@ export default function PlayersPage() {
             if (e.key === "Enter" && query.trim()) loadPlayer(query.trim());
             if (e.key === "Escape") setShowSugg(false);
           }}
-          onFocus={() => setShowSugg(true)}
-          onBlur={() => setTimeout(() => setShowSugg(false), 150)}
+          onFocus={e => {
+            e.currentTarget.style.border = `1px solid rgba(167,139,250,0.60)`;
+            e.currentTarget.style.boxShadow = `0 0 22px rgba(167,139,250,0.14), inset 0 0 10px rgba(124,58,237,0.05)`;
+            e.currentTarget.style.background = `rgba(40,28,68,0.70)`;
+            setShowSugg(true);
+          }}
+          onBlur={e => {
+            e.currentTarget.style.border = `1px solid rgba(167,139,250,0.25)`;
+            e.currentTarget.style.boxShadow = ``;
+            e.currentTarget.style.background = `rgba(35,24,58,0.55)`;
+            setTimeout(() => setShowSugg(false), 150);
+          }}
           placeholder="Search any NHL player…"
-          className="w-full px-5 py-4 text-base bg-white/[0.05] border border-white/[0.10] rounded-2xl text-white placeholder:text-white/25 focus:outline-none focus:border-[#a78bfa]/40 focus:bg-white/[0.06] transition-all"
+          className="w-full pl-11 pr-5 py-4 text-base rounded-2xl text-white placeholder:text-[#a78bfa]/35 focus:outline-none transition-[border,box-shadow]"
+          style={{
+            background: `rgba(35,24,58,0.55)`,
+            border: `1px solid rgba(167,139,250,0.25)`,
+          }}
         />
         {query && (
           <button
             onClick={() => { setQuery(""); setSelectedPlayer(null); setPlayerNotFound(false); inputRef.current?.focus(); }}
-            className="absolute right-4 top-1/2 -translate-y-1/2 text-white/25 hover:text-white/60 transition-colors text-lg"
+            className="absolute right-4 top-1/2 -translate-y-1/2 text-[#a78bfa]/30 hover:text-[#a78bfa]/70 transition-colors text-lg"
           >✕</button>
         )}
 

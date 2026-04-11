@@ -50,27 +50,26 @@ import { usePathname } from "next/navigation";
 // Mini neural-net icon for the mobile Cortex nav button
 function MiniCortex() {
   return (
-    <svg width="13" height="13" viewBox="0 0 36 36" fill="none" aria-hidden="true" className="shrink-0">
-      <line x1="18" y1="4"  x2="30" y2="12" stroke="#a78bfa" strokeOpacity="0.50" strokeWidth="2" strokeLinecap="round"/>
-      <line x1="18" y1="4"  x2="6"  y2="12" stroke="#a78bfa" strokeOpacity="0.50" strokeWidth="2" strokeLinecap="round"/>
-      <line x1="30" y1="12" x2="32" y2="24" stroke="#7c3aed" strokeOpacity="0.55" strokeWidth="2" strokeLinecap="round"/>
-      <line x1="6"  y1="12" x2="4"  y2="24" stroke="#7c3aed" strokeOpacity="0.55" strokeWidth="2" strokeLinecap="round"/>
-      <line x1="32" y1="24" x2="18" y2="32" stroke="#a78bfa" strokeOpacity="0.50" strokeWidth="2" strokeLinecap="round"/>
-      <line x1="4"  y1="24" x2="18" y2="32" stroke="#a78bfa" strokeOpacity="0.50" strokeWidth="2" strokeLinecap="round"/>
-      <line x1="18" y1="4"  x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.25" strokeWidth="1.5" strokeLinecap="round"/>
-      <line x1="30" y1="12" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.25" strokeWidth="1.5" strokeLinecap="round"/>
-      <line x1="6"  y1="12" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.25" strokeWidth="1.5" strokeLinecap="round"/>
-      <line x1="32" y1="24" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.25" strokeWidth="1.5" strokeLinecap="round"/>
-      <line x1="4"  y1="24" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.25" strokeWidth="1.5" strokeLinecap="round"/>
-      <line x1="18" y1="32" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.25" strokeWidth="1.5" strokeLinecap="round"/>
-      <circle cx="18" cy="4"  r="3" fill="#a78bfa" opacity="0.90"/>
-      <circle cx="30" cy="12" r="2.5" fill="#7c3aed" opacity="0.85"/>
-      <circle cx="6"  cy="12" r="2.5" fill="#7c3aed" opacity="0.85"/>
-      <circle cx="32" cy="24" r="2.5" fill="#a78bfa" opacity="0.80"/>
-      <circle cx="4"  cy="24" r="2.5" fill="#a78bfa" opacity="0.80"/>
-      <circle cx="18" cy="32" r="3" fill="#7c3aed" opacity="0.90"/>
-      <circle cx="18" cy="18" r="3.5" fill="#a78bfa" opacity="0.95"/>
-      <circle cx="18" cy="18" r="1.6" fill="white"   opacity="0.55"/>
+    <svg width="14" height="14" viewBox="0 0 48 48" fill="none" aria-hidden="true" className="shrink-0">
+      {/* Hexagonal badge */}
+      <path d="M24 2 L42 12 L42 36 L24 46 L6 36 L6 12 Z"
+            stroke="#a78bfa" strokeWidth="1.5" strokeOpacity="0.30" fill="#a78bfa" fillOpacity="0.04"/>
+      {/* Left hemisphere */}
+      <path d="M24 10 C18 10 11 14 9 20 C7 25 9 31 13 34 C17 37 21 37 24 37"
+            stroke="#a78bfa" strokeWidth="2.5" strokeLinecap="round" fill="rgba(167,139,250,0.08)"/>
+      {/* Right hemisphere */}
+      <path d="M24 10 C30 10 37 14 39 20 C41 25 39 31 35 34 C31 37 27 37 24 37"
+            stroke="#a78bfa" strokeWidth="2.5" strokeLinecap="round" fill="rgba(167,139,250,0.08)"/>
+      {/* Fold lines */}
+      <path d="M11 19 C14 18 17 19 17 22" stroke="#c4b5fd" strokeWidth="1.8" fill="none" strokeOpacity="0.55" strokeLinecap="round"/>
+      <path d="M37 19 C34 18 31 19 31 22" stroke="#c4b5fd" strokeWidth="1.8" fill="none" strokeOpacity="0.55" strokeLinecap="round"/>
+      {/* Neural nodes */}
+      <circle cx="15" cy="22" r="3" fill="#a78bfa" fillOpacity="0.88"/>
+      <circle cx="33" cy="22" r="3" fill="#a78bfa" fillOpacity="0.88"/>
+      {/* Central hub */}
+      <circle cx="24" cy="24" r="5.5" fill="#a78bfa" fillOpacity="0.10"/>
+      <circle cx="24" cy="24" r="3.8" fill="#a78bfa" fillOpacity="0.95"/>
+      <circle cx="24" cy="24" r="1.9" fill="white"   fillOpacity="0.70"/>
     </svg>
   );
 }
@@ -418,13 +417,13 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                     <Link
                       key={href}
                       href={href}
-                      className={`px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md text-[8px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border flex items-center justify-center ${
+                      className={`px-1.5 sm:px-2 py-1.5 sm:py-2 rounded-md text-[8px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border flex items-center justify-center ${
                         active
                           ? "bg-[#a78bfa]/15 text-[#a78bfa] border-[#a78bfa]/50 shadow-[0_0_8px_rgba(167,139,250,0.20)]"
                           : "text-[#a78bfa]/50 border-[#a78bfa]/20 bg-[#a78bfa]/[0.04] hover:text-[#a78bfa]/80 hover:border-[#a78bfa]/40 hover:bg-[#a78bfa]/10"
                       }`}
                     >
-                      <span className="sm:hidden"><MiniDNA /></span>
+                      <span className="sm:hidden"><MiniCortex /></span>
                       <span className="hidden sm:inline">{label}</span>
                     </Link>
                   );
