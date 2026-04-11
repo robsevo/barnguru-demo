@@ -179,10 +179,10 @@ function GameCard({ g }: { g: Game }) {
   const gcShadow = isLive ? "rgba(74,222,128,0.35)" : isFinal ? "rgba(248,113,113,0.35)" : "rgba(251,191,36,0.35)";
   const gcBorder = isLive ? "rgba(74,222,128,0.45)" : isFinal ? "rgba(248,113,113,0.45)" : "rgba(251,191,36,0.45)";
 
-  // Glossy glass cards — deep shadows, bright inner edge, gradient pop
+  // Glossy glass cards — shiny effect, strong button feel
   const cardCls = live
-    ? "border-[1.5px] border-white/[0.32] bg-gradient-to-b from-white/[0.20] via-white/[0.09] to-transparent backdrop-blur-sm shadow-[0_10px_40px_rgba(0,0,0,0.85),0_0_24px_rgba(74,222,128,0.10),0_2px_6px_rgba(0,0,0,0.60),inset_0_1px_0_rgba(255,255,255,0.30),inset_0_-1px_0_rgba(0,0,0,0.35),inset_1px_0_0_rgba(255,255,255,0.10),inset_-1px_0_0_rgba(255,255,255,0.10)]"
-    : "border-[1.5px] border-white/[0.22] bg-gradient-to-b from-white/[0.13] via-white/[0.05] to-transparent backdrop-blur-sm shadow-[0_8px_32px_rgba(0,0,0,0.80),0_2px_6px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-1px_0_rgba(0,0,0,0.35),inset_1px_0_0_rgba(255,255,255,0.07),inset_-1px_0_0_rgba(255,255,255,0.07)]";
+    ? "border-[1.5px] border-[#4ade80]/[0.38] bg-gradient-to-b from-white/[0.20] via-white/[0.08] to-transparent backdrop-blur-sm cursor-pointer active:scale-[0.97] transition-transform duration-100 shadow-[0_10px_40px_rgba(0,0,0,0.90),0_0_24px_rgba(74,222,128,0.18),0_2px_6px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.32),inset_0_-1px_0_rgba(0,0,0,0.40),inset_1px_0_0_rgba(255,255,255,0.10),inset_-1px_0_0_rgba(255,255,255,0.10)] hover:shadow-[0_14px_48px_rgba(0,0,0,0.95),0_0_32px_rgba(74,222,128,0.28),0_2px_6px_rgba(0,0,0,0.70),inset_0_1px_0_rgba(255,255,255,0.36),inset_0_-1px_0_rgba(0,0,0,0.45)] hover:border-[#4ade80]/[0.55] hover:-translate-y-px"
+    : "border-[1.5px] border-[#C9A84C]/[0.30] bg-gradient-to-b from-[#C9A84C]/[0.06] via-white/[0.04] to-transparent backdrop-blur-sm cursor-pointer active:scale-[0.97] transition-transform duration-100 shadow-[0_8px_32px_rgba(0,0,0,0.85),0_0_18px_rgba(201,168,76,0.12),0_2px_6px_rgba(0,0,0,0.60),inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-1px_0_rgba(0,0,0,0.40),inset_1px_0_0_rgba(201,168,76,0.04),inset_-1px_0_0_rgba(201,168,76,0.04)] hover:shadow-[0_12px_40px_rgba(0,0,0,0.90),0_0_24px_rgba(201,168,76,0.18),0_2px_6px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.25)] hover:border-[#C9A84C]/[0.50] hover:-translate-y-px";
 
   const homeClr = TEAM_COLORS[g.home_team] ?? "#C9A84C";
   const awayClr = TEAM_COLORS[g.away_team] ?? "#94a3b8";
@@ -376,12 +376,19 @@ export default function ScoreboardBar() {
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const liveEl = el.querySelector("[data-live='true']") as HTMLElement | null;
-    if (liveEl) {
+
+    // Default to today's first game; fall back to first live game; last resort = end
+    const todayStr = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD local
+    const todayEl  = el.querySelector(`[data-date='${todayStr}']`) as HTMLElement | null;
+    const liveEl   = el.querySelector("[data-live='true']")         as HTMLElement | null;
+    if (todayEl) {
+      el.scrollLeft = Math.max(0, todayEl.offsetLeft - 8);
+    } else if (liveEl) {
       el.scrollLeft = liveEl.offsetLeft;
     } else {
       el.scrollLeft = el.scrollWidth - 120;
     }
+
     el.addEventListener("scroll", updateArrows, { passive: true });
     updateArrows();
     return () => el.removeEventListener("scroll", updateArrows);
@@ -417,7 +424,7 @@ export default function ScoreboardBar() {
   return (
     <div className="select-none">
       {/* Label strip */}
-      <div className="flex items-center justify-center gap-2 border-b border-[#c8cdd2]/[0.12] h-8 relative">
+      <div className="flex items-center justify-center gap-2 border-b border-[#C9A84C]/[0.18] h-8 relative" style={{ background: "linear-gradient(to bottom, rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.04), transparent)" }}>
         <span className={`h-2 w-2 rounded-full shrink-0 border transition-all duration-300 ${
           hasLive
             ? "bg-[#4ade80]/80 border-[#4ade80]/60 shadow-[0_0_7px_rgba(74,222,128,0.75)] animate-pulse"
@@ -439,7 +446,7 @@ export default function ScoreboardBar() {
       </div>
 
       {games.length > 0 && (
-        <div className="flex items-center border-b border-[#c8cdd2]/[0.12] py-1.5">
+        <div className="flex items-center border-b border-[#C9A84C]/[0.14] py-1.5" style={{ background: "linear-gradient(to bottom, rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.025), transparent)" }}>
           <Arrow dir="left" onClick={() => scroll("left")} visible={canLeft} />
           <div
             ref={scrollRef}
@@ -450,7 +457,7 @@ export default function ScoreboardBar() {
               if (g.date) seenDates.add(g.date);
               const isLive = g.game_state === "LIVE" || g.game_state === "CRIT";
               return (
-                <div key={g.game_id} className="flex items-center shrink-0 gap-2" data-live={isLive ? "true" : undefined}>
+                <div key={g.game_id} className="flex items-center shrink-0 gap-2" data-live={isLive ? "true" : undefined} data-date={g.date ?? undefined}>
                   {isNew && <DateSep date={g.date} />}
                   <Link href={`/game/${g.game_id}`} className="block">
                     <GameCard g={g} />

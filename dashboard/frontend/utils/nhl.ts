@@ -5,6 +5,7 @@ export const NHL_CODE: Record<string, string> = {
   NJ: "NJD",
   SJ: "SJS",
   TB: "TBL",
+  UTH: "UTA",
 };
 
 export const POS_MAP: Record<string, string> = {
@@ -20,6 +21,7 @@ export function fmtPos(pos: string | null | undefined): string {
 }
 
 // TBL _light is the blue logo; _dark is the white one — use dark on our dark UI
+// UTA _dark is the black logo — use light (colored) on our dark UI
 const DARK_VARIANT = new Set(["TBL", "TB"]);
 
 export function logoUrl(abbrev: string): string {
@@ -46,6 +48,23 @@ export const STRENGTH_STYLE: Record<string, string> = {
   EN: "text-white/30   border-white/10",
 };
 
+export const TEAM_FULL_NAMES: Record<string, string> = {
+  ANA: "Anaheim Ducks",       BOS: "Boston Bruins",         BUF: "Buffalo Sabres",
+  CGY: "Calgary Flames",      CAR: "Carolina Hurricanes",   CHI: "Chicago Blackhawks",
+  COL: "Colorado Avalanche",  CBJ: "Columbus Blue Jackets", DAL: "Dallas Stars",
+  DET: "Detroit Red Wings",   EDM: "Edmonton Oilers",       FLA: "Florida Panthers",
+  LAK: "Los Angeles Kings",   MIN: "Minnesota Wild",        MTL: "Montréal Canadiens",
+  NSH: "Nashville Predators", NJD: "New Jersey Devils",     NYI: "New York Islanders",
+  NYR: "New York Rangers",    OTT: "Ottawa Senators",       PHI: "Philadelphia Flyers",
+  PIT: "Pittsburgh Penguins", SEA: "Seattle Kraken",        SJS: "San Jose Sharks",
+  STL: "St. Louis Blues",     TBL: "Tampa Bay Lightning",   TOR: "Toronto Maple Leafs",
+  UTA: "Utah Mammoth",         VAN: "Vancouver Canucks",     VGK: "Vegas Golden Knights",
+  WSH: "Washington Capitals", WPG: "Winnipeg Jets",
+  // aliases
+  LA: "Los Angeles Kings", NJ: "New Jersey Devils", SJ: "San Jose Sharks",
+  TB: "Tampa Bay Lightning", UTH: "Utah Mammoth",
+};
+
 export const TEAM_COLORS: Record<string, string> = {
   ANA: "#F47A38", ARI: "#8C2633", BOS: "#FFB81C", BUF: "#003087",
   CGY: "#C8102E", CAR: "#CC0000", CHI: "#CF0A2C", COL: "#6F263D",
@@ -53,11 +72,11 @@ export const TEAM_COLORS: Record<string, string> = {
   FLA: "#C8102E", LAK: "#A2AAAD", MIN: "#154734", MTL: "#AF1E2D",
   NSH: "#FFB81C", NJD: "#CE1126", NYI: "#00539B", NYR: "#0038A8",
   OTT: "#C52032", PHI: "#F74902", PIT: "#FCB514", SEA: "#99D9D9",
-  SJS: "#006D75", STL: "#002F87", TBL: "#002868", TOR: "#003E7E",
+  SJS: "#006D75", STL: "#002F87", TBL: "#FFFFFF", TOR: "#003E7E",
   VAN: "#00843D", VGK: "#B4975A", WSH: "#C8102E", WPG: "#004C97",
-  UTA: "#6B6B6B", UTH: "#6B6B6B",
+  UTA: "#6CACE4", UTH: "#6CACE4",
   // short-code aliases
-  LA: "#A2AAAD", NJ: "#CE1126", SJ: "#006D75", TB: "#002868",
+  LA: "#A2AAAD", NJ: "#CE1126", SJ: "#006D75", TB: "#FFFFFF",
 };
 
 export const TEAM_SECONDARY: Record<string, string> = {
@@ -67,9 +86,9 @@ export const TEAM_SECONDARY: Record<string, string> = {
   FLA: "#041E42", LAK: "#111111", MIN: "#DDAF38", MTL: "#192168",
   NSH: "#041E42", NJD: "#000000", NYI: "#F47D20", NYR: "#CE1126",
   OTT: "#C2912C", PHI: "#000000", PIT: "#000000", SEA: "#001628",
-  SJS: "#EA7200", STL: "#FCB514", TBL: "#FFFFFF", TOR: "#FFFFFF",
+  SJS: "#EA7200", STL: "#FCB514", TBL: "#002868", TOR: "#FFFFFF",
   VAN: "#001F5B", VGK: "#333F42", WSH: "#041E42", WPG: "#AC162C",
-  UTA: "#6B6B6B", UTH: "#6B6B6B",
+  UTA: "#010101", UTH: "#010101",
   // short-code aliases
-  LA: "#111111", NJ: "#000000", SJ: "#EA7200", TB: "#FFFFFF",
+  LA: "#111111", NJ: "#000000", SJ: "#EA7200", TB: "#002868",
 };

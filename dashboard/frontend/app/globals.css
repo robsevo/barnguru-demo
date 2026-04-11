@@ -1,17 +1,23 @@
 @import "tailwindcss";
 
 :root {
+  /* Brand / accent color — overridden by ThemeInjector when a team theme is active */
+  --brand-hex:       #C9A84C;
+  --brand-r:         201;
+  --brand-g:         168;
+  --brand-b:         76;
+
   --bg-base:         #090a0c;
   --bg-card:         rgba(255,255,255,0.05);
   --bg-card-header:  rgba(255,255,255,0.06);
-  --border-dim:      rgba(201,168,76,0.12);
-  --border-default:  rgba(201,168,76,0.22);
-  --border-bright:   rgba(201,168,76,0.38);
+  --border-dim:      rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.12);
+  --border-default:  rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.22);
+  --border-bright:   rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.38);
   --text-primary:    #f1f5f9;
   --text-secondary:  #94a3b8;
   --text-muted:      #475569;
-  --green:           #C9A84C;
-  --gold:            #C9A84C;
+  --green:           var(--brand-hex);
+  --gold:            var(--brand-hex);
   --amber:           #fbbf24;
   --red:             #f87171;
   --blue:            #38bdf8;
@@ -45,33 +51,33 @@ body {
 /* Standard glass card */
 .glass {
   background: linear-gradient(180deg, rgba(20,16,10,0.80) 0%, rgba(7,6,4,0.92) 100%);
-  border: 1px solid rgba(201,168,76,0.20);
+  border: 1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.20);
   border-radius: 0.75rem;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  box-shadow: 0 4px 28px rgba(0,0,0,0.70), inset 0 1px 0 rgba(201,168,76,0.08);
+  box-shadow: 0 4px 28px rgba(0,0,0,0.70), inset 0 1px 0 rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.08);
 }
 
 /* Smaller glass pill / inset */
 .glass-sm {
   background: linear-gradient(180deg, rgba(16,13,8,0.70) 0%, rgba(6,5,3,0.85) 100%);
-  border: 1px solid rgba(201,168,76,0.14);
+  border: 1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.14);
   border-radius: 0.5rem;
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
-  box-shadow: 0 2px 14px rgba(0,0,0,0.60), inset 0 1px 0 rgba(201,168,76,0.06);
+  box-shadow: 0 2px 14px rgba(0,0,0,0.60), inset 0 1px 0 rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.06);
 }
 
 /* Card header divider */
 .glass-header {
-  background: rgba(201,168,76,0.03);
-  border-bottom: 1px solid rgba(201,168,76,0.10);
+  background: rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.03);
+  border-bottom: 1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.10);
 }
 
 /* Inset well (inputs, code blocks, inner boxes) */
 .glass-inset {
   background: rgba(0,0,0,0.35);
-  border: 1px solid rgba(201,168,76,0.10);
+  border: 1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.10);
   border-radius: 0.5rem;
   box-shadow: inset 0 2px 4px rgba(0,0,0,0.40);
 }
@@ -103,4 +109,87 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   filter: invert(1);
   opacity: 0.6;
   cursor: pointer;
+}
+
+/* ─── Team theme overrides ───────────────────────────────────────────────────
+   When a team theme is active ([data-team-theme] is set on <html>),
+   replace all gold (#C9A84C) UI chrome with the team brand color.
+   Tailwind v4 compiles arbitrary hex classes to hardcoded values, so we
+   override them explicitly here. Game-specific team colors are untouched.
+─────────────────────────────────────────────────────────────────────────── */
+
+/* Border colors */
+[data-team-theme] .border-\[\#C9A84C\] { border-color: var(--brand-hex) !important; }
+[data-team-theme] .border-\[\#C9A84C\]\/\[0\.14\],
+[data-team-theme] .border-\[\#C9A84C\]\/14 { border-color: color-mix(in oklab, var(--brand-hex) 14%, transparent) !important; }
+[data-team-theme] .border-\[\#C9A84C\]\/\[0\.15\],
+[data-team-theme] .border-\[\#C9A84C\]\/15 { border-color: color-mix(in oklab, var(--brand-hex) 15%, transparent) !important; }
+[data-team-theme] .border-\[\#C9A84C\]\/\[0\.18\],
+[data-team-theme] .border-\[\#C9A84C\]\/18 { border-color: color-mix(in oklab, var(--brand-hex) 18%, transparent) !important; }
+[data-team-theme] .border-\[\#C9A84C\]\/\[0\.20\],
+[data-team-theme] .border-\[\#C9A84C\]\/20 { border-color: color-mix(in oklab, var(--brand-hex) 20%, transparent) !important; }
+[data-team-theme] .border-\[\#C9A84C\]\/\[0\.25\],
+[data-team-theme] .border-\[\#C9A84C\]\/25 { border-color: color-mix(in oklab, var(--brand-hex) 25%, transparent) !important; }
+[data-team-theme] .border-\[\#C9A84C\]\/\[0\.30\],
+[data-team-theme] .border-\[\#C9A84C\]\/30 { border-color: color-mix(in oklab, var(--brand-hex) 30%, transparent) !important; }
+[data-team-theme] .border-\[\#C9A84C\]\/\[0\.35\],
+[data-team-theme] .border-\[\#C9A84C\]\/35 { border-color: color-mix(in oklab, var(--brand-hex) 35%, transparent) !important; }
+[data-team-theme] .border-\[\#C9A84C\]\/\[0\.40\],
+[data-team-theme] .border-\[\#C9A84C\]\/40 { border-color: color-mix(in oklab, var(--brand-hex) 40%, transparent) !important; }
+[data-team-theme] .border-\[\#C9A84C\]\/\[0\.50\],
+[data-team-theme] .border-\[\#C9A84C\]\/50 { border-color: color-mix(in oklab, var(--brand-hex) 50%, transparent) !important; }
+
+/* Text colors */
+[data-team-theme] .text-\[\#C9A84C\] { color: var(--brand-hex) !important; }
+[data-team-theme] .text-\[\#C9A84C\]\/\[0\.15\],
+[data-team-theme] .text-\[\#C9A84C\]\/15 { color: color-mix(in oklab, var(--brand-hex) 15%, transparent) !important; }
+[data-team-theme] .text-\[\#C9A84C\]\/\[0\.20\],
+[data-team-theme] .text-\[\#C9A84C\]\/20 { color: color-mix(in oklab, var(--brand-hex) 20%, transparent) !important; }
+[data-team-theme] .text-\[\#C9A84C\]\/\[0\.30\],
+[data-team-theme] .text-\[\#C9A84C\]\/30 { color: color-mix(in oklab, var(--brand-hex) 30%, transparent) !important; }
+[data-team-theme] .text-\[\#C9A84C\]\/\[0\.40\],
+[data-team-theme] .text-\[\#C9A84C\]\/40 { color: color-mix(in oklab, var(--brand-hex) 40%, transparent) !important; }
+[data-team-theme] .text-\[\#C9A84C\]\/\[0\.50\],
+[data-team-theme] .text-\[\#C9A84C\]\/50 { color: color-mix(in oklab, var(--brand-hex) 50%, transparent) !important; }
+[data-team-theme] .text-\[\#C9A84C\]\/\[0\.60\],
+[data-team-theme] .text-\[\#C9A84C\]\/60 { color: color-mix(in oklab, var(--brand-hex) 60%, transparent) !important; }
+[data-team-theme] .text-\[\#C9A84C\]\/\[0\.70\],
+[data-team-theme] .text-\[\#C9A84C\]\/70 { color: color-mix(in oklab, var(--brand-hex) 70%, transparent) !important; }
+
+/* Background colors */
+[data-team-theme] .bg-\[\#C9A84C\] { background-color: var(--brand-hex) !important; }
+[data-team-theme] .bg-\[\#C9A84C\]\/\[0\.03\],
+[data-team-theme] .bg-\[\#C9A84C\]\/3  { background-color: color-mix(in oklab, var(--brand-hex) 3%, transparent) !important; }
+[data-team-theme] .bg-\[\#C9A84C\]\/\[0\.04\],
+[data-team-theme] .bg-\[\#C9A84C\]\/4  { background-color: color-mix(in oklab, var(--brand-hex) 4%, transparent) !important; }
+[data-team-theme] .bg-\[\#C9A84C\]\/\[0\.05\],
+[data-team-theme] .bg-\[\#C9A84C\]\/5  { background-color: color-mix(in oklab, var(--brand-hex) 5%, transparent) !important; }
+[data-team-theme] .bg-\[\#C9A84C\]\/\[0\.06\],
+[data-team-theme] .bg-\[\#C9A84C\]\/6  { background-color: color-mix(in oklab, var(--brand-hex) 6%, transparent) !important; }
+[data-team-theme] .bg-\[\#C9A84C\]\/\[0\.08\],
+[data-team-theme] .bg-\[\#C9A84C\]\/8  { background-color: color-mix(in oklab, var(--brand-hex) 8%, transparent) !important; }
+[data-team-theme] .bg-\[\#C9A84C\]\/\[0\.10\],
+[data-team-theme] .bg-\[\#C9A84C\]\/10 { background-color: color-mix(in oklab, var(--brand-hex) 10%, transparent) !important; }
+[data-team-theme] .bg-\[\#C9A84C\]\/\[0\.12\],
+[data-team-theme] .bg-\[\#C9A84C\]\/12 { background-color: color-mix(in oklab, var(--brand-hex) 12%, transparent) !important; }
+[data-team-theme] .bg-\[\#C9A84C\]\/\[0\.15\],
+[data-team-theme] .bg-\[\#C9A84C\]\/15 { background-color: color-mix(in oklab, var(--brand-hex) 15%, transparent) !important; }
+[data-team-theme] .bg-\[\#C9A84C\]\/\[0\.20\],
+[data-team-theme] .bg-\[\#C9A84C\]\/20 { background-color: color-mix(in oklab, var(--brand-hex) 20%, transparent) !important; }
+
+/* Gradient from/via/to */
+[data-team-theme] .from-\[\#C9A84C\] { --tw-gradient-from: var(--brand-hex) !important; }
+[data-team-theme] .to-\[\#C9A84C\]   { --tw-gradient-to:   var(--brand-hex) !important; }
+[data-team-theme] .via-\[\#C9A84C\]  { --tw-gradient-via:  var(--brand-hex) !important; }
+
+/* Hover variants (for buttons) */
+[data-team-theme] .hover\:border-\[\#C9A84C\]\/35:hover { border-color: color-mix(in oklab, var(--brand-hex) 35%, transparent) !important; }
+[data-team-theme] .hover\:border-\[\#C9A84C\]\/40:hover { border-color: color-mix(in oklab, var(--brand-hex) 40%, transparent) !important; }
+[data-team-theme] .hover\:bg-\[\#C9A84C\]\/10:hover     { background-color: color-mix(in oklab, var(--brand-hex) 10%, transparent) !important; }
+[data-team-theme] .hover\:bg-\[\#C9A84C\]\/\[0\.08\]:hover { background-color: color-mix(in oklab, var(--brand-hex) 8%, transparent) !important; }
+[data-team-theme] .hover\:text-\[\#C9A84C\]\/80:hover   { color: color-mix(in oklab, var(--brand-hex) 80%, transparent) !important; }
+
+/* Shadow overrides for header border glow */
+[data-team-theme] .shadow-\[0_0_8px_rgba\(201\,168\,76\,0\.15\)\] {
+  box-shadow: 0 0 8px rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.15) !important;
 }
