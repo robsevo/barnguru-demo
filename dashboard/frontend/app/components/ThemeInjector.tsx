@@ -3,7 +3,8 @@
 import { useEffect } from "react";
 import { useTheme } from "@/utils/themeContext";
 
-function hexToRgb(hex: string): [number, number, number] {
+function hexToRgb(hex: string | undefined | null): [number, number, number] {
+  if (!hex) return [9, 10, 12];
   const clean = hex.replace("#", "");
   const r = parseInt(clean.slice(0, 2), 16) || 0;
   const g = parseInt(clean.slice(2, 4), 16) || 0;
@@ -46,7 +47,8 @@ export default function ThemeInjector() {
     }
 
     const [pr, pg, pb] = hexToRgb(theme.primaryColor);
-    const [sr, sg, sb] = hexToRgb(theme.secondaryColor);
+    // secondaryColor may be absent in themes saved before this field was added
+    const [sr, sg, sb] = hexToRgb(theme.secondaryColor ?? theme.primaryColor);
 
     // Pick the darker of primary/secondary as the tint base (for backgrounds)
     const primaryRgb:   [number, number, number] = [pr, pg, pb];
