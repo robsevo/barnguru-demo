@@ -377,7 +377,7 @@ function FormBadge({ flag, delta }: { flag?: string | null; delta?: number | nul
         border: `1px solid ${isHot ? "rgba(74,222,128,0.3)" : "rgba(248,113,113,0.3)"}`,
       }}
     >
-      {isHot ? "🔥" : "🧊"} {isHot ? "Running Hot" : "Running Cold"}
+      {isHot ? "Running Hot" : "Running Cold"}
     </span>
   );
 }
@@ -535,7 +535,7 @@ function PlayerDetailCard({
             )}
             {warRank && warRank <= 20 && (
               <span className="text-[10px] font-semibold text-[#a78bfa] bg-[#a78bfa]/10 border border-[#a78bfa]/25 rounded-full px-2.5 py-1">
-                🏆 #{warRank} WAR in NHL
+                #{warRank} WAR in NHL
               </span>
             )}
           </div>
@@ -557,7 +557,7 @@ function PlayerDetailCard({
             ? "text-[#4ade80]/80 bg-[#4ade80]/[0.04]"
             : "text-[#f87171]/80 bg-[#f87171]/[0.04]"}`}
         >
-          {(formFlag === "hot" || formFlag === "rising" || (ewmaAbove ?? 0) > 0) ? "🔥 " : "🧊 "}
+          
           {whyHot}
         </div>
       )}
@@ -834,40 +834,69 @@ function InfoTip({ tip }: { tip: string }) {
 // ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
-// Cortex info pill
+// Cortex about pill + DNA strand
 // ---------------------------------------------------------------------------
+
+function CortexAbout() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mb-4">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className={`mx-auto flex items-center gap-1.5 px-4 py-1.5 rounded-lg border transition-all duration-200 ${
+          open
+            ? "bg-[#a78bfa]/12 border-[#a78bfa]/35 shadow-[0_0_12px_rgba(167,139,250,0.15)]"
+            : "bg-[#a78bfa]/[0.05] border-[#a78bfa]/15 hover:bg-[#a78bfa]/10 hover:border-[#a78bfa]/30"
+        }`}
+      >
+        <span className="text-[8px] font-black uppercase tracking-[0.24em] bg-gradient-to-r from-white via-[#c4b5fd] to-[#a78bfa] bg-clip-text text-transparent">
+          What is Cortex?
+        </span>
+        <span className={`text-[#a78bfa]/50 text-[7px] transition-transform duration-200 ${open ? "rotate-180" : ""}`}>▼</span>
+      </button>
+
+      <div className={`overflow-hidden transition-all duration-300 ease-in-out ${open ? "max-h-64 opacity-100 mt-3" : "max-h-0 opacity-0 mt-0"}`}>
+        <div className="mx-auto max-w-lg rounded-xl border border-[#a78bfa]/15 bg-[#a78bfa]/[0.04] px-4 py-3">
+          <p className="text-[11px] text-white/50 leading-relaxed">
+            Every player has a living neural network — built from xG models, RAPM, WAR, behavioral
+            patterns, and real-time form tracking. Watch a game and the AI watches with you, feeding
+            observations directly into the model. As each phase and feature is completed by the dev,
+            new layers of intelligence are added. The deeper the system gets, the sharper the
+            simulations become — and the sharper the edge over the oddsmakers.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function DNAStrand() {
   return (
-    <svg width="22" height="46" viewBox="0 0 22 46" fill="none" aria-hidden="true" className="shrink-0 opacity-90">
+    <svg width="26" height="32" viewBox="0 0 26 32" fill="none" aria-hidden="true" className="shrink-0">
       {/* Strand A */}
-      <path d="M18 0 C6 3 4 7 4 11.5 C4 16 18 19 18 23 C18 27 4 30 4 34.5 C4 39 18 42 18 46"
-        stroke="#a78bfa" strokeWidth="2.2" strokeLinecap="round" fill="none"/>
+      <path d="M21 0 C5 3 3 7 3 10 C3 13 5 17 21 20 C21 20 5 23 3 26 C3 29 21 31 21 32"
+        stroke="#a78bfa" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
       {/* Strand B */}
-      <path d="M4 0 C16 3 18 7 18 11.5 C18 16 4 19 4 23 C4 27 18 30 18 34.5 C18 39 4 42 4 46"
-        stroke="#7c3aed" strokeWidth="2.2" strokeLinecap="round" fill="none"/>
-      {/* Base-pair rungs at turning points */}
-      <line x1="4" y1="0" x2="18" y2="0" stroke="rgba(167,139,250,0.28)" strokeWidth="1.5" strokeLinecap="round"/>
-      <line x1="4" y1="11.5" x2="18" y2="11.5" stroke="rgba(167,139,250,0.45)" strokeWidth="1.5" strokeLinecap="round"/>
-      <line x1="4" y1="23" x2="18" y2="23" stroke="rgba(167,139,250,0.45)" strokeWidth="1.5" strokeLinecap="round"/>
-      <line x1="4" y1="34.5" x2="18" y2="34.5" stroke="rgba(167,139,250,0.45)" strokeWidth="1.5" strokeLinecap="round"/>
-      <line x1="4" y1="46" x2="18" y2="46" stroke="rgba(167,139,250,0.28)" strokeWidth="1.5" strokeLinecap="round"/>
-      {/* Mid-cross rungs */}
-      <line x1="6.5" y1="5.75" x2="15.5" y2="5.75" stroke="rgba(167,139,250,0.20)" strokeWidth="1" strokeLinecap="round"/>
-      <line x1="6.5" y1="17.25" x2="15.5" y2="17.25" stroke="rgba(167,139,250,0.20)" strokeWidth="1" strokeLinecap="round"/>
-      <line x1="6.5" y1="28.75" x2="15.5" y2="28.75" stroke="rgba(167,139,250,0.20)" strokeWidth="1" strokeLinecap="round"/>
-      <line x1="6.5" y1="40.25" x2="15.5" y2="40.25" stroke="rgba(167,139,250,0.20)" strokeWidth="1" strokeLinecap="round"/>
-      {/* Node dots at turning points */}
-      <circle cx="18" cy="0" r="2.5" fill="#a78bfa" opacity="0.85"/>
-      <circle cx="4" cy="0" r="2.5" fill="#7c3aed" opacity="0.85"/>
-      <circle cx="4" cy="11.5" r="2.5" fill="#a78bfa" opacity="0.9"/>
-      <circle cx="18" cy="11.5" r="2.5" fill="#7c3aed" opacity="0.9"/>
-      <circle cx="18" cy="23" r="2.5" fill="#a78bfa" opacity="0.9"/>
-      <circle cx="4" cy="23" r="2.5" fill="#7c3aed" opacity="0.9"/>
-      <circle cx="4" cy="34.5" r="2.5" fill="#a78bfa" opacity="0.9"/>
-      <circle cx="18" cy="34.5" r="2.5" fill="#7c3aed" opacity="0.9"/>
-      <circle cx="18" cy="46" r="2.5" fill="#a78bfa" opacity="0.85"/>
-      <circle cx="4" cy="46" r="2.5" fill="#7c3aed" opacity="0.85"/>
+      <path d="M5 0 C21 3 23 7 23 10 C23 13 21 17 5 20 C5 20 21 23 23 26 C23 29 5 31 5 32"
+        stroke="#7c3aed" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
+      {/* Rungs at turning points */}
+      <line x1="3" y1="0" x2="23" y2="0" stroke="rgba(167,139,250,0.30)" strokeWidth="2" strokeLinecap="round"/>
+      <line x1="3" y1="10" x2="23" y2="10" stroke="rgba(167,139,250,0.55)" strokeWidth="2" strokeLinecap="round"/>
+      <line x1="3" y1="20" x2="23" y2="20" stroke="rgba(167,139,250,0.55)" strokeWidth="2" strokeLinecap="round"/>
+      <line x1="3" y1="32" x2="23" y2="32" stroke="rgba(167,139,250,0.30)" strokeWidth="2" strokeLinecap="round"/>
+      {/* Mid rungs */}
+      <line x1="7" y1="5" x2="19" y2="5" stroke="rgba(167,139,250,0.22)" strokeWidth="1.5" strokeLinecap="round"/>
+      <line x1="7" y1="15" x2="19" y2="15" stroke="rgba(167,139,250,0.22)" strokeWidth="1.5" strokeLinecap="round"/>
+      <line x1="7" y1="26" x2="19" y2="26" stroke="rgba(167,139,250,0.22)" strokeWidth="1.5" strokeLinecap="round"/>
+      {/* Node dots */}
+      <circle cx="21" cy="0" r="3" fill="#a78bfa" opacity="0.9"/>
+      <circle cx="5" cy="0" r="3" fill="#7c3aed" opacity="0.9"/>
+      <circle cx="3" cy="10" r="3" fill="#a78bfa" opacity="0.95"/>
+      <circle cx="23" cy="10" r="3" fill="#7c3aed" opacity="0.95"/>
+      <circle cx="21" cy="20" r="3" fill="#a78bfa" opacity="0.95"/>
+      <circle cx="5" cy="20" r="3" fill="#7c3aed" opacity="0.95"/>
+      <circle cx="5" cy="32" r="3" fill="#a78bfa" opacity="0.9"/>
+      <circle cx="21" cy="32" r="3" fill="#7c3aed" opacity="0.9"/>
     </svg>
   );
 }
@@ -1062,6 +1091,9 @@ export default function PlayersPage() {
         </div>
       </div>
 
+      {/* ── About pill ── */}
+      <CortexAbout />
+
       {/* Search bar */}
       <div className="relative mb-5">
         <input
@@ -1144,13 +1176,13 @@ export default function PlayersPage() {
       <div className="flex flex-col gap-4">
 
         {/* Hot Streaks */}
-        <Section title="Hot Streak" icon="🔥" count={rising?.length}>
+        <Section title="Hot Streak" count={rising?.length}>
           {rising === null ? <SectionLoading /> :
            rising.length === 0 ? <SectionEmpty msg="Nothing to report yet." /> : (
            <div className="space-y-1">
              {rising.map((p, i) => (
                <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
-                 {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                 {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                  <div className="flex-1 min-w-0">
                    <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                    {p.delta != null && <p className="text-[9px] text-white/35 mt-0.5">+{p.delta.toFixed(1)} above avg{p.n_games ? ` · ${p.n_games} GP` : ""}</p>}
@@ -1163,13 +1195,13 @@ export default function PlayersPage() {
         </Section>
 
         {/* Cold Streaks */}
-        <Section title="Cold Streak" icon="🧊" count={falling?.length}>
+        <Section title="Cold Streak" count={falling?.length}>
           {falling === null ? <SectionLoading /> :
            falling.length === 0 ? <SectionEmpty msg="Nothing to report yet." /> : (
            <div className="space-y-1">
              {falling.map((p, i) => (
                <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
-                 {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                 {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                  <div className="flex-1 min-w-0">
                    <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                    {p.delta != null && <p className="text-[9px] text-white/35 mt-0.5">{p.delta.toFixed(1)} vs avg{p.n_games ? ` · ${p.n_games} GP` : ""}</p>}
@@ -1182,7 +1214,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* Top Performers */}
-        <Section title="WAR Leaderboard" icon="🏆" count={warList?.length}>
+        <Section title="WAR Leaderboard" count={warList?.length}>
           {warList === null ? <SectionLoading /> :
            warList.length === 0 ? <SectionEmpty msg="Run compute-war to populate." /> : (
            <div className="space-y-1">
@@ -1190,7 +1222,7 @@ export default function PlayersPage() {
                const warColor = p.war != null && p.war >= 2 ? "#4ade80" : p.war != null && p.war >= 0 ? "#fbbf24" : "#f87171";
                return (
                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
-                   {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                   {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                    <div className="flex-1 min-w-0">
                      <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                      <p className="text-[9px] text-white/35 mt-0.5">Ranked #{p.rank} in NHL</p>
@@ -1204,7 +1236,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* Injuries */}
-        <Section title="Injured / DTD" icon="🩹" count={injuries?.length}>
+        <Section title="Injured / DTD" count={injuries?.length}>
           {injuries === null ? <SectionLoading /> :
            injuries.length === 0 ? <SectionEmpty msg="No injury data synced yet. Run sync." /> : (
            <div className="space-y-1">
@@ -1212,7 +1244,7 @@ export default function PlayersPage() {
                const statusColor = p.status === "Out" ? "#f87171" : p.status === "DTD" ? "#fbbf24" : p.status === "Questionable" ? "#fb923c" : "#94a3b8";
                return (
                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
-                   {p.team_code && <TeamLogo team={p.team_code} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team_code}`)} />}
+                   {p.team_code && <TeamLogo team={p.team_code} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team_code}`)} />}
                    <div className="flex-1 min-w-0">
                      <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                      <p className="text-[9px] text-white/35 mt-0.5">{fmtPos(p.position)}{p.return_date_estimate ? ` · ret. ${p.return_date_estimate}` : ""}</p>
@@ -1226,7 +1258,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* Scoring Leaders */}
-        <Section title="Scoring Leaders" icon="🎯" count={scoringCategories?.[scoringSort]?.length}>
+        <Section title="Scoring Leaders" count={scoringCategories?.[scoringSort]?.length}>
           {scoringCategories === null ? <SectionLoading /> :
            (scoringCategories[scoringSort]?.length ?? 0) === 0 ? <SectionEmpty msg="NHL stats unavailable." /> : (
            <>
@@ -1257,7 +1289,7 @@ export default function PlayersPage() {
                  return (
                    <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.name)}>
                      <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                     {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                     {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                      <div className="flex-1 min-w-0">
                        <p className="text-[11px] font-semibold text-white/80 truncate">{p.name}</p>
                        <p className="text-[9px] text-white/35 mt-0.5">{fmtPos(p.position)} · {p.team}</p>
@@ -1272,13 +1304,13 @@ export default function PlayersPage() {
         </Section>
 
         {/* Quality of Teammates */}
-        <Section title="Quality of Teammates" icon="🔗" count={qotList?.length}>
+        <Section title="Quality of Teammates" count={qotList?.length}>
           {qotList === null ? <SectionLoading /> :
            qotList.length === 0 ? <SectionEmpty msg="Run train-matchup to populate." /> : (
            <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
              {qotList.map((p, i) => (
                <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
-                 {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                 {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                  <div className="flex-1 min-w-0">
                    <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                    <p className="text-[9px] text-white/35 mt-0.5">
@@ -1295,24 +1327,24 @@ export default function PlayersPage() {
         </Section>
 
         {/* Recent Moves */}
-        <Section title="Recent Moves" icon="📋">
+        <Section title="Recent Moves">
           {txns === null ? <SectionLoading /> :
            txns.length === 0 ? <SectionEmpty msg="No transactions in the last 7 days. Run sync." /> : (
            <div className="space-y-1 max-h-72 overflow-y-auto pr-1">
              {txns.map((t, i) => {
                const TYPE_META: Record<string, { label: string; emoji: string; color: string }> = {
-                 trade:          { label: "TRADED",       emoji: "🔀", color: "#a78bfa" },
-                 signing:        { label: "SIGNING",      emoji: "✍️", color: "#4ade80" },
-                 call_up:        { label: "CALL UP",      emoji: "⬆️", color: "#4ade80" },
-                 activated:      { label: "ACTIVATED",    emoji: "✅", color: "#4ade80" },
-                 send_down:      { label: "SEND DOWN",    emoji: "⬇️", color: "#f87171" },
-                 ltir:           { label: "LTIR",         emoji: "🏥", color: "#fb923c" },
-                 waiver_claim:   { label: "CLAIMED",      emoji: "🎣", color: "#a78bfa" },
-                 waiver_release: { label: "WAIVED",       emoji: "👋", color: "#fbbf24" },
-                 front_office:   { label: "FRONT OFFICE", emoji: "🏢", color: "#fbbf24" },
-                 other:          { label: "MOVE",         emoji: "📋", color: "#94a3b8" },
+                 trade:          { label: "TRADED",       emoji: "",    color: "#a78bfa" },
+                 signing:        { label: "SIGNING",      emoji: "",    color: "#4ade80" },
+                 call_up:        { label: "CALL UP",      emoji: "",    color: "#4ade80" },
+                 activated:      { label: "ACTIVATED",    emoji: "",    color: "#4ade80" },
+                 send_down:      { label: "SEND DOWN",    emoji: "",    color: "#f87171" },
+                 ltir:           { label: "LTIR",         emoji: "",    color: "#fb923c" },
+                 waiver_claim:   { label: "CLAIMED",      emoji: "",    color: "#a78bfa" },
+                 waiver_release: { label: "WAIVED",       emoji: "",    color: "#fbbf24" },
+                 front_office:   { label: "FRONT OFFICE", emoji: "",    color: "#fbbf24" },
+                 other:          { label: "MOVE",         emoji: "",    color: "#94a3b8" },
                };
-               const meta = TYPE_META[t.event_type] ?? { label: t.event_type.replace("_", " ").toUpperCase(), emoji: "📋", color: "#94a3b8" };
+               const meta = TYPE_META[t.event_type] ?? { label: t.event_type.replace("_", " ").toUpperCase(), emoji: "", color: "#94a3b8" };
                const desc = t.description.length > 50 ? t.description.slice(0, 48) + "…" : t.description;
                return (
                  <div
@@ -1320,7 +1352,7 @@ export default function PlayersPage() {
                    className="flex items-center gap-3 px-3 py-2 rounded-xl border"
                    style={{ backgroundColor: `${meta.color}08`, borderColor: `${meta.color}20` }}
                  >
-                   {t.team && <TeamLogo team={t.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${t.team}`)} />}
+                   {t.team && <TeamLogo team={t.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${t.team}`)} />}
                    <p className="flex-1 text-[11px] text-white/70 truncate min-w-0">{desc}</p>
                    <span
                      className="text-[8px] font-semibold shrink-0 px-1.5 py-0.5 rounded border whitespace-nowrap"
@@ -1336,7 +1368,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* Team Disruption */}
-        <Section title="Team Disruption" icon="⚠️">
+        <Section title="Team Disruption">
           {rdi === null ? <SectionLoading /> :
            rdi.filter(t => (t.n_moves_30d ?? 0) > 0).length === 0 ? (
              <SectionEmpty msg="No significant roster movement in the last 30 days." />
@@ -1348,7 +1380,7 @@ export default function PlayersPage() {
                const color = high ? "#f87171" : med ? "#fbbf24" : "#94a3b8";
                return (
                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06]">
-                   {t.team && <TeamLogo team={t.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${t.team}`)} />}
+                   {t.team && <TeamLogo team={t.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${t.team}`)} />}
                    <div className="flex-1 min-w-0">
                      <p className="text-[11px] font-semibold text-white/80">{t.team}</p>
                      <p className="text-[9px] text-white/35 mt-0.5">
@@ -1358,7 +1390,7 @@ export default function PlayersPage() {
                    </div>
                    {med && (
                      <span className="text-[8px] font-semibold uppercase shrink-0 px-1.5 py-0.5 rounded border" style={{ color, borderColor: `${color}40`, backgroundColor: `${color}14` }}>
-                       {high ? "🔴 HIGH" : "🟡 WATCH"}
+                       {high ? "HIGH" : "WATCH"}
                      </span>
                    )}
                  </div>
@@ -1373,17 +1405,16 @@ export default function PlayersPage() {
         {/* ─────────────────────────────────────────────────────────────────── */}
 
         {/* EDGE Skating Leaderboard */}
-        <Section title="EDGE Skating" icon="⚡" count={edgeSkating?.length}>
+        <Section title="EDGE Skating" count={edgeSkating?.length}>
           {/* Tab bar */}
           <div className="flex gap-1.5 mb-2 flex-wrap">
             {([
               { k: "max_speed_kmh",        label: "Top Speed",      unit: "km/h" },
-              { k: "avg_speed_kmh",         label: "Avg Speed",      unit: "km/h" },
               { k: "distance_per_game_km",  label: "Dist/Game",      unit: "km"   },
             ] as const).map(({ k, label }) => (
               <button key={k} onClick={() => switchEdgeSkateMetric(k)}
                 className="px-2.5 py-1 rounded-lg text-[10px] font-semibold uppercase tracking-wide border transition-all duration-150"
-                style={edgeSkateMetric === k ? { color:"#4ade80", borderColor:"rgba(74,222,128,0.35)", backgroundColor:"rgba(74,222,128,0.10)" }
+                style={edgeSkateMetric === k ? { color:"#a78bfa", borderColor:"rgba(167,139,250,0.40)", backgroundColor:"rgba(167,139,250,0.10)" }
                   : { color:"rgba(255,255,255,0.30)", borderColor:"rgba(255,255,255,0.08)", backgroundColor:"transparent" }}
               >{label}</button>
             ))}
@@ -1396,7 +1427,7 @@ export default function PlayersPage() {
                 return (
                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                    {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                    {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                       <p className="text-[9px] text-white/35 mt-0.5">{p.games_played != null ? `${p.games_played} GP` : ""}</p>
@@ -1410,16 +1441,14 @@ export default function PlayersPage() {
         </Section>
 
         {/* EDGE Shot Speed Leaderboard */}
-        <Section title="EDGE Shot Speed" icon="🏒" count={edgeShotSpeed?.length}>
+        <Section title="EDGE Shot Speed" count={edgeShotSpeed?.length}>
           <div className="flex gap-1.5 mb-2 flex-wrap">
             {([
-              { k: "max_shot_speed_mph",  label: "Max Speed"  },
-              { k: "avg_shot_speed_mph",  label: "Avg Speed"  },
-              { k: "hard_shot_count",     label: "Hard Shots (≥70mph)" },
+              { k: "max_shot_speed_mph",  label: "Max Shot Speed" },
             ] as const).map(({ k, label }) => (
               <button key={k} onClick={() => switchEdgeShotMetric(k)}
                 className="px-2.5 py-1 rounded-lg text-[10px] font-semibold uppercase tracking-wide border transition-all duration-150"
-                style={edgeShotMetric === k ? { color:"#fb923c", borderColor:"rgba(251,146,60,0.35)", backgroundColor:"rgba(251,146,60,0.10)" }
+                style={edgeShotMetric === k ? { color:"#a78bfa", borderColor:"rgba(167,139,250,0.40)", backgroundColor:"rgba(167,139,250,0.10)" }
                   : { color:"rgba(255,255,255,0.30)", borderColor:"rgba(255,255,255,0.08)", backgroundColor:"transparent" }}
               >{label}</button>
             ))}
@@ -1432,7 +1461,7 @@ export default function PlayersPage() {
                 return (
                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                    {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                    {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                       <p className="text-[9px] text-white/35 mt-0.5">{p.games_played != null ? `${p.games_played} GP` : ""}</p>
@@ -1446,7 +1475,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* Goalie Leaderboard */}
-        <Section title="Goalie Leaderboard" icon="🥅" count={goalieList?.length}>
+        <Section title="Goalie Leaderboard" count={goalieList?.length}>
           <div className="flex gap-1.5 mb-2 flex-wrap">
             {([
               { k: "gsax",     label: "GSAx",        tip: "Goals Saved Above Expected" },
@@ -1472,7 +1501,7 @@ export default function PlayersPage() {
                 return (
                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                    {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                    {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                       <p className="text-[9px] text-white/35 mt-0.5">
@@ -1489,7 +1518,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* Clutch Index Leaderboard */}
-        <Section title="Clutch Index" icon="🎯" count={clutchList?.length}>
+        <Section title="Clutch Index" count={clutchList?.length}>
           <InfoTip tip="Win Probability Added (WPA) above expectation. Clutch Index = actual WPA/60 minus expected WPA/60 given the opportunities faced. Positive = outperforms in high-leverage moments. Bayesian-shrunk (small samples near zero). Source: GRTZKY model 2.29." />
           {clutchList === null ? <SectionLoading /> : clutchList.length === 0 ? <SectionEmpty msg="Run train-clutch to populate." /> : (
             <div className="space-y-1 max-h-72 overflow-y-auto pr-1 mt-2">
@@ -1498,7 +1527,7 @@ export default function PlayersPage() {
                 return (
                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                    {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                    {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                       {p.wpa_per60 != null && <p className="text-[9px] text-white/35 mt-0.5">WPA/60: {p.wpa_per60.toFixed(4)}</p>}
@@ -1512,11 +1541,11 @@ export default function PlayersPage() {
         </Section>
 
         {/* PP & PK xGF/60 Leaderboard */}
-        <Section title="Special Teams xGF/60" icon="⚔️">
+        <Section title="Special Teams xGF/60">
           <div className="flex gap-1.5 mb-2">
             {(["PP", "PK"] as const).map(side => (
               <span key={side} className="px-2.5 py-1 rounded-lg text-[10px] font-semibold uppercase tracking-wide border"
-                style={{ color:"#fbbf24", borderColor:"rgba(251,191,36,0.35)", backgroundColor:"rgba(251,191,36,0.08)" }}>{side}</span>
+                style={{ color:"#a78bfa", borderColor:"rgba(167,139,250,0.30)", backgroundColor:"rgba(167,139,250,0.07)" }}>{side}</span>
             ))}
           </div>
           <InfoTip tip="Per-player PP and PK xGF/60 isolated from team context. PP xGF/60 = expected goals generated per 60 min on the power play; PK xGF/60 = expected goals generated while short-handed. Min 50 PP/PK minutes. Source: GRTZKY model 2.7." />
@@ -1529,7 +1558,7 @@ export default function PlayersPage() {
                   {ppList.map((p, i) => (
                     <div key={i} className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] transition-all cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                       <span className="text-[9px] font-mono text-white/25 w-4 shrink-0">{p.rank}</span>
-                      {p.team && <TeamLogo team={p.team} size={28} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                      {p.team && <TeamLogo team={p.team} size={34} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                       <p className="text-[11px] font-semibold text-white/80 flex-1 truncate">{p.player_name}</p>
                       <span className="text-[10px] font-bold tabular-nums shrink-0" style={{ color: "#fbbf24" }}>{p.xgf60?.toFixed(1) ?? "—"}</span>
                     </div>
@@ -1545,7 +1574,7 @@ export default function PlayersPage() {
                   {pkList.map((p, i) => (
                     <div key={i} className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] transition-all cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                       <span className="text-[9px] font-mono text-white/25 w-4 shrink-0">{p.rank}</span>
-                      {p.team && <TeamLogo team={p.team} size={28} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                      {p.team && <TeamLogo team={p.team} size={34} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                       <p className="text-[11px] font-semibold text-white/80 flex-1 truncate">{p.player_name}</p>
                       <span className="text-[10px] font-bold tabular-nums shrink-0" style={{ color: "#60a5fa" }}>{p.xgf60?.toFixed(1) ?? "—"}</span>
                     </div>
@@ -1557,7 +1586,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* Hot Hand Leaderboard */}
-        <Section title="Hot Hand Score" icon="⚡" count={hotHandList?.length}>
+        <Section title="Hot Hand Score" count={hotHandList?.length}>
           <InfoTip tip="5-game burst signal. Hot Hand Score = z-score of (goals − expected goals) over last 5 games vs. player's own season variance. +2.0 = 2 standard deviations above their own mean — runaway hot streak. Bayesian-shrunk by career GP. Source: GRTZKY model 2.28." />
           {hotHandList === null ? <SectionLoading /> : hotHandList.length === 0 ? <SectionEmpty msg="Run train-hot-hand to populate." /> : (
             <div className="space-y-1 max-h-72 overflow-y-auto pr-1 mt-2">
@@ -1566,7 +1595,7 @@ export default function PlayersPage() {
                 return (
                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                    {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                    {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                       <p className="text-[9px] text-white/35 mt-0.5">
@@ -1584,7 +1613,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* xG Leaderboard */}
-        <Section title="xGF/60 Leaders" icon="🎲" count={xgList?.length}>
+        <Section title="xGF/60 Leaders" count={xgList?.length}>
           <InfoTip tip="Expected Goals For per 60 minutes (EWMA — exponentially weighted 20-game rolling average, λ=0.96). Measures how much offense a player drives at even strength, independent of finishing luck. League average ≈ 4.09 xGF/60. Source: GRTZKY model 2.13." />
           {xgList === null ? <SectionLoading /> : xgList.length === 0 ? <SectionEmpty msg="Run compute-ewma to populate." /> : (
             <div className="space-y-1 max-h-72 overflow-y-auto pr-1 mt-2">
@@ -1594,7 +1623,7 @@ export default function PlayersPage() {
                 return (
                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                    {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                    {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                       <p className="text-[9px] text-white/35 mt-0.5">{p.games_played != null ? `${p.games_played} GP · ` : ""}{above >= 0 ? "+" : ""}{above.toFixed(1)} vs avg</p>
@@ -1608,7 +1637,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* CDR Leaderboard */}
-        <Section title="Composite Defensive Rating" icon="🛡️" count={cdrList?.length}>
+        <Section title="Composite Defensive Rating" count={cdrList?.length}>
           <InfoTip tip="CDR = 0.60×z(EV Def RAPM xGA) + 0.25×z(Takeaway/Giveaway ratio) + 0.15×z(−xGA/60 adj). All components z-scored; DZS% adjusts xGA so heavy defensive deployment is credited. Positive = better than average defender. Source: GRTZKY model 2.26." />
           {cdrList === null ? <SectionLoading /> : cdrList.length === 0 ? <SectionEmpty msg="Run rate-def to populate." /> : (
             <div className="space-y-1 max-h-72 overflow-y-auto pr-1 mt-2">
@@ -1617,7 +1646,7 @@ export default function PlayersPage() {
                 return (
                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                    {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                    {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                       <p className="text-[9px] text-white/35 mt-0.5">
@@ -1635,7 +1664,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* RAPM Leaderboard */}
-        <Section title="RAPM" icon="📊" count={rapmList?.length}>
+        <Section title="RAPM" count={rapmList?.length}>
           <div className="flex gap-1.5 mb-2 flex-wrap">
             {([
               { k: "ev_off", label: "EV Off",  tip: "Even Strength Offensive RAPM" },
@@ -1658,7 +1687,7 @@ export default function PlayersPage() {
                 return (
                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                    {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                    {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                       <p className="text-[9px] text-white/35 mt-0.5">{p.gp != null ? `${p.gp} GP` : ""}{p.toi_ev != null ? ` · ${p.toi_ev.toFixed(0)} EV TOI` : ""}</p>
@@ -1672,7 +1701,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* xGA/60 Leaderboard */}
-        <Section title="xGA/60 (Defensive Wall)" icon="🔒" count={xgaList?.length}>
+        <Section title="xGA/60 (Defensive Wall)" count={xgaList?.length}>
           <InfoTip tip="On-ice expected goals against per 60 minutes at even strength. Lower = better — this player's line suppresses shot quality when on the ice. Source: GRTZKY RAPM model. Min 20 GP. Complements CDR (2.26) for identifying elite defensive forwards and D-men." />
           {xgaList === null ? <SectionLoading /> : xgaList.length === 0 ? <SectionEmpty msg="Run train-rapm to populate." /> : (
             <div className="space-y-1 max-h-72 overflow-y-auto pr-1 mt-2">
@@ -1681,7 +1710,7 @@ export default function PlayersPage() {
                 return (
                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                    {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                    {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                       <p className="text-[9px] text-white/35 mt-0.5">{p.gp != null ? `${p.gp} GP` : ""}{p.rapm_ev_def != null ? ` · Def RAPM ${p.rapm_ev_def > 0 ? "+" : ""}${p.rapm_ev_def.toFixed(2)}` : ""}</p>
