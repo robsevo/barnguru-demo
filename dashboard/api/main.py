@@ -1050,6 +1050,222 @@ async def standings() -> dict:
 
 
 # ===========================================================================
+# Team page — roster stats + cap data
+# ===========================================================================
+
+_PUCKPEDIA_SLUGS: dict[str, str] = {
+    "ANA": "anaheim-ducks",    "BOS": "boston-bruins",      "BUF": "buffalo-sabres",
+    "CGY": "calgary-flames",   "CAR": "carolina-hurricanes", "CHI": "chicago-blackhawks",
+    "COL": "colorado-avalanche","CBJ": "columbus-blue-jackets","DAL": "dallas-stars",
+    "DET": "detroit-red-wings","EDM": "edmonton-oilers",    "FLA": "florida-panthers",
+    "LAK": "los-angeles-kings","MIN": "minnesota-wild",     "MTL": "montreal-canadiens",
+    "NSH": "nashville-predators","NJD": "new-jersey-devils", "NYI": "new-york-islanders",
+    "NYR": "new-york-rangers", "OTT": "ottawa-senators",    "PHI": "philadelphia-flyers",
+    "PIT": "pittsburgh-penguins","SEA": "seattle-kraken",   "SJS": "san-jose-sharks",
+    "STL": "st-louis-blues",   "TBL": "tampa-bay-lightning","TOR": "toronto-maple-leafs",
+    "UTA": "utah-hockey-club", "VAN": "vancouver-canucks",  "VGK": "vegas-golden-knights",
+    "WSH": "washington-capitals","WPG": "winnipeg-jets",
+}
+
+
+_TEAM_CODE_REMAP: dict[str, str] = {
+    "UTH": "UTA", "LA": "LAK", "NJ": "NJD", "SJ": "SJS", "TB": "TBL",
+}
+
+@app.get("/team/{team}/stats")
+async def team_stats(team: str) -> dict:
+    """Player stats for all skaters and goalies on a team — current season from NHL API."""
+    team = _TEAM_CODE_REMAP.get(team.upper(), team.upper())
+    _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+    def _name(obj: object) -> str:
+        if isinstance(obj, dict):
+            return obj.get("default", "") or ""
+        return str(obj or "")
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, headers={"User-Agent": _UA}) as client:
+            r = await client.get(f"https://api-web.nhle.com/v1/club-stats/{team}/now")
+        if r.status_code != 200:
+            return {"team": team, "skaters": [], "goalies": [], "error": f"NHL API {r.status_code}"}
+        data = r.json()
+    except Exception as exc:  # noqa: BLE001
+        return {"team": team, "skaters": [], "goalies": [], "error": str(exc)}
+
+    def _fmt_toi(secs: object) -> str:
+        """Convert seconds-per-game float to MM:SS string."""
+        try:
+            s = int(float(secs or 0))
+            return f"{s // 60}:{s % 60:02d}"
+        except (TypeError, ValueError):
+            return str(secs or "")
+
+    skaters = []
+    for p in data.get("skaters") or []:
+        ppg = int(p.get("powerPlayGoals") or 0)
+        ppa = int(p.get("powerPlayAssists") or 0)
+        skaters.append({
+            "player_id":    p.get("playerId"),
+            "headshot":     p.get("headshot", ""),
+            "first_name":   _name(p.get("firstName")),
+            "last_name":    _name(p.get("lastName")),
+            "position":     p.get("positionCode", ""),
+            "jersey":       p.get("sweaterNumber"),
+            "gp":           p.get("gamesPlayed", 0),
+            "goals":        p.get("goals", 0),
+            "assists":      p.get("assists", 0),
+            "points":       p.get("points", 0),
+            "plus_minus":   p.get("plusMinus", 0),
+            "pim":          p.get("penaltyMinutes", 0),
+            "pp_points":    ppg + ppa,
+            "pp_goals":     ppg,
+            "sh_goals":     p.get("shortHandedGoals") or p.get("shorthandedGoals", 0),
+            "gwg":          p.get("gameWinningGoals", 0),
+            "shots":        p.get("shots", 0),
+            "shooting_pct": round(float(p.get("shootingPctg") or 0) * 100, 1),
+            "avg_toi":      _fmt_toi(p.get("avgTimeOnIcePerGame") or p.get("avgToi")),
+            "faceoff_pct":  round(float(p.get("faceoffWinPctg") or 0) * 100, 1),
+        })
+
+    goalies = []
+    for g in data.get("goalies") or []:
+        goalies.append({
+            "player_id":     g.get("playerId"),
+            "headshot":      g.get("headshot", ""),
+            "first_name":    _name(g.get("firstName")),
+            "last_name":     _name(g.get("lastName")),
+            "position":      "G",
+            "jersey":        g.get("sweaterNumber"),
+            "gp":            g.get("gamesPlayed", 0),
+            "wins":          g.get("wins", 0),
+            "losses":        g.get("losses", 0),
+            "ot_losses":     g.get("otLosses", 0),
+            "gaa":           round(float(g.get("goalsAgainstAvg") or 0), 2),
+            "sv_pct":        round(float(g.get("savePctg") or 0), 3),
+            "shutouts":      g.get("shutouts", 0),
+            "saves":         g.get("saves", 0),
+            "goals_against": g.get("goalsAgainst", 0),
+        })
+
+    skaters.sort(key=lambda x: (-x["points"], -x["goals"]))
+    return {"team": team, "skaters": skaters, "goalies": goalies}
+
+
+@app.get("/team/{team}/cap")
+async def team_cap(team: str) -> dict:
+    """Cap data for a team scraped from PuckPedia __NEXT_DATA__."""
+    import json as _json
+    import re as _re
+
+    team = _TEAM_CODE_REMAP.get(team.upper(), team.upper())
+    slug = _PUCKPEDIA_SLUGS.get(team)
+    if not slug:
+        return {"team": team, "players": [], "cap_ceiling": 88_000_000, "status": "unknown_team"}
+
+    _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    try:
+        async with httpx.AsyncClient(
+            timeout=20.0, follow_redirects=True,
+            headers={"User-Agent": _UA, "Accept-Language": "en-US,en;q=0.9"},
+        ) as client:
+            r = await client.get(f"https://puckpedia.com/team/{slug}")
+        if r.status_code != 200:
+            return {"team": team, "players": [], "cap_ceiling": 88_000_000, "status": f"http_{r.status_code}"}
+    except Exception as exc:  # noqa: BLE001
+        return {"team": team, "players": [], "cap_ceiling": 88_000_000, "status": "fetch_error", "error": str(exc)}
+
+    match = _re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, _re.DOTALL)
+    if not match:
+        return {"team": team, "players": [], "cap_ceiling": 88_000_000, "status": "parse_error"}
+
+    try:
+        nd = _json.loads(match.group(1))
+    except _json.JSONDecodeError:
+        return {"team": team, "players": [], "cap_ceiling": 88_000_000, "status": "json_error"}
+
+    def _fmt_money(val: object) -> int | None:
+        if val is None:
+            return None
+        if isinstance(val, (int, float)):
+            return int(val)
+        if isinstance(val, str):
+            try:
+                return int(float(val.replace("$", "").replace(",", "").strip()))
+            except ValueError:
+                return None
+        return None
+
+    def _find_list(obj: object, depth: int = 0) -> list | None:
+        if depth > 14:
+            return None
+        if isinstance(obj, list) and len(obj) >= 3:
+            s = obj[0] if obj else {}
+            if isinstance(s, dict) and any(k in s for k in ("capHit", "cap_hit", "aav", "salary", "name", "lastName", "player")):
+                return obj
+        if isinstance(obj, dict):
+            for v in obj.values():
+                r2 = _find_list(v, depth + 1)
+                if r2:
+                    return r2
+        return None
+
+    def _find_summary(obj: object, depth: int = 0) -> dict | None:
+        if depth > 10:
+            return None
+        if isinstance(obj, dict):
+            if any(k in obj for k in ("capSpace", "cap_space", "capCeiling", "totalCapHit", "total_cap_hit")):
+                return obj  # type: ignore[return-value]
+            for v in obj.values():
+                r2 = _find_summary(v, depth + 1)
+                if r2:
+                    return r2
+        return None
+
+    raw = _find_list(nd) or []
+    players: list[dict] = []
+    for p in raw:
+        if not isinstance(p, dict):
+            continue
+        player_obj = p.get("player") if isinstance(p.get("player"), dict) else {}
+        name = (
+            p.get("name")
+            or f"{p.get('firstName', '')} {p.get('lastName', '')}".strip()
+            or (player_obj.get("name") or f"{player_obj.get('firstName', '')} {player_obj.get('lastName', '')}".strip())
+        )
+        if not name or len(name) < 3:
+            continue
+        cap_raw = p.get("capHit") or p.get("cap_hit") or p.get("aav") or p.get("salary") or player_obj.get("capHit")
+        pos = p.get("position") or p.get("pos") or player_obj.get("position") or player_obj.get("pos") or ""
+        players.append({
+            "name":            str(name),
+            "position":        str(pos),
+            "age":             p.get("age") or player_obj.get("age"),
+            "cap_hit":         _fmt_money(cap_raw),
+            "contract_type":   str(p.get("type") or p.get("contractType") or p.get("contract_type") or ""),
+            "expiry_year":     p.get("expiryYear") or p.get("expiry_year") or p.get("expiryDate"),
+            "years_remaining": p.get("yearsRemaining") or p.get("years_remaining") or p.get("term"),
+        })
+
+    cap_ceiling = 88_000_000
+    total_hit: int | None = None
+    cap_space: int | None = None
+    summary = _find_summary(nd)
+    if summary:
+        cap_ceiling = _fmt_money(summary.get("capCeiling") or summary.get("cap_ceiling")) or cap_ceiling
+        total_hit   = _fmt_money(summary.get("totalCapHit") or summary.get("total_cap_hit") or summary.get("capHit"))
+        cap_space   = _fmt_money(summary.get("capSpace") or summary.get("cap_space"))
+
+    return {
+        "team":        team,
+        "players":     players,
+        "cap_ceiling": cap_ceiling,
+        "total_hit":   total_hit,
+        "cap_space":   cap_space,
+        "status":      "ok" if players else "empty",
+    }
+
+
+# ===========================================================================
 # Stats Leaders — skaters and goalies
 # ===========================================================================
 
@@ -1097,7 +1313,7 @@ async def skater_stats() -> dict:
                     "cayenneExp": f"seasonId=20252026 and gameTypeId=2{extra}",
                     "sort":       sort_field,
                     "dir":        "DESC",
-                    "limit":      40,
+                    "limit":      50,
                 },
             )
             if r.status_code != 200:
@@ -1488,6 +1704,72 @@ async def phase2_player(
     except Exception:
         pass
 
+    # Try to join Special Teams ratings (Feature 2.7)
+    special_teams_pp: float | None = None
+    special_teams_pk: float | None = None
+    try:
+        st_dir = _GRETZKY_DATA_DIR / "special_teams"
+        st_parquets = sorted(st_dir.glob("special_teams_*.parquet")) if st_dir.exists() else []
+        if st_parquets and player_id_val is not None:
+            st_df = pl.read_parquet(st_parquets[-1])
+            st_row = st_df.filter(pl.col("player_id") == player_id_val)
+            if not st_row.is_empty():
+                st = st_row.to_dicts()[0]
+                special_teams_pp = round(float(st["pp_rating"]), 3) if st.get("pp_rating") is not None else None
+                special_teams_pk = round(float(st["pk_rating"]), 3) if st.get("pk_rating") is not None else None
+    except Exception:
+        pass
+
+    # Try to join Bayesian player rating (Feature 2.9)
+    bayesian_rating:      float | None = None
+    bayesian_uncertainty: float | None = None
+    try:
+        br_dir = _GRETZKY_DATA_DIR / "bayes_ratings"
+        br_parquets = sorted(br_dir.glob("player_ratings_*.parquet")) if br_dir.exists() else []
+        if br_parquets and player_id_val is not None:
+            br_df = pl.read_parquet(br_parquets[-1])
+            br_row = br_df.filter(pl.col("player_id") == player_id_val)
+            if not br_row.is_empty():
+                br = br_row.to_dicts()[0]
+                bayesian_rating      = round(float(br["posterior_mean"]),  3) if br.get("posterior_mean")  is not None else None
+                bayesian_uncertainty = round(float(br["posterior_sigma"]), 3) if br.get("posterior_sigma") is not None else None
+    except Exception:
+        pass
+
+    # Try to join Playoff Delta (Feature 2.23)
+    playoff_delta: float | None = None
+    try:
+        pd_dir = _GRETZKY_DATA_DIR / "playoff_delta"
+        pd_parquets = sorted(pd_dir.glob("playoff_delta_*.parquet")) if pd_dir.exists() else []
+        if pd_parquets and player_id_val is not None:
+            pd_df = pl.read_parquet(pd_parquets[-1])
+            if not pd_df.is_empty():
+                pd_row = pd_df.filter(pl.col("player_id") == player_id_val)
+                if not pd_row.is_empty():
+                    pd_r = pd_row.to_dicts()[0]
+                    reg_xgf = pd_r.get("reg_xgf_per60")
+                    po_xgf  = pd_r.get("playoff_xgf_per60")
+                    if reg_xgf is not None and po_xgf is not None and float(reg_xgf) > 0:
+                        playoff_delta = round(float(po_xgf) - float(reg_xgf), 3)
+    except Exception:
+        pass
+
+    # Try to join Former Team Boost (Feature 2.27)
+    former_team_boost: float | None = None
+    former_team:       str | None = None
+    try:
+        ftb_dir = _GRETZKY_DATA_DIR / "former_team_boost"
+        ftb_parquets = sorted(ftb_dir.glob("former_team_boost_*.parquet")) if ftb_dir.exists() else []
+        if ftb_parquets and player_id_val is not None:
+            ftb_df = pl.read_parquet(ftb_parquets[-1])
+            ftb_row = ftb_df.filter(pl.col("player_id") == player_id_val)
+            if not ftb_row.is_empty():
+                ftb = ftb_row.to_dicts()[0]
+                former_team_boost = round(float(ftb["base_boost"]), 3) if ftb.get("base_boost") is not None else None
+                former_team       = str(ftb["former_team"]) if ftb.get("former_team") else None
+    except Exception:
+        pass
+
     return {
         "player_name":          r["shooter_name"],
         "player_id":            player_id_val,
@@ -1518,6 +1800,13 @@ async def phase2_player(
         "hot_hand_xg5":         hot_hand_xg5,
         "clutch_index":         clutch_index,
         "clutch_wpa_per60":     clutch_wpa_per60,
+        "special_teams_pp":     special_teams_pp,
+        "special_teams_pk":     special_teams_pk,
+        "bayesian_rating":      bayesian_rating,
+        "bayesian_uncertainty": bayesian_uncertainty,
+        "playoff_delta":        playoff_delta,
+        "former_team_boost":    former_team_boost,
+        "former_team":          former_team,
     }
 
 
@@ -1981,6 +2270,1093 @@ async def phase2_matchup_explorer(limit: int = 10, player_id: int | None = None)
         return {"qot": [], "qoc": [], "top_pairs": [], "selected_player": None, "selected_pairs": [], "built": False}
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 — Regime Change Alerts (Feature 2.14)
+# ---------------------------------------------------------------------------
+
+@app.get("/phase2/regime-alerts")
+async def phase2_regime_alerts(limit: int = 10) -> dict:
+    """Return recent regime change alerts — players who have statistically shifted up or down."""
+    import polars as pl
+
+    regime_dir = _GRETZKY_DATA_DIR / "regime"
+    files = sorted(regime_dir.glob("*.parquet")) if regime_dir.exists() else []
+    if not files:
+        return {"alerts": [], "status": "not_built"}
+
+    try:
+        df = pl.read_parquet(files[-1])
+        if df.is_empty():
+            return {"alerts": [], "status": "empty"}
+
+        # Build name lookup to resolve placeholder names like "player_8470613"
+        name_lookup = _build_name_lookup()
+
+        # Build team lookup from RAPM (most complete source)
+        team_lookup: dict[int, str] = {}
+        try:
+            rapm_dir = _GRETZKY_DATA_DIR / "rapm"
+            rapm_files = sorted(rapm_dir.glob("rapm_*.parquet"))
+            if rapm_files:
+                rapm_df = pl.read_parquet(rapm_files[-1], columns=["player_id", "team"])
+                for row in rapm_df.drop_nulls().to_dicts():
+                    if row.get("player_id") and row.get("team"):
+                        abbr = _abbr(row["team"]) or str(row["team"])
+                        team_lookup[int(row["player_id"])] = abbr
+        except Exception:
+            pass
+
+        alerts = []
+        rows = (
+            df.sort("mean_residual", descending=True)
+            .head(limit * 3)
+            .to_dicts()
+        )
+
+        for r in rows:
+            pid = r.get("player_id")
+            raw_name = r.get("player_name", "")
+            # Resolve placeholder names
+            if pid and (not raw_name or raw_name.startswith("player_")):
+                raw_name = name_lookup.get(int(pid), raw_name)
+            if not raw_name or raw_name.startswith("player_"):
+                continue  # skip unresolvable
+            direction = "breakout" if r.get("regime_state") == "up_shift" else "crash"
+            alerts.append({
+                "player_id":     int(pid) if pid else None,
+                "player_name":   raw_name,
+                "team":          team_lookup.get(int(pid), None) if pid else None,
+                "direction":     direction,
+                "mean_residual": round(float(r["mean_residual"]), 3) if r.get("mean_residual") is not None else None,
+                "games_detected": int(r["consecutive_games"]) if r.get("consecutive_games") is not None else None,
+                "reason":        r.get("reason"),
+            })
+            if len(alerts) >= limit:
+                break
+
+        return {"alerts": alerts, "status": "ok"}
+    except Exception:
+        return {"alerts": [], "status": "error"}
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — Top Line Pairs (Feature 2.4)
+# ---------------------------------------------------------------------------
+
+@app.get("/phase2/top-pairs")
+async def phase2_top_pairs(limit: int = 10) -> dict:
+    """Return top line pairs by chemistry delta (how much better they are together vs. expected)."""
+    import polars as pl
+
+    chem_dir = _GRETZKY_DATA_DIR / "chemistry"
+    files = sorted(chem_dir.glob("pair_chemistry_*.parquet")) if chem_dir.exists() else []
+    if not files:
+        return {"pairs": [], "status": "not_built"}
+
+    try:
+        df = pl.read_parquet(files[-1])
+        if df.is_empty():
+            return {"pairs": [], "status": "empty"}
+
+        name_lookup = _build_name_lookup()
+
+        # Team lookup from RAPM
+        team_lookup: dict[int, str] = {}
+        try:
+            rapm_dir = _GRETZKY_DATA_DIR / "rapm"
+            rapm_files = sorted(rapm_dir.glob("rapm_*.parquet"))
+            if rapm_files:
+                rapm_df = pl.read_parquet(rapm_files[-1], columns=["player_id", "team"])
+                for row in rapm_df.drop_nulls().to_dicts():
+                    if row.get("player_id") and row.get("team"):
+                        abbr = _abbr(row["team"]) or str(row["team"])
+                        team_lookup[int(row["player_id"])] = abbr
+        except Exception:
+            pass
+
+        top = df.sort("chemistry_delta", descending=True).head(limit)
+        pairs = []
+        for r in top.to_dicts():
+            a_id = r.get("player_a_id")
+            b_id = r.get("player_b_id")
+            a_name = name_lookup.get(int(a_id), f"player_{a_id}") if a_id else None
+            b_name = name_lookup.get(int(b_id), f"player_{b_id}") if b_id else None
+            if not a_name or a_name.startswith("player_") or not b_name or b_name.startswith("player_"):
+                continue
+            team = team_lookup.get(int(a_id)) or team_lookup.get(int(b_id)) if a_id else None
+            pairs.append({
+                "player_a":        a_name,
+                "player_b":        b_name,
+                "player_a_id":     int(a_id) if a_id else None,
+                "player_b_id":     int(b_id) if b_id else None,
+                "team":            team,
+                "chemistry_delta": round(float(r["chemistry_delta"]), 4) if r.get("chemistry_delta") is not None else None,
+                "model_xgf_pct":   round(float(r["model_xgf_pct"]) * 100, 1) if r.get("model_xgf_pct") is not None else None,
+                "co_toi_ev":       round(float(r["co_toi_ev"]), 1) if r.get("co_toi_ev") is not None else None,
+                "games_together":  int(r["games_together"]) if r.get("games_together") is not None else None,
+            })
+
+        return {"pairs": pairs, "status": "ok"}
+    except Exception:
+        return {"pairs": [], "status": "error"}
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — Roster Disruption Index (Feature 2.19)
+# ---------------------------------------------------------------------------
+
+@app.get("/phase2/roster-disruption")
+async def phase2_roster_disruption() -> dict:
+    """Return all teams sorted by Roster Disruption Index (how many key roster moves recently)."""
+    rdi_dir = _GRETZKY_DATA_DIR / "roster_disruption"
+    files = sorted(rdi_dir.glob("*.parquet")) if rdi_dir.exists() else []
+    if not files:
+        return {"teams": [], "status": "not_built"}
+
+    try:
+        import polars as pl
+        df = pl.read_parquet(files[-1])
+        if df.is_empty():
+            return {"teams": [], "status": "empty"}
+
+        teams = []
+        for r in df.sort("disruption_index", descending=True).to_dicts():
+            teams.append({
+                "team":            r.get("team"),
+                "disruption_index": round(float(r["disruption_index"]), 3) if r.get("disruption_index") is not None else None,
+                "n_moves_30d":     int(r["n_moves_30d"]) if r.get("n_moves_30d") is not None else None,
+                "n_moves_72h":     int(r["n_moves_72h"]) if r.get("n_moves_72h") is not None else None,
+                "as_of_date":      str(r["as_of_date"]) if r.get("as_of_date") is not None else None,
+            })
+
+        return {"teams": teams, "status": "ok"}
+    except Exception:
+        return {"teams": [], "status": "error"}
+
+
+# ---------------------------------------------------------------------------
+# Cortex leaderboard endpoints — EDGE, Goalie, Clutch, ST, Hot Hand, CDR, RAPM, xGA
+# ---------------------------------------------------------------------------
+
+
+@app.get("/phase2/edge-leaderboard")
+async def phase2_edge_leaderboard(
+    metric: str = Query("max_speed_kmh", description="max_speed_kmh | avg_speed_kmh | distance_per_game_km | max_shot_speed_mph | avg_shot_speed_mph | hard_shot_count"),
+    limit: int = 20,
+) -> dict:
+    """EDGE skating/shot-speed leaderboard. All metrics are season aggregates."""
+    import polars as pl
+    edge_dir = _module_dir("edge")
+    SHOT_METRICS = {"max_shot_speed_mph", "avg_shot_speed_mph", "hard_shot_count"}
+    is_shot = metric in SHOT_METRICS
+    pattern = "edge_shot_speed_*.parquet" if is_shot else "edge_skating_*.parquet"
+    files = sorted(edge_dir.glob(pattern)) if edge_dir.exists() else []
+    if not files:
+        return {"players": [], "built": False, "metric": metric}
+    try:
+        df = pl.read_parquet(files[-1])
+        if metric not in df.columns:
+            return {"players": [], "built": False, "metric": metric, "reason": "metric_not_found"}
+        # Min games played to qualify
+        MIN_GP = 10
+        df = df.filter(pl.col("games_played") >= MIN_GP).filter(pl.col(metric).is_not_null())
+        ranked = df.sort(metric, descending=(metric != "distance_per_game_km")).head(limit)
+        rows = []
+        for i, r in enumerate(ranked.to_dicts()):
+            rows.append({
+                "rank":        i + 1,
+                "player_id":   r.get("player_id"),
+                "player_name": r.get("player_name"),
+                "team":        r.get("team"),
+                "value":       round(float(r[metric]), 2) if r[metric] is not None else None,
+                "games_played":r.get("games_played"),
+            })
+        return {"players": rows, "built": True, "metric": metric}
+    except Exception:
+        return {"players": [], "built": False, "metric": metric}
+
+
+@app.get("/phase2/goalie-leaderboard")
+async def phase2_goalie_leaderboard(
+    metric: str = Query("gsax", description="gsax | hdsv_pct | sv_pct"),
+    limit: int = 20,
+) -> dict:
+    """Goalie leaderboard from MoneyPuck goalie_stats (all situations, min 10 GP)."""
+    import polars as pl
+    goalie_dir = _module_dir("goalie_stats")
+    files = sorted(goalie_dir.glob("goalie_stats_*.parquet")) if goalie_dir.exists() else []
+    if not files:
+        return {"players": [], "built": False, "metric": metric}
+    try:
+        df = pl.read_parquet(files[-1])
+        df = df.filter(pl.col("situation") == "all") if "situation" in df.columns else df
+        # Compute hdsv_pct if needed
+        if "hdsv_pct" not in df.columns and "hd_saves" in df.columns and "hd_shots" in df.columns:
+            df = df.with_columns(
+                (pl.col("hd_saves") / pl.col("hd_shots").clip(lower_bound=1)).alias("hdsv_pct")
+            )
+        if "sv_pct" not in df.columns and "saves" in df.columns and "shots" in df.columns:
+            df = df.with_columns(
+                (pl.col("saves") / pl.col("shots").clip(lower_bound=1)).alias("sv_pct")
+            )
+        if metric not in df.columns:
+            return {"players": [], "built": False, "metric": metric, "reason": "metric_not_found"}
+        MIN_GP = 10
+        df = df.filter(pl.col("games_played") >= MIN_GP).filter(pl.col(metric).is_not_null())
+        ranked = df.sort(metric, descending=True).head(limit)
+        rows = []
+        for i, r in enumerate(ranked.to_dicts()):
+            val = r.get(metric)
+            rows.append({
+                "rank":        i + 1,
+                "player_id":   r.get("player_id"),
+                "player_name": r.get("player_name"),
+                "team":        _abbr(r.get("team")) if r.get("team") else r.get("team"),
+                "value":       round(float(val), 4) if val is not None else None,
+                "games_played":r.get("games_played"),
+                "gsax":        round(float(r["gsax"]), 2) if r.get("gsax") is not None else None,
+            })
+        return {"players": rows, "built": True, "metric": metric}
+    except Exception as exc:
+        return {"players": [], "built": False, "metric": metric, "error": str(exc)}
+
+
+@app.get("/phase2/clutch-leaderboard")
+async def phase2_clutch_leaderboard(limit: int = 20) -> dict:
+    """Clutch Index leaderboard (WPA above expected, Bayesian-shrunk)."""
+    import polars as pl
+    ci_dir = _GRETZKY_DATA_DIR / "clutch_index"
+    files = sorted(ci_dir.glob("clutch_index_2*.parquet")) if ci_dir.exists() else []
+    if not files:
+        return {"players": [], "built": False}
+    try:
+        df = pl.read_parquet(files[-1])
+        col = "clutch_index_shrunk" if "clutch_index_shrunk" in df.columns else "clutch_index"
+        name_lut = _build_name_lookup()
+        MIN_TOI_HRS = 5.0  # toi_60 column is in hours (e.g. 35h max for top players)
+        df = df.filter(pl.col(col).is_not_null())
+        if "toi_60" in df.columns:
+            df = df.filter(pl.col("toi_60") >= MIN_TOI_HRS)
+        ranked = df.sort(col, descending=True).head(limit)
+        rows = []
+        for i, r in enumerate(ranked.to_dicts()):
+            pid = r.get("player_id")
+            name = r.get("player_name") or (name_lut.get(int(pid)) if pid else None) or f"id_{pid}"
+            rows.append({
+                "rank":        i + 1,
+                "player_id":   pid,
+                "player_name": name,
+                "team":        _abbr(r.get("team")),
+                "value":       round(float(r[col]), 4),
+                "wpa_per60":   round(float(r["actual_wpa_per60"]), 4) if r.get("actual_wpa_per60") is not None else None,
+            })
+        return {"players": rows, "built": True}
+    except Exception:
+        return {"players": [], "built": False}
+
+
+@app.get("/phase2/special-teams-leaderboard")
+async def phase2_special_teams_leaderboard(
+    side: str = Query("pp", description="pp | pk"),
+    limit: int = 20,
+) -> dict:
+    """Power Play or Penalty Kill xGF/60 leaderboard."""
+    import polars as pl
+    st_dir = _GRETZKY_DATA_DIR / "special_teams"
+    files = sorted(st_dir.glob("special_teams_*.parquet")) if st_dir.exists() else []
+    if not files:
+        return {"players": [], "built": False, "side": side}
+    try:
+        df = pl.read_parquet(files[-1])
+        toi_col  = "toi_pp"  if side == "pp" else "toi_pk"
+        xgf_col  = "pp_xgf60" if side == "pp" else "pk_xgf60"
+        rapm_col = "rapm_pp"  if side == "pp" else "rapm_pk"
+        name_lut = _build_name_lookup()
+        MIN_TOI = 50.0  # 50+ PP/PK minutes to qualify
+        if toi_col not in df.columns or xgf_col not in df.columns:
+            return {"players": [], "built": False, "side": side, "reason": "columns_missing"}
+        df = (
+            df.filter(pl.col(toi_col) >= MIN_TOI)
+              .filter(pl.col(xgf_col).is_not_null())
+        )
+        ranked = df.sort(xgf_col, descending=True).head(limit)
+        rows = []
+        for i, r in enumerate(ranked.to_dicts()):
+            pid  = r.get("player_id")
+            name = r.get("player_name") or (name_lut.get(int(pid)) if pid else None) or f"id_{pid}"
+            rows.append({
+                "rank":        i + 1,
+                "player_id":   pid,
+                "player_name": name,
+                "team":        _abbr(r.get("team")),
+                "xgf60":       round(float(r[xgf_col]), 2),
+                "rapm":        round(float(r[rapm_col]), 3) if r.get(rapm_col) is not None else None,
+                "toi":         round(float(r[toi_col]), 1),
+            })
+        return {"players": rows, "built": True, "side": side}
+    except Exception:
+        return {"players": [], "built": False, "side": side}
+
+
+@app.get("/phase2/hot-hand-leaderboard")
+async def phase2_hot_hand_leaderboard(limit: int = 20) -> dict:
+    """Hot Hand Signal leaderboard — 5-game burst goals-vs-xG z-score."""
+    import polars as pl
+    hh_dir = _GRETZKY_DATA_DIR / "hot_hand"
+    files = sorted(hh_dir.glob("hot_hand_summary_*.parquet")) if hh_dir.exists() else []
+    if not files:
+        return {"players": [], "built": False}
+    try:
+        df = pl.read_parquet(files[-1])
+        name_lut = _build_name_lookup()
+        MIN_GP = 5
+        if "games_played" in df.columns:
+            df = df.filter(pl.col("games_played") >= MIN_GP)
+        df = df.filter(pl.col("hot_hand_score").is_not_null())
+        ranked = df.sort("hot_hand_score", descending=True).head(limit)
+        rows = []
+        for i, r in enumerate(ranked.to_dicts()):
+            pid  = r.get("player_id")
+            name = r.get("player_name") or (name_lut.get(int(pid)) if pid else None) or f"id_{pid}"
+
+            # Try to get team from RAPM parquet (hot_hand doesn't carry team)
+            team = None
+            rapm_dir = _GRETZKY_DATA_DIR / "rapm"
+            rapm_files = sorted(rapm_dir.glob("rapm_*.parquet")) if rapm_dir.exists() else []
+            if rapm_files and pid:
+                try:
+                    rdf = pl.read_parquet(rapm_files[-1], columns=["player_id", "team"])
+                    t_rows = rdf.filter(pl.col("player_id") == pid).to_dicts()
+                    if t_rows:
+                        team = _abbr(t_rows[0].get("team"))
+                except Exception:
+                    pass
+
+            rows.append({
+                "rank":        i + 1,
+                "player_id":   pid,
+                "player_name": name,
+                "team":        team,
+                "value":       round(float(r["hot_hand_score"]), 3),
+                "goals_5g":    r.get("goals_5g"),
+                "xg_5g":       round(float(r["xg_5g"]), 2) if r.get("xg_5g") is not None else None,
+            })
+        return {"players": rows, "built": True}
+    except Exception:
+        return {"players": [], "built": False}
+
+
+@app.get("/phase2/xg-leaderboard")
+async def phase2_xg_leaderboard(limit: int = 20) -> dict:
+    """xGF/60 leaderboard from EWMA form model (min 20 games)."""
+    import polars as pl
+    ewma_dir = _GRETZKY_DATA_DIR / "ewma"
+    files = sorted(ewma_dir.glob("ewma_form_*.parquet")) if ewma_dir.exists() else []
+    if not files:
+        return {"players": [], "built": False}
+    try:
+        df = pl.read_parquet(files[-1])
+        ewma_col = "ewma_xgf60" if "ewma_xgf60" in df.columns else "current_ewma"
+        if ewma_col not in df.columns:
+            return {"players": [], "built": False}
+        name_lut = _build_name_lookup()
+
+        MIN_GP = 20
+        if "games_played" in df.columns:
+            df = df.filter(pl.col("games_played") >= MIN_GP)
+        df = df.filter(pl.col(ewma_col).is_not_null())
+        ranked = df.sort(ewma_col, descending=True).head(limit)
+
+        # Build team lookup from RAPM
+        team_lut: dict[int, str | None] = {}
+        rapm_dir = _GRETZKY_DATA_DIR / "rapm"
+        rapm_files = sorted(rapm_dir.glob("rapm_*.parquet")) if rapm_dir.exists() else []
+        if rapm_files:
+            try:
+                rdf = pl.read_parquet(rapm_files[-1], columns=["player_id", "team"])
+                for r in rdf.to_dicts():
+                    pid2 = r.get("player_id")
+                    if pid2:
+                        team_lut[int(pid2)] = _abbr(r.get("team"))
+            except Exception:
+                pass
+
+        rows = []
+        for i, r in enumerate(ranked.to_dicts()):
+            pid  = r.get("player_id")
+            name = r.get("player_name") or (name_lut.get(int(pid)) if pid else None) or f"id_{pid}"
+            team = team_lut.get(int(pid)) if pid else None
+            rows.append({
+                "rank":        i + 1,
+                "player_id":   pid,
+                "player_name": name,
+                "team":        team,
+                "value":       round(float(r[ewma_col]), 2),
+                "games_played":r.get("games_played"),
+            })
+        return {"players": rows, "built": True}
+    except Exception:
+        return {"players": [], "built": False}
+
+
+@app.get("/phase2/cdr-leaderboard")
+async def phase2_cdr_leaderboard(limit: int = 20) -> dict:
+    """Composite Defensive Rating leaderboard (higher = better defender)."""
+    import polars as pl
+    cdr_dir = _GRETZKY_DATA_DIR / "cdr"
+    files = sorted(cdr_dir.glob("cdr_*.parquet")) if cdr_dir.exists() else []
+    if not files:
+        return {"players": [], "built": False}
+    try:
+        df = pl.read_parquet(files[-1])
+        name_lut = _build_name_lookup()
+        MIN_GP = 20
+        if "gp" in df.columns:
+            df = df.filter(pl.col("gp") >= MIN_GP)
+        df = df.filter(pl.col("cdr").is_not_null())
+        ranked = df.sort("cdr", descending=True).head(limit)
+        rows = []
+        for i, r in enumerate(ranked.to_dicts()):
+            pid  = r.get("player_id")
+            name = r.get("player_name") or (name_lut.get(int(pid)) if pid else None) or f"id_{pid}"
+            rows.append({
+                "rank":        i + 1,
+                "player_id":   pid,
+                "player_name": name,
+                "team":        _abbr(r.get("team")),
+                "value":       round(float(r["cdr"]), 3),
+                "xga_60":      round(float(r["xga_60"]), 2) if r.get("xga_60") is not None else None,
+                "tk_gv_ratio": round(float(r["tk_gv_ratio"]), 2) if r.get("tk_gv_ratio") is not None else None,
+                "gp":          r.get("gp"),
+            })
+        return {"players": rows, "built": True}
+    except Exception:
+        return {"players": [], "built": False}
+
+
+@app.get("/phase2/rapm-leaderboard")
+async def phase2_rapm_leaderboard(
+    category: str = Query("ev_off", description="ev_off | ev_def | pp | pk"),
+    limit: int = 20,
+) -> dict:
+    """RAPM leaderboard by category (EV Off, EV Def, PP, PK)."""
+    import polars as pl
+    rapm_dir = _GRETZKY_DATA_DIR / "rapm"
+    files = sorted(rapm_dir.glob("rapm_*.parquet")) if rapm_dir.exists() else []
+    if not files:
+        return {"players": [], "built": False, "category": category}
+    _COL = {"ev_off": "rapm_ev_off", "ev_def": "rapm_ev_def", "pp": "rapm_pp", "pk": "rapm_pk"}
+    col = _COL.get(category, "rapm_ev_off")
+    try:
+        df = pl.read_parquet(files[-1])
+        if col not in df.columns:
+            return {"players": [], "built": False, "category": category, "reason": "column_missing"}
+        name_lut = _build_name_lookup()
+        MIN_GP = 20
+        if "gp" in df.columns:
+            df = df.filter(pl.col("gp") >= MIN_GP)
+        df = df.filter(pl.col(col).is_not_null())
+        ranked = df.sort(col, descending=True).head(limit)
+        rows = []
+        for i, r in enumerate(ranked.to_dicts()):
+            pid  = r.get("player_id")
+            name = r.get("player_name") or (name_lut.get(int(pid)) if pid else None) or f"id_{pid}"
+            rows.append({
+                "rank":        i + 1,
+                "player_id":   pid,
+                "player_name": name,
+                "team":        _abbr(r.get("team")),
+                "value":       round(float(r[col]), 3),
+                "gp":          r.get("gp"),
+                "toi_ev":      round(float(r["toi_ev"]), 1) if r.get("toi_ev") is not None else None,
+            })
+        return {"players": rows, "built": True, "category": category}
+    except Exception:
+        return {"players": [], "built": False, "category": category}
+
+
+@app.get("/phase2/xga-leaderboard")
+async def phase2_xga_leaderboard(limit: int = 20) -> dict:
+    """xGA/60 leaderboard — best defenders by lowest on-ice xGA/60 (min 20 GP)."""
+    import polars as pl
+    rapm_dir = _GRETZKY_DATA_DIR / "rapm"
+    files = sorted(rapm_dir.glob("rapm_*.parquet")) if rapm_dir.exists() else []
+    if not files:
+        return {"players": [], "built": False}
+    try:
+        df = pl.read_parquet(files[-1])
+        if "xga_60" not in df.columns:
+            return {"players": [], "built": False, "reason": "xga_60_missing"}
+        name_lut = _build_name_lookup()
+        MIN_GP = 20
+        if "gp" in df.columns:
+            df = df.filter(pl.col("gp") >= MIN_GP)
+        df = df.filter(pl.col("xga_60").is_not_null())
+        # Lower xGA/60 = better defensive player; sort ascending
+        ranked = df.sort("xga_60", descending=False).head(limit)
+        rows = []
+        for i, r in enumerate(ranked.to_dicts()):
+            pid  = r.get("player_id")
+            name = r.get("player_name") or (name_lut.get(int(pid)) if pid else None) or f"id_{pid}"
+            rows.append({
+                "rank":       i + 1,
+                "player_id":  pid,
+                "player_name":name,
+                "team":       _abbr(r.get("team")),
+                "value":      round(float(r["xga_60"]), 2),
+                "gp":         r.get("gp"),
+                "rapm_ev_def":round(float(r["rapm_ev_def"]), 3) if r.get("rapm_ev_def") is not None else None,
+            })
+        return {"players": rows, "built": True}
+    except Exception:
+        return {"players": [], "built": False}
+
+
+# ---------------------------------------------------------------------------
+# Player recent game log — NHL API passthrough (last N games)
+# ---------------------------------------------------------------------------
+
+@app.get("/player-gamelog/{player_id}")
+async def player_gamelog(player_id: int, limit: int = 5) -> dict:
+    """Fetch recent game log for a player from the NHL API.
+    Returns last `limit` regular-season games with goals, assists, TOI, opponent.
+    """
+    cache_key = f"gamelog:{player_id}:{limit}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached  # type: ignore[return-value]
+
+    try:
+        async with httpx.AsyncClient(
+            base_url="https://api-web.nhle.com",
+            timeout=8.0,
+            headers={"User-Agent": "grtzky/1.0"},
+            follow_redirects=True,
+        ) as client:
+            resp = await client.get(f"/v1/player/{player_id}/game-log/now")
+            resp.raise_for_status()
+            data = resp.json()
+
+        games_raw = data.get("gameLog", [])
+        # Filter to regular season (gameTypeId 2) only, most recent first
+        regular = [g for g in games_raw if g.get("gameTypeId", 2) == 2]
+        recent = regular[:limit]
+
+        games = []
+        for g in recent:
+            toi_raw = g.get("toi", "0:00")
+            games.append({
+                "game_id":   g.get("gameId"),
+                "date":      g.get("gameDate"),
+                "opponent":  g.get("opponentAbbrev"),
+                "home_road": g.get("homeRoadFlag"),
+                "goals":     g.get("goals", 0),
+                "assists":   g.get("assists", 0),
+                "points":    g.get("points", 0),
+                "shots":     g.get("shots", 0),
+                "toi":       toi_raw,
+                "plus_minus": g.get("plusMinus", 0),
+                "pp_goals":  g.get("powerPlayGoals", 0),
+                "pp_points": g.get("powerPlayPoints", 0),
+            })
+
+        # Aggregate last-N summary
+        total_g  = sum(x["goals"]   for x in games)
+        total_a  = sum(x["assists"] for x in games)
+        total_pts = sum(x["points"] for x in games)
+        n = len(games)
+
+        result: dict = {
+            "player_id": player_id,
+            "games":     games,
+            "summary": {
+                "n_games":  n,
+                "goals":    total_g,
+                "assists":  total_a,
+                "points":   total_pts,
+                "gpg":      round(total_g  / n, 2) if n else 0,
+                "apg":      round(total_a  / n, 2) if n else 0,
+                "ppg":      round(total_pts / n, 2) if n else 0,
+            },
+            "status": "ok",
+        }
+        _cache_set(cache_key, result, ttl=180.0)
+        return result
+
+    except Exception as exc:
+        return {"player_id": player_id, "games": [], "summary": {}, "status": "error", "error": str(exc)}
+
+
+@app.get("/player-profile/{player_id}")
+async def player_profile(player_id: int) -> dict:
+    """Comprehensive player profile — all phase model data + NHL bio in a single call.
+
+    Fetches (all null-safe if parquet missing):
+    - Bio from NHL API (name, team, position, age, height, weight, draft)
+    - xG Finishing, RAPM, CDR, WAR, Archetype, EWMA, Hot Hand, Clutch
+    - Special Teams PP/PK, Bayesian Rating, Playoff Delta, Former Team Boost
+    - Skating Baseline (speed, distance, zone times)
+    - Puck Battle Rating (battle_score, battle_percentile, physical metrics)
+    - Behavioral NN tendencies (carry_in, dump, shoot_slot, net drive, etc.)
+    - In-Season Bayesian Blend (mu_blend, CI bands)
+    - Recent game log (last 10 games)
+    - WAR rank context
+    """
+    import polars as pl
+
+    cache_key = f"profile:{player_id}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached  # type: ignore[return-value]
+
+    result: dict = {"player_id": player_id, "status": "ok"}
+
+    # ── 1. NHL API bio ─────────────────────────────────────────────────────────
+    try:
+        async with httpx.AsyncClient(
+            base_url="https://api-web.nhle.com",
+            timeout=8.0,
+            headers={"User-Agent": "grtzky/1.0"},
+            follow_redirects=True,
+        ) as client:
+            bio_resp = await client.get(f"/v1/player/{player_id}/landing")
+            bio_resp.raise_for_status()
+            bio = bio_resp.json()
+
+        result.update({
+            "player_name":    bio.get("firstName", {}).get("default", "") + " " + bio.get("lastName", {}).get("default", ""),
+            "team":           bio.get("currentTeamAbbrev"),
+            "position":       bio.get("position"),
+            "jersey_number":  bio.get("sweaterNumber"),
+            "height_cm":      bio.get("heightInCentimeters"),
+            "weight_kg":      bio.get("weightInKilograms"),
+            "shoots_catches": bio.get("shootsCatches"),
+            "birth_date":     bio.get("birthDate"),
+            "birth_city":     bio.get("birthCity", {}).get("default"),
+            "birth_country":  bio.get("birthCountryCode"),
+            "draft_year":     bio.get("draftDetails", {}).get("year"),
+            "draft_round":    bio.get("draftDetails", {}).get("round"),
+            "draft_pick":     bio.get("draftDetails", {}).get("pickInRound"),
+            "draft_team":     bio.get("draftDetails", {}).get("teamAbbrev"),
+            "headshot":       bio.get("headshot"),
+            "hero_image":     bio.get("heroImage"),
+            "nhl_games_played": bio.get("careerTotals", {}).get("regularSeason", {}).get("gamesPlayed"),
+            "nhl_career_goals": bio.get("careerTotals", {}).get("regularSeason", {}).get("goals"),
+            "nhl_career_points": bio.get("careerTotals", {}).get("regularSeason", {}).get("points"),
+        })
+    except Exception:
+        pass  # bio fields remain unset
+
+    # Ensure we at least have a name from our lookup
+    if not result.get("player_name", "").strip():
+        result["player_name"] = _build_name_lookup().get(player_id, f"Player {player_id}")
+
+    # ── 2. xG Finishing ────────────────────────────────────────────────────────
+    xg_dir = _GRETZKY_DATA_DIR / "xg_finishing"
+    xg_parquets = sorted(xg_dir.glob("xg_finishing_*.parquet")) if xg_dir.exists() else []
+    season_val: int | None = None
+    if xg_parquets:
+        try:
+            df = pl.read_parquet(xg_parquets[-1])
+            row = df.filter(pl.col("shooter_id") == player_id) if "shooter_id" in df.columns else pl.DataFrame()
+            if not row.is_empty():
+                r = row.to_dicts()[0]
+                season_val = r.get("season")
+                result.update({
+                    "season":          season_val,
+                    "shots":           r.get("shots"),
+                    "goals":           r.get("goals"),
+                    "xg_sum":          round(r["xg_sum"], 3) if r.get("xg_sum") is not None else None,
+                    "finishing":       round(r["finishing"], 3) if r.get("finishing") is not None else None,
+                    "finishing_per60": round(r["finishing_per60"], 3) if r.get("finishing_per60") is not None else None,
+                })
+                if not result.get("team"):
+                    result["team"] = r.get("team")
+        except Exception:
+            pass
+
+    # Goalie fallback
+    is_goalie = False
+    if not result.get("shots"):
+        goalie_dir = _module_dir("goalie_stats")
+        goalie_parquets = sorted(goalie_dir.glob("goalie_stats_*.parquet")) if goalie_dir.exists() else []
+        if goalie_parquets:
+            try:
+                gdf = pl.read_parquet(goalie_parquets[-1])
+                grow = gdf.filter(pl.col("player_id") == player_id)
+                if not grow.is_empty():
+                    is_goalie = True
+                    sit_row = grow.filter(pl.col("situation") == "all") if "situation" in grow.columns else grow
+                    gr = (sit_row if not sit_row.is_empty() else grow).to_dicts()[0]
+                    result.update({
+                        "is_goalie":      True,
+                        "season":         gr.get("season"),
+                        "games_played":   gr.get("games_played"),
+                        "shots_against":  gr.get("shots"),
+                        "saves":          gr.get("saves"),
+                        "goals_against":  gr.get("goals_against"),
+                        "sv_pct":         gr.get("sv_pct"),
+                        "xga":            gr.get("xga"),
+                        "gsax":           gr.get("gsax"),
+                        "hd_shots":       gr.get("hd_shots"),
+                        "hd_saves":       gr.get("hd_saves"),
+                        "hdsv_pct":       gr.get("hdsv_pct"),
+                        "mdsv_pct":       gr.get("mdsv_pct"),
+                        "ldsv_pct":       gr.get("ldsv_pct"),
+                    })
+            except Exception:
+                pass
+
+    if not is_goalie:
+        # ── 3. CDR ─────────────────────────────────────────────────────────────
+        try:
+            from models.defensive_rating import read_cdr, lookup_player as _lookup_cdr
+            cdr_df = read_cdr(_GRETZKY_DATA_DIR, season=season_val)
+            if cdr_df is not None:
+                name_for_cdr = result.get("player_name", "")
+                cdr_row = _lookup_cdr(cdr_df, name_for_cdr)
+                if not cdr_row.is_empty():
+                    raw = cdr_row["cdr"][0]
+                    result["cdr"] = round(float(raw), 3) if raw is not None else None
+        except Exception:
+            pass
+
+        # ── 4. RAPM ────────────────────────────────────────────────────────────
+        try:
+            rapm_dir = _GRETZKY_DATA_DIR / "rapm"
+            rapm_path = rapm_dir / f"rapm_{season_val}.parquet" if season_val else None
+            if rapm_path and rapm_path.exists():
+                rapm_df = pl.read_parquet(rapm_path)
+                rapm_row = rapm_df.filter(pl.col("player_id") == player_id)
+                if not rapm_row.is_empty():
+                    result.update({
+                        "rapm_ev_off": round(float(rapm_row["rapm_ev_off"][0]), 3),
+                        "rapm_ev_def": round(float(rapm_row["rapm_ev_def"][0]), 3),
+                        "rapm_xga_60": round(float(rapm_row["xga_60"][0]), 2) if "xga_60" in rapm_df.columns else None,
+                        "shots_per60": round(float(rapm_row["shots_per60"][0]), 2) if "shots_per60" in rapm_df.columns else None,
+                        "goals_per60": round(float(rapm_row["goals_per60"][0]), 2) if "goals_per60" in rapm_df.columns else None,
+                        "xgf_per60":   round(float(rapm_row["xgf_per60"][0]), 2) if "xgf_per60" in rapm_df.columns else None,
+                        "toi_ev":      round(float(rapm_row["toi_ev"][0]), 1) if "toi_ev" in rapm_df.columns else None,
+                    })
+        except Exception:
+            pass
+
+        # ── 5. WAR ─────────────────────────────────────────────────────────────
+        try:
+            war_dir = _GRETZKY_DATA_DIR / "war"
+            war_parquets = sorted(war_dir.glob("war_*.parquet")) if war_dir.exists() else []
+            if war_parquets:
+                war_df = pl.read_parquet(war_parquets[-1])
+                war_row = war_df.filter(pl.col("player_id") == player_id)
+                if not war_row.is_empty():
+                    w = war_row.to_dicts()[0]
+                    result.update({
+                        "war":                 round(float(w["war"]), 2) if w.get("war") is not None else None,
+                        "gar":                 round(float(w["gar_total"]), 2) if w.get("gar_total") is not None else None,
+                        "contract_efficiency": round(float(w["contract_efficiency"]), 2) if w.get("contract_efficiency") is not None else None,
+                    })
+                # Compute WAR rank
+                ranked = (
+                    war_df.filter(pl.col("war").is_not_null())
+                    .pipe(lambda d: d.filter(pl.col("toi_ev") >= 200) if "toi_ev" in d.columns else d)
+                    .sort("war", descending=True)
+                )
+                ids = ranked["player_id"].to_list()
+                if player_id in ids:
+                    result["war_rank"] = ids.index(player_id) + 1
+                    result["war_total_qualified"] = len(ids)
+        except Exception:
+            pass
+
+        # ── 6. Archetype ───────────────────────────────────────────────────────
+        try:
+            arch_dir = _GRETZKY_DATA_DIR / "archetypes"
+            arch_parquets = sorted(arch_dir.glob("archetype_assignments_*.parquet")) if arch_dir.exists() else []
+            if arch_parquets:
+                arch_df = pl.read_parquet(arch_parquets[-1])
+                arch_row = arch_df.filter(pl.col("player_id") == player_id)
+                if not arch_row.is_empty():
+                    a = arch_row.to_dicts()[0]
+                    result.update({
+                        "archetype_id":   int(a["cluster_id"]) if a.get("cluster_id") is not None else None,
+                        "archetype_name": str(a.get("archetype") or a.get("archetype_name") or "") or None,
+                    })
+        except Exception:
+            pass
+
+        # ── 7. EWMA ────────────────────────────────────────────────────────────
+        try:
+            ewma_dir = _GRETZKY_DATA_DIR / "ewma"
+            ewma_parquets = sorted(ewma_dir.glob("ewma_form_*.parquet")) if ewma_dir.exists() else []
+            if ewma_parquets:
+                ewma_df = pl.read_parquet(ewma_parquets[-1])
+                ewma_row = ewma_df.filter(pl.col("player_id") == player_id)
+                if not ewma_row.is_empty():
+                    e = ewma_row.to_dicts()[0]
+                    raw_ewma = e.get("ewma_xgf60") or e.get("current_ewma") or e.get("xgf_per60")
+                    result.update({
+                        "ewma_xgf60":    round(float(raw_ewma), 3) if raw_ewma is not None else None,
+                        "ewma_form_flag": str(e["form_flag"]) if e.get("form_flag") else None,
+                        "ewma_games":    int(e["games_processed"]) if e.get("games_processed") is not None else None,
+                    })
+        except Exception:
+            pass
+
+        # ── 8. Hot Hand ────────────────────────────────────────────────────────
+        try:
+            hh_dir = _GRETZKY_DATA_DIR / "hot_hand"
+            hh_parquets = sorted(hh_dir.glob("hot_hand_summary_*.parquet")) if hh_dir.exists() else []
+            if hh_parquets:
+                hh_df = pl.read_parquet(hh_parquets[-1])
+                hh_row = hh_df.filter(pl.col("player_id") == player_id)
+                if not hh_row.is_empty():
+                    hh = hh_row.to_dicts()[0]
+                    result.update({
+                        "hot_hand_score":  round(float(hh["hot_hand_score"]), 3) if hh.get("hot_hand_score") is not None else None,
+                        "hot_hand_goals5": round(float(hh["goals_5g"]), 2)       if hh.get("goals_5g")       is not None else None,
+                        "hot_hand_xg5":    round(float(hh["xg_5g"]), 2)          if hh.get("xg_5g")          is not None else None,
+                    })
+        except Exception:
+            pass
+
+        # ── 9. Clutch ──────────────────────────────────────────────────────────
+        try:
+            ci_dir = _GRETZKY_DATA_DIR / "clutch_index"
+            ci_parquets = sorted(ci_dir.glob("clutch_index_[0-9]*.parquet")) if ci_dir.exists() else []
+            if ci_parquets:
+                ci_df = pl.read_parquet(ci_parquets[-1])
+                ci_row = ci_df.filter(pl.col("player_id") == player_id)
+                if not ci_row.is_empty():
+                    ci = ci_row.to_dicts()[0]
+                    result.update({
+                        "clutch_index":    round(float(ci["clutch_index_shrunk"]), 4) if ci.get("clutch_index_shrunk") is not None else None,
+                        "clutch_wpa_per60": round(float(ci["actual_wpa_per60"]), 4)   if ci.get("actual_wpa_per60")   is not None else None,
+                    })
+        except Exception:
+            pass
+
+        # ── 10. Special Teams ──────────────────────────────────────────────────
+        try:
+            st_dir = _GRETZKY_DATA_DIR / "special_teams"
+            st_parquets = sorted(st_dir.glob("special_teams_*.parquet")) if st_dir.exists() else []
+            if st_parquets:
+                st_df = pl.read_parquet(st_parquets[-1])
+                st_row = st_df.filter(pl.col("player_id") == player_id)
+                if not st_row.is_empty():
+                    st = st_row.to_dicts()[0]
+                    result.update({
+                        "special_teams_pp": round(float(st["pp_rating"]), 3) if st.get("pp_rating") is not None else None,
+                        "special_teams_pk": round(float(st["pk_rating"]), 3) if st.get("pk_rating") is not None else None,
+                    })
+        except Exception:
+            pass
+
+        # ── 11. Bayesian Rating ────────────────────────────────────────────────
+        try:
+            br_dir = _GRETZKY_DATA_DIR / "bayes_ratings"
+            br_parquets = sorted(br_dir.glob("player_ratings_*.parquet")) if br_dir.exists() else []
+            if br_parquets:
+                br_df = pl.read_parquet(br_parquets[-1])
+                br_row = br_df.filter(pl.col("player_id") == player_id)
+                if not br_row.is_empty():
+                    br = br_row.to_dicts()[0]
+                    result.update({
+                        "bayesian_rating":      round(float(br["posterior_mean"]),  3) if br.get("posterior_mean")  is not None else None,
+                        "bayesian_uncertainty": round(float(br["posterior_sigma"]), 3) if br.get("posterior_sigma") is not None else None,
+                    })
+        except Exception:
+            pass
+
+        # ── 12. Playoff Delta ──────────────────────────────────────────────────
+        try:
+            pd_dir = _GRETZKY_DATA_DIR / "playoff_delta"
+            pd_parquets = sorted(pd_dir.glob("playoff_delta_*.parquet")) if pd_dir.exists() else []
+            if pd_parquets:
+                pd_df = pl.read_parquet(pd_parquets[-1])
+                pd_row = pd_df.filter(pl.col("player_id") == player_id)
+                if not pd_row.is_empty():
+                    pd_r = pd_row.to_dicts()[0]
+                    reg_xgf = pd_r.get("reg_xgf_per60")
+                    po_xgf  = pd_r.get("playoff_xgf_per60")
+                    if reg_xgf is not None and po_xgf is not None and float(reg_xgf) > 0:
+                        result["playoff_delta"] = round(float(po_xgf) - float(reg_xgf), 3)
+        except Exception:
+            pass
+
+        # ── 13. Former Team Boost ──────────────────────────────────────────────
+        try:
+            ftb_dir = _GRETZKY_DATA_DIR / "former_team_boost"
+            ftb_parquets = sorted(ftb_dir.glob("former_team_boost_*.parquet")) if ftb_dir.exists() else []
+            if ftb_parquets:
+                ftb_df = pl.read_parquet(ftb_parquets[-1])
+                ftb_row = ftb_df.filter(pl.col("player_id") == player_id)
+                if not ftb_row.is_empty():
+                    ftb = ftb_row.to_dicts()[0]
+                    result.update({
+                        "former_team_boost": round(float(ftb["base_boost"]), 3) if ftb.get("base_boost") is not None else None,
+                        "former_team":       str(ftb["former_team"]) if ftb.get("former_team") else None,
+                    })
+        except Exception:
+            pass
+
+        # ── 14. Skating Baseline ───────────────────────────────────────────────
+        try:
+            skate_dir = _GRETZKY_DATA_DIR / "skating_baseline"
+            skate_parquets = sorted(skate_dir.glob("skating_baseline_*.parquet")) if skate_dir.exists() else []
+            if skate_parquets:
+                sk_df = pl.read_parquet(skate_parquets[-1])
+                sk_row = sk_df.filter(pl.col("player_id") == player_id)
+                if not sk_row.is_empty():
+                    sk = sk_row.to_dicts()[0]
+                    result.update({
+                        "skating_avg_speed_kmh":         round(float(sk["baseline_avg_speed_kmh"]), 1)          if sk.get("baseline_avg_speed_kmh")          is not None else None,
+                        "skating_max_speed_kmh":         round(float(sk["baseline_max_speed_kmh"]), 1)          if sk.get("baseline_max_speed_kmh")          is not None else None,
+                        "skating_distance_per_game_km":  round(float(sk["baseline_distance_per_game_km"]), 2)   if sk.get("baseline_distance_per_game_km")   is not None else None,
+                        "skating_zone_time_oz_pct":      round(float(sk["baseline_zone_time_pct_oz"]) * 100, 1) if sk.get("baseline_zone_time_pct_oz")       is not None else None,
+                        "skating_zone_time_dz_pct":      round(float(sk["baseline_zone_time_pct_dz"]) * 100, 1) if sk.get("baseline_zone_time_pct_dz")       is not None else None,
+                        "skating_games_sample":          int(sk["n_games_total"])                                if sk.get("n_games_total")                  is not None else None,
+                    })
+        except Exception:
+            pass
+
+        # ── 15. Puck Battles ───────────────────────────────────────────────────
+        try:
+            battles_dir = _GRETZKY_DATA_DIR / "battles"
+            battle_parquets = sorted(battles_dir.glob("puck_battle_*.parquet")) if battles_dir.exists() else []
+            if battle_parquets:
+                b_df = pl.read_parquet(battle_parquets[-1])
+                b_row = b_df.filter(pl.col("player_id") == player_id) if "player_id" in b_df.columns else pl.DataFrame()
+                if not b_row.is_empty():
+                    b = b_row.to_dicts()[0]
+                    result.update({
+                        "battle_score":       round(float(b["battle_score"]), 3)       if b.get("battle_score")       is not None else None,
+                        "battle_percentile":  round(float(b["battle_percentile"]), 1)  if b.get("battle_percentile")  is not None else None,
+                        "hits_per60":         round(float(b["hits_per60"]), 2)         if b.get("hits_per60")         is not None else None,
+                        "blocks_per60":       round(float(b["blocks_per60"]), 2)       if b.get("blocks_per60")       is not None else None,
+                        "carry_entry_pct":    round(float(b["carry_entry_pct"]) * 100, 1) if b.get("carry_entry_pct") is not None else None,
+                        "net_front_pct":      round(float(b["net_front_pct"]) * 100, 1)   if b.get("net_front_pct")  is not None else None,
+                    })
+        except Exception:
+            pass
+
+        # ── 16. Behavioral NN ──────────────────────────────────────────────────
+        try:
+            beh_dir = _GRETZKY_DATA_DIR / "behavior_net"
+            beh_parquets = sorted(beh_dir.glob("behavior_predictions_*.parquet")) if beh_dir.exists() else []
+            if beh_parquets:
+                beh_df = pl.read_parquet(beh_parquets[-1])
+                beh_row = beh_df.filter(pl.col("player_id") == player_id) if "player_id" in beh_df.columns else pl.DataFrame()
+                if not beh_row.is_empty():
+                    beh = beh_row.to_dicts()[0]
+                    result.update({
+                        "nn_carry_in_pct":       round(float(beh["carry_in"]) * 100, 1)         if beh.get("carry_in")        is not None else None,
+                        "nn_dump_pct":           round(float(beh["dump"]) * 100, 1)             if beh.get("dump")            is not None else None,
+                        "nn_shoot_slot_pct":     round(float(beh["shoot_slot"]) * 100, 1)       if beh.get("shoot_slot")      is not None else None,
+                        "nn_shoot_perimeter_pct": round(float(beh["shoot_perimeter"]) * 100, 1) if beh.get("shoot_perimeter") is not None else None,
+                        "nn_drive_net_pct":      round(float(beh["drive_net"]) * 100, 1)        if beh.get("drive_net")       is not None else None,
+                        "nn_battle_corner_pct":  round(float(beh["battle_corner"]) * 100, 1)    if beh.get("battle_corner")   is not None else None,
+                        "nn_hold_corner_pct":    round(float(beh["hold_corner"]) * 100, 1)      if beh.get("hold_corner")     is not None else None,
+                        "nn_fi_score":           round(float(beh["fi_score"]), 3)               if beh.get("fi_score")        is not None else None,
+                    })
+        except Exception:
+            pass
+
+        # ── 17. In-Season Bayesian Blend ───────────────────────────────────────
+        try:
+            inseason_dir = _GRETZKY_DATA_DIR / "inseason"
+            inseason_parquets = sorted(inseason_dir.glob("inseason_blend_*.parquet")) if inseason_dir.exists() else []
+            if inseason_parquets:
+                is_df = pl.read_parquet(inseason_parquets[-1])
+                is_row = is_df.filter(pl.col("player_id") == player_id)
+                if not is_row.is_empty():
+                    ib = is_row.to_dicts()[0]
+                    result.update({
+                        "inseason_mu_blend":   round(float(ib["mu_blend"]), 3)    if ib.get("mu_blend")    is not None else None,
+                        "inseason_ci_lower":   round(float(ib["ci_lower_95"]), 3) if ib.get("ci_lower_95") is not None else None,
+                        "inseason_ci_upper":   round(float(ib["ci_upper_95"]), 3) if ib.get("ci_upper_95") is not None else None,
+                        "inseason_games":      int(ib["games_played"])            if ib.get("games_played") is not None else None,
+                        "inseason_blend_weight": round(float(ib["blend_weight"]), 3) if ib.get("blend_weight") is not None else None,
+                    })
+        except Exception:
+            pass
+
+    # ── 18. Game Log (last 10) ─────────────────────────────────────────────────
+    try:
+        async with httpx.AsyncClient(
+            base_url="https://api-web.nhle.com",
+            timeout=8.0,
+            headers={"User-Agent": "grtzky/1.0"},
+            follow_redirects=True,
+        ) as client:
+            gl_resp = await client.get(f"/v1/player/{player_id}/game-log/now")
+            gl_resp.raise_for_status()
+            gl_data = gl_resp.json()
+
+        games_raw = gl_data.get("gameLog", [])
+        regular = [g for g in games_raw if g.get("gameTypeId", 2) == 2][:10]
+        games = []
+        for g in regular:
+            games.append({
+                "game_id":    g.get("gameId"),
+                "date":       g.get("gameDate"),
+                "opponent":   g.get("opponentAbbrev"),
+                "home_road":  g.get("homeRoadFlag"),
+                "goals":      g.get("goals", 0),
+                "assists":    g.get("assists", 0),
+                "points":     g.get("points", 0),
+                "shots":      g.get("shots", 0),
+                "toi":        g.get("toi", "0:00"),
+                "plus_minus": g.get("plusMinus", 0),
+                "pp_goals":   g.get("powerPlayGoals", 0),
+                "pp_points":  g.get("powerPlayPoints", 0),
+            })
+        n = len(games)
+        total_g = sum(x["goals"] for x in games)
+        total_a = sum(x["assists"] for x in games)
+        result["game_log"] = {
+            "games": games,
+            "summary": {
+                "n_games": n, "goals": total_g, "assists": total_a, "points": total_g + total_a,
+                "gpg": round(total_g / n, 2) if n else 0,
+                "apg": round(total_a / n, 2) if n else 0,
+                "ppg": round((total_g + total_a) / n, 2) if n else 0,
+            },
+        }
+    except Exception:
+        result["game_log"] = {"games": [], "summary": {}}
+
+    # ── 19. Line Pairs (best linemates for this player) ────────────────────────
+    if not is_goalie:
+        try:
+            pair_dir = _GRETZKY_DATA_DIR / "chemistry"
+            pair_parquets = sorted(pair_dir.glob("pair_chemistry_*.parquet")) if pair_dir.exists() else []
+            name_lut = _build_name_lookup()
+            if pair_parquets:
+                pc_df = pl.read_parquet(pair_parquets[-1])
+                # Collect all rows where player appears on either side, keeping partner_id
+                pairs_seen: dict[int, dict] = {}
+                for row in pc_df.filter(
+                    (pl.col("player_a_id") == player_id) | (pl.col("player_b_id") == player_id)
+                ).to_dicts():
+                    partner_id = int(row["player_b_id"]) if int(row["player_a_id"]) == player_id else int(row["player_a_id"])
+                    delta = row.get("chemistry_delta")
+                    if partner_id not in pairs_seen or (delta or 0) > (pairs_seen[partner_id]["chemistry_delta"] or 0):
+                        pairs_seen[partner_id] = {
+                            "partner_id":      partner_id,
+                            "partner_name":    name_lut.get(partner_id, f"Player {partner_id}"),
+                            "games_together":  row.get("games_together"),
+                            "chemistry_delta": round(float(delta), 3) if delta is not None else None,
+                            "model_xgf_pct":   round(float(row["model_xgf_pct"]) * 100, 1) if row.get("model_xgf_pct") is not None else None,
+                            "co_toi_ev":       round(float(row["co_toi_ev"]), 0) if row.get("co_toi_ev") is not None else None,
+                        }
+                result["line_pairs"] = sorted(pairs_seen.values(), key=lambda x: x["chemistry_delta"] or 0, reverse=True)[:5]
+        except Exception:
+            result["line_pairs"] = []
+
+    _cache_set(cache_key, result, ttl=120.0)
+    return result
+
+
 @app.get("/phase2/players")
 async def phase2_players() -> dict:
     """Known player names for client-side autocomplete in the Phase 2 rating lookup.
@@ -1991,27 +3367,35 @@ async def phase2_players() -> dict:
 
     players: dict[str, dict] = {}
 
-    # Skaters from xg_finishing
+    # Skaters from xg_finishing (include shooter_id as player_id)
     xg_dir = _GRETZKY_DATA_DIR / "xg_finishing"
     xg_parquets = sorted(xg_dir.glob("xg_finishing_*.parquet")) if xg_dir.exists() else []
     if xg_parquets:
         df = pl.read_parquet(xg_parquets[-1])
         if "shooter_name" in df.columns:
-            cols = ["shooter_name"] + (["team"] if "team" in df.columns else [])
+            has_id = "shooter_id" in df.columns
+            cols = ["shooter_name"] + (["shooter_id"] if has_id else []) + (["team"] if "team" in df.columns else [])
             pos_map = _shots_name_position_map()
             for r in df.select(cols).drop_nulls(subset=["shooter_name"]).unique(subset=["shooter_name"]).to_dicts():
                 name = r["shooter_name"]
-                players[name] = {"name": name, "team": r.get("team") or "", "position": pos_map.get(name, "")}
+                pid = int(r["shooter_id"]) if has_id and r.get("shooter_id") is not None else None
+                players[name] = {"name": name, "team": r.get("team") or "", "position": pos_map.get(name, ""), "player_id": pid}
 
     # Goalies from goalie_stats
     goalie_dir = _module_dir("goalie_stats")
     goalie_parquets = sorted(goalie_dir.glob("goalie_stats_*.parquet")) if goalie_dir.exists() else []
     if goalie_parquets:
-        gdf = pl.read_parquet(goalie_parquets[-1], columns=["player_name", "team"])
+        has_id = True
+        try:
+            gdf = pl.read_parquet(goalie_parquets[-1], columns=["player_id", "player_name", "team"])
+        except Exception:
+            has_id = False
+            gdf = pl.read_parquet(goalie_parquets[-1], columns=["player_name", "team"])
         for r in gdf.drop_nulls(subset=["player_name"]).unique(subset=["player_name"]).to_dicts():
             name = r["player_name"]
             if name not in players:
-                players[name] = {"name": name, "team": r.get("team") or "", "position": "G"}
+                pid = int(r["player_id"]) if has_id and r.get("player_id") is not None else None
+                players[name] = {"name": name, "team": r.get("team") or "", "position": "G", "player_id": pid}
 
     return {"players": sorted(players.values(), key=lambda p: p["name"])}
 
