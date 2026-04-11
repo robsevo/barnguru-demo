@@ -552,12 +552,11 @@ function PlayerDetailCard({
 
       {/* Why hot/cold explanation */}
       {whyHot && (
-        <div className={`px-5 py-2.5 border-b border-white/[0.05] text-[11px] font-medium
+        <div className={`px-5 py-2.5 border-b border-white/[0.05] text-[11px] font-medium text-center
           ${(formFlag === "hot" || formFlag === "rising" || (ewmaAbove ?? 0) > 0)
             ? "text-[#4ade80]/80 bg-[#4ade80]/[0.04]"
             : "text-[#f87171]/80 bg-[#f87171]/[0.04]"}`}
         >
-          
           {whyHot}
         </div>
       )}
@@ -587,7 +586,7 @@ function PlayerDetailCard({
           <div className="space-y-0">
             {data.finishing != null && (
               <StatRow label="Finishing Ability"
-                value={`${data.finishing > 0 ? "+" : ""}${data.finishing.toFixed(1)} vs xG`}
+                value={`${data.finishing > 0 ? "+" : ""}${data.finishing.toFixed(1)} xG`}
                 tier={finishingTier(data.finishing)}
                 sub="Goals above what shot quality predicts" />
             )}
@@ -949,6 +948,7 @@ export default function PlayersPage() {
   const [xgaList,        setXgaList]        = useState<XGAEntry[] | null>(null);
   const [edgeSkateMetric, setEdgeSkateMetric] = useState<"max_speed_kmh" | "avg_speed_kmh" | "distance_per_game_km">("max_speed_kmh");
   const [edgeShotMetric,  setEdgeShotMetric]  = useState<"max_shot_speed_mph" | "avg_shot_speed_mph" | "hard_shot_count">("max_shot_speed_mph");
+  const [stSide,          setStSide]          = useState<"PP" | "PK">("PP");
 
   // Fetch all leaderboard data on mount
   useEffect(() => {
@@ -1172,6 +1172,12 @@ export default function PlayersPage() {
         </div>
       )}
 
+      {/* ── Leaderboards header ── */}
+      <div className="flex items-center gap-3 mb-1">
+        <span className="text-[9px] font-black uppercase tracking-[0.28em] text-[#a78bfa]/40">Leaderboards</span>
+        <div className="flex-1 h-px bg-gradient-to-r from-[#a78bfa]/15 to-transparent" />
+      </div>
+
       {/* ── Sections ── */}
       <div className="flex flex-col gap-4">
 
@@ -1214,7 +1220,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* Top Performers */}
-        <Section title="WAR Leaderboard" count={warList?.length}>
+        <Section title="WAR Rankings" count={warList?.length}>
           {warList === null ? <SectionLoading /> :
            warList.length === 0 ? <SectionEmpty msg="Run compute-war to populate." /> : (
            <div className="space-y-1">
@@ -1475,7 +1481,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* Goalie Leaderboard */}
-        <Section title="Goalie Leaderboard" count={goalieList?.length}>
+        <Section title="Goalies" count={goalieList?.length}>
           <div className="flex gap-1.5 mb-2 flex-wrap">
             {([
               { k: "gsax",     label: "GSAx",        tip: "Goals Saved Above Expected" },
@@ -1540,21 +1546,26 @@ export default function PlayersPage() {
           )}
         </Section>
 
-        {/* PP & PK xGF/60 Leaderboard */}
+        {/* PP & PK xGF/60 */}
         <Section title="Special Teams xGF/60">
           <div className="flex gap-1.5 mb-2">
             {(["PP", "PK"] as const).map(side => (
-              <span key={side} className="px-2.5 py-1 rounded-lg text-[10px] font-semibold uppercase tracking-wide border"
-                style={{ color:"#a78bfa", borderColor:"rgba(167,139,250,0.30)", backgroundColor:"rgba(167,139,250,0.07)" }}>{side}</span>
+              <button key={side}
+                onClick={() => setStSide(side)}
+                className="px-2.5 py-1 rounded-lg text-[10px] font-semibold uppercase tracking-wide border transition-all duration-150"
+                style={stSide === side
+                  ? side === "PP"
+                    ? { color:"#fbbf24", borderColor:"rgba(251,191,36,0.40)", backgroundColor:"rgba(251,191,36,0.10)" }
+                    : { color:"#60a5fa", borderColor:"rgba(96,165,250,0.40)", backgroundColor:"rgba(96,165,250,0.10)" }
+                  : { color:"rgba(255,255,255,0.25)", borderColor:"rgba(255,255,255,0.08)", backgroundColor:"transparent" }}
+              >{side === "PP" ? "Power Play" : "Penalty Kill"}</button>
             ))}
           </div>
           <InfoTip tip="Per-player PP and PK xGF/60 isolated from team context. PP xGF/60 = expected goals generated per 60 min on the power play; PK xGF/60 = expected goals generated while short-handed. Min 50 PP/PK minutes. Source: GRTZKY model 2.7." />
-          <div className="grid gap-3 sm:grid-cols-2 mt-2">
-            {/* PP side */}
-            <div>
-              <p className="text-[9px] font-semibold uppercase tracking-widest text-[#fbbf24]/60 mb-1.5 pl-1">Power Play xGF/60</p>
+          {stSide === "PP" ? (
+            <div className="mt-2">
               {ppList === null ? <SectionLoading /> : ppList.length === 0 ? <SectionEmpty msg="Run train-special-teams." /> : (
-                <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
+                <div className="space-y-1 max-h-72 overflow-y-auto pr-1">
                   {ppList.map((p, i) => (
                     <div key={i} className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] transition-all cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                       <span className="text-[9px] font-mono text-white/25 w-4 shrink-0">{p.rank}</span>
@@ -1566,11 +1577,10 @@ export default function PlayersPage() {
                 </div>
               )}
             </div>
-            {/* PK side */}
-            <div>
-              <p className="text-[9px] font-semibold uppercase tracking-widest text-[#60a5fa]/60 mb-1.5 pl-1">Penalty Kill xGF/60</p>
+          ) : (
+            <div className="mt-2">
               {pkList === null ? <SectionLoading /> : pkList.length === 0 ? <SectionEmpty msg="Run train-special-teams." /> : (
-                <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
+                <div className="space-y-1 max-h-72 overflow-y-auto pr-1">
                   {pkList.map((p, i) => (
                     <div key={i} className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] transition-all cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                       <span className="text-[9px] font-mono text-white/25 w-4 shrink-0">{p.rank}</span>
@@ -1582,7 +1592,7 @@ export default function PlayersPage() {
                 </div>
               )}
             </div>
-          </div>
+          )}
         </Section>
 
         {/* Hot Hand Leaderboard */}

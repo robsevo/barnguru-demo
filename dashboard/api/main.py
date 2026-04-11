@@ -2460,7 +2460,7 @@ async def phase2_edge_leaderboard(
         # Min games played to qualify
         MIN_GP = 10
         df = df.filter(pl.col("games_played") >= MIN_GP).filter(pl.col(metric).is_not_null())
-        ranked = df.sort(metric, descending=(metric != "distance_per_game_km")).head(limit)
+        ranked = df.sort(metric, descending=True).head(limit)
         rows = []
         for i, r in enumerate(ranked.to_dicts()):
             rows.append({

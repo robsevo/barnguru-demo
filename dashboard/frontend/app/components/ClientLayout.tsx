@@ -344,10 +344,10 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
                 { href: "/gamecentre", labelSm: "Live",  label: "Games",     active: pathname === "/gamecentre" || pathname.startsWith("/game/") },
                 { href: "/standings",  labelSm: "Stnd",  label: "Standings", active: pathname === "/standings" },
                 { href: "/stats",      labelSm: "Stats", label: "Stats",     active: pathname === "/stats" },
-                { href: "/cortex",     labelSm: "Crtx",  label: "Cortex",    active: pathname === "/cortex" },
+                { href: "/players",    labelSm: "Crtx",  label: "Cortex",    active: pathname === "/players" || pathname.startsWith("/players/") },
               ] as const
             ).map(({ href, labelSm, label, active }) => {
-              const isCortex = href === "/cortex";
+              const isCortex = label === "Cortex";
               return (
                 <Link
                   key={href}
