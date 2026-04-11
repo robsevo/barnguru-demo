@@ -144,11 +144,15 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
 
         {/* Sidebar */}
         <aside
-          className={`fixed top-0 left-0 z-50 h-full w-64 flex flex-col
-            bg-gradient-to-b from-[#0d0f13]/99 to-[#090a0c]/99 backdrop-blur-2xl border-r border-white/[0.08]
+          className={`fixed top-0 left-0 z-50 h-full w-64 flex flex-col backdrop-blur-2xl border-r border-white/[0.08]
             shadow-[4px_0_40px_rgba(0,0,0,0.85),inset_-1px_0_0_rgba(218,226,236,0.07)]
             transition-transform duration-300 ease-in-out
             ${open ? "translate-x-0" : "-translate-x-full"}`}
+          style={{
+            background: theme
+              ? `linear-gradient(180deg, rgba(var(--header-r), var(--header-g), var(--header-b), 0.99) 0%, rgba(var(--card-mid-r), var(--card-mid-g), var(--card-mid-b), 0.99) 100%)`
+              : "linear-gradient(180deg, rgba(13,15,19,0.99) 0%, rgba(9,10,12,0.99) 100%)",
+          }}
         >
           {/* Sidebar header */}
           <div className="flex items-center justify-between px-4 py-3.5 border-b border-white/[0.07] shrink-0">
@@ -312,7 +316,9 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
           <header
             className="sticky top-0 z-30 flex items-center gap-3 px-2 sm:px-3 h-12 backdrop-blur-2xl select-none"
             style={{
-              background: `linear-gradient(to right, rgba(7,8,9,0.97), rgba(10,11,15,0.95), rgba(7,8,9,0.97))`,
+              background: theme
+                ? `linear-gradient(to right, rgba(var(--header-r), var(--header-g), var(--header-b), 0.98), rgba(var(--header-r), var(--header-g), var(--header-b), 0.95), rgba(var(--header-r), var(--header-g), var(--header-b), 0.98))`
+                : `linear-gradient(to right, rgba(7,8,9,0.97), rgba(10,11,15,0.95), rgba(7,8,9,0.97))`,
               borderBottom: `1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.30)`,
               boxShadow: `0 1px 0 rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.18), 0 4px 32px rgba(0,0,0,0.70), 0 0 40px rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.04), inset 0 1px 0 rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.10)`,
             }}

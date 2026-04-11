@@ -113,10 +113,39 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 /* ─── Team theme overrides ───────────────────────────────────────────────────
    When a team theme is active ([data-team-theme] is set on <html>),
-   replace all gold (#C9A84C) UI chrome with the team brand color.
+   replace gold chrome + backgrounds with team brand color palette.
    Tailwind v4 compiles arbitrary hex classes to hardcoded values, so we
    override them explicitly here. Game-specific team colors are untouched.
 ─────────────────────────────────────────────────────────────────────────── */
+
+/* Page background — replaces the ice-grey gradient with team-coloured dark */
+[data-team-theme] body {
+  background:
+    radial-gradient(ellipse 90% 50% at 50% -8%,  rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.18) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 55% at 15% 70%,  rgba(var(--body-base-r), var(--body-base-g), var(--body-base-b), 0.50) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 40% at 85% 75%,  rgba(var(--body-base-r), var(--body-base-g), var(--body-base-b), 0.35) 0%, transparent 60%),
+    radial-gradient(ellipse 120% 80% at 50% 50%, rgba(var(--body-base-r), var(--body-base-g), var(--body-base-b), 0.20) 0%, transparent 70%),
+    rgb(var(--body-base-r), var(--body-base-g), var(--body-base-b));
+  background-attachment: fixed;
+}
+
+/* Glass cards — replace brownish dark with team-secondary dark blend */
+[data-team-theme] .glass {
+  background: linear-gradient(160deg,
+    rgba(var(--card-base-r), var(--card-base-g), var(--card-base-b), 0.90) 0%,
+    rgba(var(--card-mid-r),  var(--card-mid-g),  var(--card-mid-b),  0.97) 100%
+  ) !important;
+  border-color: rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.20) !important;
+  box-shadow: 0 4px 28px rgba(0,0,0,0.70), inset 0 1px 0 rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.08) !important;
+}
+
+[data-team-theme] .glass-sm {
+  background: linear-gradient(160deg,
+    rgba(var(--card-base-r), var(--card-base-g), var(--card-base-b), 0.75) 0%,
+    rgba(var(--card-mid-r),  var(--card-mid-g),  var(--card-mid-b),  0.90) 100%
+  ) !important;
+  border-color: rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.14) !important;
+}
 
 /* Border colors */
 [data-team-theme] .border-\[\#C9A84C\] { border-color: var(--brand-hex) !important; }

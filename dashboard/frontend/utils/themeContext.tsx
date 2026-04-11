@@ -4,7 +4,8 @@ import { createContext, useContext, useState, useEffect, useCallback } from "rea
 
 export interface TeamTheme {
   abbrev: string;
-  primaryColor: string; // hex e.g. "#6CACE4"
+  primaryColor: string;   // hex e.g. "#AF1E2D"
+  secondaryColor: string; // hex e.g. "#192168"
   logoUrl: string;
 }
 
@@ -26,7 +27,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<TeamTheme | null>(null);
   const [isShowingLoader, setIsShowingLoader] = useState(false);
 
-  // Rehydrate from localStorage on mount
   useEffect(() => {
     try {
       const saved = localStorage.getItem("grtzky_teamTheme");

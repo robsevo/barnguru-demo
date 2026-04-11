@@ -365,7 +365,7 @@ export default function TeamPage() {
           </button>
         ) : (
           <button
-            onClick={() => setTeamTheme({ abbrev: team, primaryColor: teamColor, logoUrl: logoUrl(team) })}
+            onClick={() => setTeamTheme({ abbrev: team, primaryColor: teamColor, secondaryColor, logoUrl: logoUrl(team) })}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-all duration-150 border hover:opacity-90"
             style={{
               color: teamColor,
