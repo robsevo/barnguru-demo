@@ -39,34 +39,39 @@ function luminance([r, g, b]: [number, number, number]): number {
   return 0.2126 * (r / 255) + 0.7152 * (g / 255) + 0.0722 * (b / 255);
 }
 
+function applyCortexVars(root: HTMLElement) {
+  root.setAttribute("data-team-theme", "cortex");
+  root.style.setProperty("--brand-hex", CORTEX.brandHex);
+  root.style.setProperty("--brand-r", String(CORTEX.br));
+  root.style.setProperty("--brand-g", String(CORTEX.bg));
+  root.style.setProperty("--brand-b", String(CORTEX.bb));
+  root.style.setProperty("--body-base-r", String(CORTEX.bodyR));
+  root.style.setProperty("--body-base-g", String(CORTEX.bodyG));
+  root.style.setProperty("--body-base-b", String(CORTEX.bodyB));
+  root.style.setProperty("--card-base-r", String(CORTEX.cardR));
+  root.style.setProperty("--card-base-g", String(CORTEX.cardG));
+  root.style.setProperty("--card-base-b", String(CORTEX.cardB));
+  root.style.setProperty("--card-mid-r",  String(CORTEX.midR));
+  root.style.setProperty("--card-mid-g",  String(CORTEX.midG));
+  root.style.setProperty("--card-mid-b",  String(CORTEX.midB));
+  root.style.setProperty("--header-r", String(CORTEX.headR));
+  root.style.setProperty("--header-g", String(CORTEX.headG));
+  root.style.setProperty("--header-b", String(CORTEX.headB));
+}
+
 export default function ThemeInjector() {
-  const { theme } = useTheme();
+  const { theme, cortexPinned } = useTheme();
   const pathname = usePathname();
   const isCortexPage = pathname.startsWith("/players");
+  // Apply cortex if: on /players page OR user pinned it site-wide (and no team theme overrides)
+  const useCortex = !theme && (isCortexPage || cortexPinned);
 
   useEffect(() => {
     const root = document.documentElement;
 
     if (!theme) {
-      if (isCortexPage) {
-        // Auto-apply cortex purple theme on /players pages
-        root.setAttribute("data-team-theme", "cortex");
-        root.style.setProperty("--brand-hex", CORTEX.brandHex);
-        root.style.setProperty("--brand-r", String(CORTEX.br));
-        root.style.setProperty("--brand-g", String(CORTEX.bg));
-        root.style.setProperty("--brand-b", String(CORTEX.bb));
-        root.style.setProperty("--body-base-r", String(CORTEX.bodyR));
-        root.style.setProperty("--body-base-g", String(CORTEX.bodyG));
-        root.style.setProperty("--body-base-b", String(CORTEX.bodyB));
-        root.style.setProperty("--card-base-r", String(CORTEX.cardR));
-        root.style.setProperty("--card-base-g", String(CORTEX.cardG));
-        root.style.setProperty("--card-base-b", String(CORTEX.cardB));
-        root.style.setProperty("--card-mid-r",  String(CORTEX.midR));
-        root.style.setProperty("--card-mid-g",  String(CORTEX.midG));
-        root.style.setProperty("--card-mid-b",  String(CORTEX.midB));
-        root.style.setProperty("--header-r", String(CORTEX.headR));
-        root.style.setProperty("--header-g", String(CORTEX.headG));
-        root.style.setProperty("--header-b", String(CORTEX.headB));
+      if (useCortex) {
+        applyCortexVars(root);
       } else {
         root.removeAttribute("data-team-theme");
         const vars = [
@@ -125,7 +130,7 @@ export default function ThemeInjector() {
     root.style.setProperty("--header-r", String(hr));
     root.style.setProperty("--header-g", String(hg));
     root.style.setProperty("--header-b", String(hb));
-  }, [theme, isCortexPage]);
+  }, [theme, useCortex]);
 
   return null;
 }

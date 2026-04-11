@@ -14,6 +14,8 @@ interface ThemeContextValue {
   setTeamTheme: (theme: TeamTheme) => void;
   clearTheme: () => void;
   isShowingLoader: boolean;
+  cortexPinned: boolean;
+  setCortexPinned: (v: boolean) => void;
 }
 
 export const ThemeContext = createContext<ThemeContextValue>({
@@ -21,18 +23,20 @@ export const ThemeContext = createContext<ThemeContextValue>({
   setTeamTheme: () => {},
   clearTheme: () => {},
   isShowingLoader: false,
+  cortexPinned: false,
+  setCortexPinned: () => {},
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<TeamTheme | null>(null);
   const [isShowingLoader, setIsShowingLoader] = useState(false);
+  const [cortexPinned, setCortexPinnedState] = useState(false);
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem("grtzky_teamTheme");
-      if (saved) {
-        setThemeState(JSON.parse(saved));
-      }
+      if (saved) setThemeState(JSON.parse(saved));
+      setCortexPinnedState(localStorage.getItem("grtzky_cortexPinned") === "1");
     } catch {}
   }, []);
 
@@ -49,8 +53,14 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setThemeState(null);
   }, []);
 
+  const setCortexPinned = useCallback((v: boolean) => {
+    if (v) localStorage.setItem("grtzky_cortexPinned", "1");
+    else localStorage.removeItem("grtzky_cortexPinned");
+    setCortexPinnedState(v);
+  }, []);
+
   return (
-    <ThemeContext.Provider value={{ theme, setTeamTheme, clearTheme, isShowingLoader }}>
+    <ThemeContext.Provider value={{ theme, setTeamTheme, clearTheme, isShowingLoader, cortexPinned, setCortexPinned }}>
       {children}
     </ThemeContext.Provider>
   );

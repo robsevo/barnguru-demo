@@ -122,11 +122,11 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
   const [username, setUsername] = useState<string | null>(null);
   const [hasLive, setHasLive] = useState(false);
   const pathname = usePathname();
-  const { theme, clearTheme } = useTheme();
-
+  const { theme, clearTheme, cortexPinned } = useTheme();
   const isCortexPage = pathname.startsWith("/players");
-  const brandHex = theme?.primaryColor ?? (isCortexPage ? "#a78bfa" : "#C9A84C");
-  const brandHex2 = theme ? lightenHex(theme.primaryColor) : (isCortexPage ? "#c4b5fd" : "#E8D090");
+  const isCortexMode = !theme && (isCortexPage || cortexPinned);
+  const brandHex = theme?.primaryColor ?? (isCortexMode ? "#a78bfa" : "#C9A84C");
+  const brandHex2 = theme ? lightenHex(theme.primaryColor) : (isCortexMode ? "#c4b5fd" : "#E8D090");
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -372,11 +372,11 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
             </button>
 
             {/* Logo + name */}
-            <Link href={isCortexPage ? "/players" : "/"} className="inline-flex items-center shrink-0 pr-1">
+            <Link href={isCortexMode ? "/players" : "/"} className="inline-flex items-center shrink-0 pr-1">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               {theme ? (
                 <img src={theme.logoUrl} alt={theme.abbrev} className="h-8 sm:h-9 w-auto object-contain block" />
-              ) : isCortexPage ? (
+              ) : isCortexMode ? (
                 <svg width="36" height="36" viewBox="0 0 48 48" fill="none" aria-hidden="true" className="shrink-0">
                   <path d="M24 2 L42 12 L42 36 L24 46 L6 36 L6 12 Z" stroke="#a78bfa" strokeWidth="0.9" strokeOpacity="0.28" fill="#a78bfa" fillOpacity="0.03"/>
                   <circle cx="24" cy="24" r="17" stroke="#a78bfa" strokeWidth="0.6" strokeOpacity="0.12" fill="none"/>
@@ -410,12 +410,12 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                 className="font-black italic tracking-[0.06em] text-[11px] sm:text-[17px] bg-clip-text text-transparent leading-none pr-1.5"
                 style={{
                   fontFamily: "var(--font-condensed)",
-                  backgroundImage: isCortexPage && !theme
+                  backgroundImage: isCortexMode
                     ? `linear-gradient(to right, #fff, #c4b5fd, #a78bfa)`
                     : `linear-gradient(to right, #fff, ${brandHex2}, ${brandHex})`,
                 }}
               >
-                {theme ? theme.abbrev : isCortexPage ? "CORTEX" : "GRTZKY"}
+                {theme ? theme.abbrev : isCortexMode ? "CORTEX" : "GRTZKY"}
               </span>
             </Link>
 
@@ -424,7 +424,7 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
               className="text-[9px] font-medium tracking-[0.16em] uppercase hidden lg:block"
               style={{ color: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.30)` }}
             >
-              {theme ? "Team Theme Active" : isCortexPage ? "Player Intelligence · Neural Models" : "Bayesian Analytics and Rating Network"}
+              {theme ? "Team Theme Active" : isCortexMode ? "Player Intelligence · Neural Models" : "Bayesian Analytics and Rating Network"}
             </span>
 
             {/* Quick-nav buttons */}

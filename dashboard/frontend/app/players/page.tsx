@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { TEAM_COLORS, TEAM_SECONDARY, logoUrl } from "@/utils/nhl";
+import { useTheme } from "@/utils/themeContext";
 
 function darkBlend(hex: string, darkness = 0.88): string {
   const base = [9, 10, 12];
@@ -883,21 +884,45 @@ function InfoTip({ tip }: { tip: string }) {
 
 function CortexAbout() {
   const [open, setOpen] = useState(false);
+  const { cortexPinned, setCortexPinned } = useTheme();
   return (
     <div className="mb-4">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className={`mx-auto flex items-center gap-1.5 px-4 py-1.5 rounded-lg border transition-all duration-200 ${
-          open
-            ? "bg-[#a78bfa]/12 border-[#a78bfa]/35 shadow-[0_0_12px_rgba(167,139,250,0.15)]"
-            : "bg-[#a78bfa]/[0.05] border-[#a78bfa]/15 hover:bg-[#a78bfa]/10 hover:border-[#a78bfa]/30"
-        }`}
-      >
-        <span className="text-[8px] font-black uppercase tracking-[0.24em] bg-gradient-to-r from-white via-[#c4b5fd] to-[#a78bfa] bg-clip-text text-transparent">
-          What is Cortex?
-        </span>
-        <span className={`text-[#a78bfa]/50 text-[7px] transition-transform duration-200 ${open ? "rotate-180" : ""}`}>▼</span>
-      </button>
+      <div className="flex items-center justify-center gap-2">
+        <button
+          onClick={() => setOpen(o => !o)}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg border transition-all duration-200 ${
+            open
+              ? "bg-[#a78bfa]/12 border-[#a78bfa]/35 shadow-[0_0_12px_rgba(167,139,250,0.15)]"
+              : "bg-[#a78bfa]/[0.05] border-[#a78bfa]/15 hover:bg-[#a78bfa]/10 hover:border-[#a78bfa]/30"
+          }`}
+        >
+          <span className="text-[8px] font-black uppercase tracking-[0.24em] bg-gradient-to-r from-white via-[#c4b5fd] to-[#a78bfa] bg-clip-text text-transparent">
+            What is Cortex?
+          </span>
+          <span className={`text-[#a78bfa]/50 text-[7px] transition-transform duration-200 ${open ? "rotate-180" : ""}`}>▼</span>
+        </button>
+
+        {/* Pin cortex theme site-wide */}
+        <button
+          onClick={() => setCortexPinned(!cortexPinned)}
+          title={cortexPinned ? "Cortex theme active site-wide — click to disable" : "Keep Cortex theme across all pages"}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all duration-200 ${
+            cortexPinned
+              ? "bg-[#a78bfa]/18 border-[#a78bfa]/55 shadow-[0_0_14px_rgba(167,139,250,0.22)] text-[#c4b5fd]"
+              : "bg-[#a78bfa]/[0.04] border-[#a78bfa]/15 text-[#a78bfa]/45 hover:bg-[#a78bfa]/10 hover:border-[#a78bfa]/30 hover:text-[#a78bfa]/70"
+          }`}
+        >
+          {/* Pin icon */}
+          <svg width="10" height="10" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.2" strokeOpacity="0.6" fill="none"/>
+            <circle cx="7" cy="7" r="2.5" fill="currentColor" fillOpacity={cortexPinned ? "0.95" : "0.5"}/>
+            {cortexPinned && <circle cx="7" cy="7" r="1.2" fill="white" fillOpacity="0.65"/>}
+          </svg>
+          <span className="text-[8px] font-black uppercase tracking-[0.20em]">
+            {cortexPinned ? "Theme On" : "Keep Theme"}
+          </span>
+        </button>
+      </div>
 
       <div className={`overflow-hidden transition-all duration-300 ease-in-out ${open ? "max-h-64 opacity-100 mt-3" : "max-h-0 opacity-0 mt-0"}`}>
         <div className="mx-auto max-w-lg rounded-xl border border-[#a78bfa]/15 bg-[#a78bfa]/[0.04] px-4 py-3">
