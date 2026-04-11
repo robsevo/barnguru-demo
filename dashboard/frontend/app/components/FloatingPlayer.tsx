@@ -13,6 +13,7 @@ export default function FloatingPlayer() {
 
   // ── Responsive width: 480px on desktop, 320px on mobile ────────────────────
   const [pipW, setPipW] = useState(320);
+  const [pipH, setPipH] = useState<number | null>(null); // null = auto 16:9
   const snapToBottomRight = useCallback((w: number) => ({
     x: Math.max(8, window.innerWidth  - w - 16),
     y: Math.max(8, window.innerHeight - Math.round(w * 9 / 16) - 60),
@@ -30,13 +31,76 @@ export default function FloatingPlayer() {
     if (!stream) return;
     const w = window.innerWidth >= 768 ? 520 : 320;
     setPipW(w);
+    setPipH(null);
     setPos(snapToBottomRight(w));
   }, [stream?.url, snapToBottomRight]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Drag — document-level listeners, reliable across all child elements ─────
   const posRef   = useRef(pos);
   posRef.current = pos;
+  const pipWRef  = useRef(pipW);
+  pipWRef.current = pipW;
+  const pipHRef  = useRef<number | null>(pipH);
+  pipHRef.current = pipH;
   const dragging = useRef<{ ox: number; oy: number; px: number; py: number } | null>(null);
+  const resizing = useRef<{
+    corner: "br" | "bl" | "tr" | "tl";
+    ox: number; oy: number;
+    pw: number; ph: number;
+    px: number; py: number;
+  } | null>(null);
+
+  const makeResizeHandler = (corner: "br" | "bl" | "tr" | "tl") => (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const currentH = pipHRef.current ?? Math.round(pipWRef.current * 9 / 16);
+    resizing.current = {
+      corner,
+      ox: e.clientX, oy: e.clientY,
+      pw: pipWRef.current, ph: currentH,
+      px: posRef.current.x, py: posRef.current.y,
+    };
+    const MIN_W = 200;
+    const onMove = (ev: PointerEvent) => {
+      if (!resizing.current) return;
+      const { corner: c, ox, oy, pw, ph, px, py } = resizing.current;
+      const dx = ev.clientX - ox;
+      const dy = ev.clientY - oy;
+      const MAX_W = window.innerWidth * 0.95;
+      let newW = pw, newH = ph, newX = px, newY = py;
+      if (c === "br") {
+        newW = Math.max(MIN_W, Math.min(MAX_W, pw + dx));
+        newH = Math.max(112, ph + dy);
+      } else if (c === "bl") {
+        newW = Math.max(MIN_W, Math.min(MAX_W, pw - dx));
+        newH = Math.max(112, ph + dy);
+        newX = px + (pw - newW);
+      } else if (c === "tr") {
+        newW = Math.max(MIN_W, Math.min(MAX_W, pw + dx));
+        newH = Math.max(112, ph - dy);
+        newY = py + (ph - newH);
+      } else {
+        newW = Math.max(MIN_W, Math.min(MAX_W, pw - dx));
+        newH = Math.max(112, ph - dy);
+        newX = px + (pw - newW);
+        newY = py + (ph - newH);
+      }
+      setPipW(newW);
+      setPipH(newH);
+      setPos({
+        x: Math.max(0, Math.min(window.innerWidth - newW, newX)),
+        y: Math.max(0, Math.min(window.innerHeight - 40, newY)),
+      });
+    };
+    const onUp = () => {
+      resizing.current = null;
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+  };
 
   const onHeaderPointerDown = useCallback((e: React.PointerEvent) => {
     // Only drag on primary button, ignore close/link clicks
@@ -215,6 +279,40 @@ export default function FloatingPlayer() {
       className="fixed z-[9999] select-none"
       style={{ left: pos.x, top: pos.y, width: pipW }}
     >
+      {/* ── Corner resize handles ──────────────────────────────────────── */}
+      {/* top-left */}
+      <div className="absolute -top-1 -left-1 w-5 h-5 z-10 cursor-nw-resize group/tl"
+        onPointerDown={makeResizeHandler("tl")}>
+        <div className="absolute top-1 left-1 w-3 h-3 opacity-0 group-hover/tl:opacity-100 transition-opacity duration-150">
+          <div className="absolute top-0 left-0 w-full h-[2px] bg-[#C9A84C]/50 rounded" />
+          <div className="absolute top-0 left-0 h-full w-[2px] bg-[#C9A84C]/50 rounded" />
+        </div>
+      </div>
+      {/* top-right */}
+      <div className="absolute -top-1 -right-1 w-5 h-5 z-10 cursor-ne-resize group/tr"
+        onPointerDown={makeResizeHandler("tr")}>
+        <div className="absolute top-1 right-1 w-3 h-3 opacity-0 group-hover/tr:opacity-100 transition-opacity duration-150">
+          <div className="absolute top-0 right-0 w-full h-[2px] bg-[#C9A84C]/50 rounded" />
+          <div className="absolute top-0 right-0 h-full w-[2px] bg-[#C9A84C]/50 rounded" />
+        </div>
+      </div>
+      {/* bottom-left */}
+      <div className="absolute -bottom-1 -left-1 w-5 h-5 z-10 cursor-sw-resize group/bl"
+        onPointerDown={makeResizeHandler("bl")}>
+        <div className="absolute bottom-1 left-1 w-3 h-3 opacity-0 group-hover/bl:opacity-100 transition-opacity duration-150">
+          <div className="absolute bottom-0 left-0 w-full h-[2px] bg-[#C9A84C]/50 rounded" />
+          <div className="absolute bottom-0 left-0 h-full w-[2px] bg-[#C9A84C]/50 rounded" />
+        </div>
+      </div>
+      {/* bottom-right */}
+      <div className="absolute -bottom-1 -right-1 w-5 h-5 z-10 cursor-se-resize group/br"
+        onPointerDown={makeResizeHandler("br")}>
+        <div className="absolute bottom-1 right-1 w-3 h-3 opacity-0 group-hover/br:opacity-100 transition-opacity duration-150">
+          <div className="absolute bottom-0 right-0 w-full h-[2px] bg-[#C9A84C]/50 rounded" />
+          <div className="absolute bottom-0 right-0 h-full w-[2px] bg-[#C9A84C]/50 rounded" />
+        </div>
+      </div>
+
       <div className="rounded-xl overflow-hidden border border-[#C9A84C]/[0.30] bg-[#08090b]
         shadow-[0_16px_48px_rgba(0,0,0,0.90),0_4px_16px_rgba(0,0,0,0.70),inset_0_1px_0_rgba(201,168,76,0.12)]">
 
@@ -253,7 +351,7 @@ export default function FloatingPlayer() {
             <button
               onClick={deactivate}
               onPointerDown={e => e.stopPropagation()}
-              className="text-[11px] text-white/25 hover:text-white/70 transition-colors leading-none px-1"
+              className="w-7 h-7 flex items-center justify-center rounded-md text-[14px] text-white/40 hover:text-white hover:bg-[#f87171]/20 border border-transparent hover:border-[#f87171]/30 transition-all duration-150"
               title="Close"
             >
               ✕
@@ -262,7 +360,7 @@ export default function FloatingPlayer() {
         </div>
 
         {/* ── Video / iframe area ────────────────────────────────────────── */}
-        <div className="relative bg-black" style={{ aspectRatio: "16/9" }}>
+        <div className="relative bg-black" style={pipH !== null ? { height: pipH } : { aspectRatio: "16/9" }}>
           {isIframe ? (
             <iframe
               src={`/api/stream-embed?url=${encodeURIComponent(stream.url)}`}

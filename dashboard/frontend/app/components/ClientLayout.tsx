@@ -44,6 +44,27 @@ function AboutDisclaimer() {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+function MiniDNA() {
+  return (
+    <svg width="11" height="14" viewBox="0 0 26 32" fill="none" aria-hidden="true" className="shrink-0">
+      <path d="M21 0 C5 3 3 7 3 10 C3 13 5 17 21 20 C21 20 5 23 3 26 C3 29 21 31 21 32"
+        stroke="#a78bfa" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
+      <path d="M5 0 C21 3 23 7 23 10 C23 13 21 17 5 20 C5 20 21 23 23 26 C23 29 5 31 5 32"
+        stroke="#7c3aed" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
+      <line x1="3" y1="10" x2="23" y2="10" stroke="rgba(167,139,250,0.6)" strokeWidth="2" strokeLinecap="round"/>
+      <line x1="3" y1="20" x2="23" y2="20" stroke="rgba(167,139,250,0.6)" strokeWidth="2" strokeLinecap="round"/>
+      <circle cx="21" cy="0" r="3" fill="#a78bfa" opacity="0.9"/>
+      <circle cx="5" cy="0" r="3" fill="#7c3aed" opacity="0.9"/>
+      <circle cx="3" cy="10" r="3" fill="#a78bfa" opacity="0.95"/>
+      <circle cx="23" cy="10" r="3" fill="#7c3aed" opacity="0.95"/>
+      <circle cx="21" cy="20" r="3" fill="#a78bfa" opacity="0.95"/>
+      <circle cx="5" cy="20" r="3" fill="#7c3aed" opacity="0.95"/>
+      <circle cx="5" cy="32" r="3" fill="#a78bfa" opacity="0.9"/>
+      <circle cx="21" cy="32" r="3" fill="#7c3aed" opacity="0.9"/>
+    </svg>
+  );
+}
+
 type PhaseStatus = "complete" | "in_progress" | "not_started";
 
 const PHASES: { num: number; name: string; status: PhaseStatus }[] = [
@@ -158,15 +179,15 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
             </div>
           </Link>
           <Link
-            href="/dev"
+            href="/standings"
             onClick={() => setOpen(false)}
             className="block"
           >
             <div className={`flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all duration-150
-              ${pathname === "/dev" ? "bg-white/[0.08]" : "hover:bg-white/[0.04]"}`}>
-              <span className="h-1.5 w-1.5 rounded-full shrink-0 bg-white/20" />
+              ${pathname === "/standings" ? "bg-white/[0.08]" : "hover:bg-white/[0.04]"}`}>
+              <span className="h-1.5 w-1.5 rounded-full shrink-0 bg-[#fbbf24]/70 shadow-[0_0_5px_rgba(251,191,36,0.6)]" />
               <span className="text-[9px] font-semibold font-mono text-white/15 w-5 shrink-0">—</span>
-              <span className="text-[11px] font-medium leading-tight text-white/40">Dev Dashboard</span>
+              <span className="text-[11px] font-medium leading-tight text-white/70">Standings</span>
             </div>
           </Link>
           <Link
@@ -182,66 +203,74 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
             </div>
           </Link>
           <Link
-            href="/standings"
+            href="/players"
             onClick={() => setOpen(false)}
             className="block"
           >
             <div className={`flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all duration-150
-              ${pathname === "/standings" ? "bg-white/[0.08]" : "hover:bg-white/[0.04]"}`}>
-              <span className="h-1.5 w-1.5 rounded-full shrink-0 bg-[#fbbf24]/70 shadow-[0_0_5px_rgba(251,191,36,0.6)]" />
+              ${pathname === "/players" || pathname.startsWith("/players/") ? "bg-white/[0.08]" : "hover:bg-white/[0.04]"}`}>
+              <span className="h-1.5 w-1.5 rounded-full shrink-0 bg-[#a78bfa] shadow-[0_0_6px_rgba(167,139,250,0.8)]" />
               <span className="text-[9px] font-semibold font-mono text-white/15 w-5 shrink-0">—</span>
-              <span className="text-[11px] font-medium leading-tight text-white/70">Standings</span>
+              <span className="text-[11px] font-medium leading-tight text-white/70">Cortex</span>
             </div>
           </Link>
+
+          {/* Dev + Phases — rob only */}
           {username === "rob" && (
-            <Link
-              href="/whiz"
-              onClick={() => setOpen(false)}
-              className="block"
-            >
-              <div className={`flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all duration-150
-                ${pathname === "/whiz" ? "bg-white/[0.08]" : "hover:bg-white/[0.04]"}`}>
-                <span className="h-1.5 w-1.5 rounded-full shrink-0 bg-[#a78bfa] shadow-[0_0_6px_rgba(167,139,250,0.9)]" />
-                <span className="text-[9px] font-semibold font-mono text-white/15 w-5 shrink-0">—</span>
-                <span className="text-[11px] font-medium leading-tight text-[#a78bfa]/90">Whiz&apos;s Brain</span>
-              </div>
-            </Link>
-          )}
-
-          {/* Phase list */}
-          <p className="px-3 pt-3 pb-1.5 text-[9px] font-semibold uppercase tracking-[0.22em] text-white/15">
-            Phases
-          </p>
-          {PHASES.map((p) => {
-            const href = `/phase${p.num}`;
-            const active = pathname === href;
-            const linkable = p.status !== "not_started";
-
-            const row = (
-              <div
-                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all duration-150
-                  ${active ? "bg-white/[0.08]" : linkable ? "hover:bg-white/[0.04]" : ""}`}
+            <>
+              <div className="mx-3 mt-3 mb-1.5 border-t border-white/[0.06]" />
+              <p className="px-3 pt-1 pb-1.5 text-[9px] font-semibold uppercase tracking-[0.22em] text-white/15">
+                Dev
+              </p>
+              <Link
+                href="/dev"
+                onClick={() => setOpen(false)}
+                className="block"
               >
-                <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${DOT_CLASS[p.status]}`} />
-                <span className="text-[9px] font-semibold font-mono text-white/15 w-5 shrink-0 tabular-nums">
-                  P{p.num}
-                </span>
-                <span className={`text-[11px] font-medium leading-tight ${NAME_CLASS[p.status]}`}>
-                  {p.name}
-                </span>
-              </div>
-            );
-
-            return linkable ? (
-              <Link key={p.num} href={href} onClick={() => setOpen(false)} className="block">
-                {row}
+                <div className={`flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all duration-150
+                  ${pathname === "/dev" ? "bg-white/[0.08]" : "hover:bg-white/[0.04]"}`}>
+                  <span className="h-1.5 w-1.5 rounded-full shrink-0 bg-white/20" />
+                  <span className="text-[9px] font-semibold font-mono text-white/15 w-5 shrink-0">—</span>
+                  <span className="text-[11px] font-medium leading-tight text-white/40">Dev Dashboard</span>
+                </div>
               </Link>
-            ) : (
-              <div key={p.num} className="cursor-default">
-                {row}
-              </div>
-            );
-          })}
+
+              {/* Phase list */}
+              <p className="px-3 pt-3 pb-1.5 text-[9px] font-semibold uppercase tracking-[0.22em] text-white/15">
+                Phases
+              </p>
+              {PHASES.map((p) => {
+                const href = `/phase${p.num}`;
+                const active = pathname === href;
+                const linkable = p.status !== "not_started";
+
+                const row = (
+                  <div
+                    className={`flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all duration-150
+                      ${active ? "bg-white/[0.08]" : linkable ? "hover:bg-white/[0.04]" : ""}`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${DOT_CLASS[p.status]}`} />
+                    <span className="text-[9px] font-semibold font-mono text-white/15 w-5 shrink-0 tabular-nums">
+                      P{p.num}
+                    </span>
+                    <span className={`text-[11px] font-medium leading-tight ${NAME_CLASS[p.status]}`}>
+                      {p.name}
+                    </span>
+                  </div>
+                );
+
+                return linkable ? (
+                  <Link key={p.num} href={href} onClick={() => setOpen(false)} className="block">
+                    {row}
+                  </Link>
+                ) : (
+                  <div key={p.num} className="cursor-default">
+                    {row}
+                  </div>
+                );
+              })}
+            </>
+          )}
         </nav>
 
         {/* About / disclaimer */}
@@ -273,9 +302,9 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       >
         {/* Top bar */}
         <header className="sticky top-0 z-30 flex items-center gap-3 px-2 sm:px-3 h-12
-          bg-gradient-to-r from-[#070809]/96 via-[#090a0d]/94 to-[#070809]/96 backdrop-blur-2xl
-          border-b border-[#C9A84C]/[0.18]
-          shadow-[0_1px_0_rgba(201,168,76,0.10),0_4px_28px_rgba(0,0,0,0.60),inset_0_1px_0_rgba(201,168,76,0.06)]
+          bg-gradient-to-r from-[#070809]/97 via-[#0a0b0f]/95 to-[#070809]/97 backdrop-blur-2xl
+          border-b border-[#C9A84C]/[0.30]
+          shadow-[0_1px_0_rgba(201,168,76,0.18),0_4px_32px_rgba(0,0,0,0.70),0_0_40px_rgba(201,168,76,0.04),inset_0_1px_0_rgba(201,168,76,0.10)]
           select-none">
 
           {/* Hamburger */}
@@ -296,7 +325,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
             <img src="/logo-circle.png" alt="GRTZKY" className="h-9 sm:h-10 w-auto block" />
             <span className="h-5 w-px bg-[#C9A84C]/30 shrink-0 mx-2" />
             <span
-              className="font-black italic tracking-[0.06em] text-[14px] sm:text-[17px] bg-gradient-to-r from-white via-[#E8D090] to-[#C9A84C] bg-clip-text text-transparent leading-none pr-1.5"
+              className="font-black italic tracking-[0.06em] text-[11px] sm:text-[17px] bg-gradient-to-r from-white via-[#E8D090] to-[#C9A84C] bg-clip-text text-transparent leading-none pr-1.5"
               style={{ fontFamily: "var(--font-condensed)" }}
             >
               GRTZKY
@@ -309,34 +338,41 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
           </span>
 
           {/* Quick-nav buttons */}
-          <div className="ml-auto flex items-center gap-1 shrink-0">
+          <div className="ml-auto flex items-center gap-0.5 sm:gap-1 shrink-0">
             {(
               [
-                { href: "/",           labelMobile: "Home",  labelDesktop: "Home",      active: pathname === "/" },
-                { href: "/gamecentre", labelMobile: "Live",  labelDesktop: "Games",     active: pathname === "/gamecentre" || pathname.startsWith("/game/") },
-                { href: "/standings",  labelMobile: "Stnd",  labelDesktop: "Standings", active: pathname === "/standings" },
-                { href: "/stats",      labelMobile: "Stats", labelDesktop: "Stats",     active: pathname === "/stats" },
+                { href: "/gamecentre", labelSm: "Live",  label: "Games",     active: pathname === "/gamecentre" || pathname.startsWith("/game/") },
+                { href: "/standings",  labelSm: "Stnd",  label: "Standings", active: pathname === "/standings" },
+                { href: "/stats",      labelSm: "Stats", label: "Stats",     active: pathname === "/stats" },
+                { href: "/cortex",     labelSm: "Crtx",  label: "Cortex",    active: pathname === "/cortex" },
               ] as const
-            ).map(({ href, labelMobile, labelDesktop, active }) => (
-              <Link
-                key={href}
-                href={href}
-                className={`px-2 py-1 rounded-md text-[9px] font-black uppercase tracking-normal transition-all duration-150 border ${
-                  active
-                    ? "bg-[#C9A84C]/15 text-[#C9A84C] border-[#C9A84C]/40 shadow-[0_0_8px_rgba(201,168,76,0.15)]"
-                    : "text-[#C9A84C]/45 border-[#C9A84C]/15 bg-[#C9A84C]/[0.04] hover:text-[#C9A84C]/80 hover:border-[#C9A84C]/35 hover:bg-[#C9A84C]/10"
-                }`}
-              >
-                <span className="sm:hidden">{labelMobile}</span>
-                <span className="hidden sm:inline">{labelDesktop}</span>
-              </Link>
-            ))}
+            ).map(({ href, labelSm, label, active }) => {
+              const isCortex = href === "/cortex";
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  className={`px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md text-[8px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border flex items-center justify-center ${
+                    isCortex
+                      ? active
+                        ? "bg-[#a78bfa]/15 text-[#a78bfa] border-[#a78bfa]/50 shadow-[0_0_8px_rgba(167,139,250,0.20)]"
+                        : "text-[#a78bfa]/50 border-[#a78bfa]/20 bg-[#a78bfa]/[0.04] hover:text-[#a78bfa]/80 hover:border-[#a78bfa]/40 hover:bg-[#a78bfa]/10"
+                      : active
+                        ? "bg-[#C9A84C]/15 text-[#C9A84C] border-[#C9A84C]/40 shadow-[0_0_8px_rgba(201,168,76,0.15)]"
+                        : "text-[#C9A84C]/45 border-[#C9A84C]/15 bg-[#C9A84C]/[0.04] hover:text-[#C9A84C]/80 hover:border-[#C9A84C]/35 hover:bg-[#C9A84C]/10"
+                  }`}
+                >
+                  <span className="sm:hidden">{isCortex ? <MiniDNA /> : labelSm}</span>
+                  <span className="hidden sm:inline">{label}</span>
+                </Link>
+              );
+            })}
             <button
               onClick={async () => {
                 await fetch("/api/auth/logout", { method: "POST" });
                 window.location.href = "/login";
               }}
-              className="px-2 py-1 rounded-md text-[9px] font-black uppercase tracking-normal transition-all duration-150 border text-white/25 border-white/[0.08] hover:text-[#f87171]/70 hover:border-[#f87171]/25 hover:bg-[#f87171]/[0.05]"
+              className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md text-[8px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border text-white/25 border-white/[0.08] hover:text-[#f87171]/70 hover:border-[#f87171]/25 hover:bg-[#f87171]/[0.05]"
             >
               <span className="sm:hidden">✕</span>
               <span className="hidden sm:inline">Logout</span>
