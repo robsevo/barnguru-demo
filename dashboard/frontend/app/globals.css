@@ -7,6 +7,12 @@
   --brand-g:         168;
   --brand-b:         76;
 
+  /* Container surface colors — overridden per-page/per-section for team tinting */
+  --card-base-r:     20;  --card-base-g:     16;  --card-base-b:     10;
+  --card-mid-r:      7;   --card-mid-g:      6;   --card-mid-b:      4;
+  --body-base-r:     9;   --body-base-g:     10;  --body-base-b:     12;
+  --header-r:        7;   --header-g:        8;   --header-b:        9;
+
   --bg-base:         #090a0c;
   --bg-card:         rgba(255,255,255,0.05);
   --bg-card-header:  rgba(255,255,255,0.06);
@@ -48,9 +54,11 @@ body {
 
 /* ─── Glass utility classes ──────────────────────────────────────────────── */
 
-/* Standard glass card */
+/* Standard glass card — background reads from CSS vars so any section can tint */
 .glass {
-  background: linear-gradient(180deg, rgba(20,16,10,0.80) 0%, rgba(7,6,4,0.92) 100%);
+  background: linear-gradient(160deg,
+    rgba(var(--card-base-r), var(--card-base-g), var(--card-base-b), 0.90) 0%,
+    rgba(var(--card-mid-r),  var(--card-mid-g),  var(--card-mid-b),  0.97) 100%);
   border: 1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.20);
   border-radius: 0.75rem;
   backdrop-filter: blur(8px);
@@ -60,7 +68,9 @@ body {
 
 /* Smaller glass pill / inset */
 .glass-sm {
-  background: linear-gradient(180deg, rgba(16,13,8,0.70) 0%, rgba(6,5,3,0.85) 100%);
+  background: linear-gradient(160deg,
+    rgba(var(--card-base-r), var(--card-base-g), var(--card-base-b), 0.75) 0%,
+    rgba(var(--card-mid-r),  var(--card-mid-g),  var(--card-mid-b),  0.90) 100%);
   border: 1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.14);
   border-radius: 0.5rem;
   backdrop-filter: blur(6px);
@@ -127,24 +137,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     radial-gradient(ellipse 120% 80% at 50% 50%, rgba(var(--body-base-r), var(--body-base-g), var(--body-base-b), 0.20) 0%, transparent 70%),
     rgb(var(--body-base-r), var(--body-base-g), var(--body-base-b));
   background-attachment: fixed;
-}
-
-/* Glass cards — replace brownish dark with team-secondary dark blend */
-[data-team-theme] .glass {
-  background: linear-gradient(160deg,
-    rgba(var(--card-base-r), var(--card-base-g), var(--card-base-b), 0.90) 0%,
-    rgba(var(--card-mid-r),  var(--card-mid-g),  var(--card-mid-b),  0.97) 100%
-  ) !important;
-  border-color: rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.20) !important;
-  box-shadow: 0 4px 28px rgba(0,0,0,0.70), inset 0 1px 0 rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.08) !important;
-}
-
-[data-team-theme] .glass-sm {
-  background: linear-gradient(160deg,
-    rgba(var(--card-base-r), var(--card-base-g), var(--card-base-b), 0.75) 0%,
-    rgba(var(--card-mid-r),  var(--card-mid-g),  var(--card-mid-b),  0.90) 100%
-  ) !important;
-  border-color: rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.14) !important;
 }
 
 /* Border colors */

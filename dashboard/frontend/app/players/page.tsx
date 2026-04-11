@@ -4,6 +4,20 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { TEAM_COLORS, TEAM_SECONDARY, logoUrl } from "@/utils/nhl";
 
+function darkBlend(hex: string, darkness = 0.88): string {
+  const base = [9, 10, 12];
+  const c = hex.replace("#", "");
+  const r = parseInt(c.slice(0, 2), 16) || 0;
+  const g = parseInt(c.slice(2, 4), 16) || 0;
+  const b = parseInt(c.slice(4, 6), 16) || 0;
+  return `#${[r, g, b].map((v, i) => Math.round(v * (1 - darkness) + base[i] * darkness).toString(16).padStart(2, "0")).join("")}`;
+}
+
+function toRgbInts(hex: string): [number, number, number] {
+  const c = hex.replace("#", "");
+  return [parseInt(c.slice(0, 2), 16) || 0, parseInt(c.slice(2, 4), 16) || 0, parseInt(c.slice(4, 6), 16) || 0];
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -486,8 +500,22 @@ function PlayerDetailCard({
       : `Generating only ${data.ewma_xgf60?.toFixed(1)} xGF/60 — ${ewmaAbove.toFixed(1)} below league average`;
   }
 
+  const pTeamColor = TEAM_COLORS[data.team ?? ""] ?? "#888888";
+  const pTeamSec   = TEAM_SECONDARY[data.team ?? ""] ?? pTeamColor;
+  const cardBase   = darkBlend(pTeamSec, 0.82);
+  const cardMid    = darkBlend(pTeamSec, 0.93);
+  const [cbr, cbg, cbb] = toRgbInts(cardBase);
+  const [cmr, cmg, cmb] = toRgbInts(cardMid);
+  const [pr, pg, pb]    = toRgbInts(pTeamColor);
+
   return (
-    <div className="rounded-2xl border border-white/[0.10] bg-gradient-to-b from-white/[0.03] to-transparent backdrop-blur-sm overflow-hidden shadow-[0_12px_60px_rgba(0,0,0,0.75),inset_0_1px_0_rgba(255,255,255,0.08)]">
+    <div
+      className="rounded-2xl overflow-hidden shadow-[0_12px_60px_rgba(0,0,0,0.75),inset_0_1px_0_rgba(255,255,255,0.08)]"
+      style={{
+        background: `linear-gradient(160deg, rgba(${cbr},${cbg},${cbb},0.95) 0%, rgba(${cmr},${cmg},${cmb},0.98) 100%)`,
+        border: `1px solid rgba(${pr},${pg},${pb},0.20)`,
+      }}
+    >
       {/* Header */}
       <div className="flex items-start gap-4 px-5 pt-4 pb-3 border-b border-white/[0.07]">
         {/* Headshot */}
@@ -709,7 +737,18 @@ function PlayerRow({
   return (
     <button
       onClick={() => onClick(name)}
-      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.06] hover:border-white/[0.12] transition-all duration-150 text-left group"
+      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-150 text-left group"
+      style={(() => {
+        const sec  = TEAM_SECONDARY[team ?? ""] ?? TEAM_COLORS[team ?? ""] ?? "#333";
+        const pri  = TEAM_COLORS[team ?? ""] ?? "#888";
+        const [br, bg_, bb] = toRgbInts(darkBlend(sec, 0.84));
+        const [mr, mg, mb]  = toRgbInts(darkBlend(sec, 0.93));
+        const [pr, pg, pb]  = toRgbInts(pri);
+        return {
+          background: `linear-gradient(135deg, rgba(${br},${bg_},${bb},0.92) 0%, rgba(${mr},${mg},${mb},0.97) 100%)`,
+          border: `1px solid rgba(${pr},${pg},${pb},0.20)`,
+        };
+      })()}
     >
       {/* Mini headshot with team color ring */}
       <div
@@ -773,7 +812,13 @@ function Section({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className={`rounded-2xl border border-white/[0.08] bg-gradient-to-b from-white/[0.015] to-transparent overflow-hidden shadow-[0_4px_16px_rgba(0,0,0,0.50)] ${className}`}>
+    <div
+      className={`rounded-2xl overflow-hidden shadow-[0_4px_16px_rgba(0,0,0,0.50)] ${className}`}
+      style={{
+        background: `linear-gradient(160deg, rgba(var(--card-base-r),var(--card-base-g),var(--card-base-b),0.90) 0%, rgba(var(--card-mid-r),var(--card-mid-g),var(--card-mid-b),0.97) 100%)`,
+        border: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.12)`,
+      }}
+    >
       <button
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center gap-2.5 px-4 py-3 border-b border-white/[0.06] hover:bg-[#a78bfa]/[0.03] transition-colors text-left"
@@ -1071,7 +1116,13 @@ export default function PlayersPage() {
     <main className="min-h-screen p-3 sm:p-6 max-w-3xl mx-auto">
 
       {/* ── Page Header ── */}
-      <div className="mb-5 rounded-xl border border-white/[0.07] bg-gradient-to-b from-white/[0.015] via-white/[0.005] to-transparent backdrop-blur-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_4px_24px_rgba(0,0,0,0.60)] overflow-hidden">
+      <div
+        className="mb-5 rounded-xl backdrop-blur-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_4px_24px_rgba(0,0,0,0.60)] overflow-hidden"
+        style={{
+          background: `linear-gradient(160deg, rgba(var(--card-base-r),var(--card-base-g),var(--card-base-b),0.92) 0%, rgba(var(--card-mid-r),var(--card-mid-g),var(--card-mid-b),0.97) 100%)`,
+          border: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.10)`,
+        }}
+      >
         <div className="px-6 py-3 border-b border-white/[0.07] flex items-center justify-center gap-3">
           <div className="h-px flex-1 bg-gradient-to-r from-transparent to-[#a78bfa]/20" />
           <DNAStrand />
@@ -1118,7 +1169,13 @@ export default function PlayersPage() {
 
         {/* Autocomplete dropdown */}
         {showSugg && suggestions.length > 0 && (
-          <div className="absolute top-full left-0 right-0 mt-1 z-50 rounded-xl border border-white/[0.12] bg-[#0d0f13]/97 backdrop-blur-xl shadow-[0_8px_40px_rgba(0,0,0,0.85)] overflow-hidden">
+          <div
+            className="absolute top-full left-0 right-0 mt-1 z-50 rounded-xl backdrop-blur-xl shadow-[0_8px_40px_rgba(0,0,0,0.85)] overflow-hidden"
+            style={{
+              background: `rgba(var(--card-mid-r),var(--card-mid-g),var(--card-mid-b),0.98)`,
+              border: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.15)`,
+            }}
+          >
             {suggestions.map(p => (
               <button
                 key={p.name}
