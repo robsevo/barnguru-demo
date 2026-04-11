@@ -146,50 +146,53 @@ export default function LandingPage() {
           </div>
         </Link>
 
-        {/* Dev Dashboard card */}
-        <Link href="/dev" className="group">
-          <div className="relative h-44 rounded-2xl border border-white/[0.09] bg-gradient-to-b from-white/[0.01] via-white/[0.005] to-transparent hover:border-white/[0.26] transition-all duration-200 p-6 flex flex-col justify-between overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.80),inset_0_1px_0_rgba(255,255,255,0.10)]">
-            <div className="absolute -top-8 -right-8 w-40 h-40 rounded-full bg-white/[0.02] blur-2xl pointer-events-none group-hover:bg-white/[0.04] transition-all duration-300" />
+        {/* Neural Scout card */}
+        <Link href="/players" className="group">
+          <div className="relative h-44 rounded-2xl border border-[#a78bfa]/[0.18] bg-gradient-to-b from-[#a78bfa]/[0.03] via-transparent to-transparent hover:border-[#a78bfa]/[0.35] transition-all duration-200 p-6 flex flex-col justify-between overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.80),inset_0_1px_0_rgba(167,139,250,0.08)]">
+            <div className="absolute -top-8 -right-8 w-40 h-40 rounded-full bg-[#a78bfa]/[0.06] blur-2xl pointer-events-none group-hover:bg-[#a78bfa]/[0.12] transition-all duration-300" />
             <div>
-              <span className="text-[9px] font-black uppercase tracking-[0.3em] text-white/15 block mb-3">GRTZKY Engine · Model Pipeline</span>
-              <h2 className="text-[28px] font-black tracking-[0.08em] uppercase text-white/50 leading-none">
-                Dev<br />Dashboard
+              <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#a78bfa]/40 block mb-3">Neural Networks · Deep Analysis</span>
+              <h2 className="text-[28px] font-black tracking-[0.08em] uppercase text-white/80 leading-none">
+                Cortex
               </h2>
             </div>
             <div className="flex items-end justify-between">
-              <p className="text-[10px] text-white/12 leading-relaxed max-w-[160px] italic">
-                Under construction.
+              <p className="text-[11px] text-white/30 leading-relaxed max-w-[160px]">
+                Model-driven player profiles, form tracking, and deep analytics.
               </p>
-              <span className="text-white/15 group-hover:text-white/35 text-xl transition-all duration-200 group-hover:translate-x-1">→</span>
+              <span className="text-[#a78bfa]/40 group-hover:text-[#a78bfa]/80 text-xl transition-all duration-200 group-hover:translate-x-1">→</span>
             </div>
           </div>
         </Link>
       </div>
 
       {/* Phase progress strip */}
-      <div className="mt-6 flex flex-col sm:flex-row sm:items-center items-center gap-2">
-        <div className="flex items-center gap-2">
-          {[
-            { status: "complete",    n: 2  },
-            { status: "in_progress", n: 1  },
-            { status: "not_started", n: 12 },
-            { status: "complete",    n: 1  },
-          ].map(({ status, n }) =>
-            Array.from({ length: n }).map((_, i) => (
-              <span
-                key={`${status}-${i}`}
-                className={`h-1 rounded-full transition-all ${
-                  status === "complete"    ? "w-5 bg-[#4ade80] shadow-[0_0_6px_rgba(74,222,128,0.7)]" :
-                  status === "in_progress" ? "w-5 bg-[#fbbf24] shadow-[0_0_6px_rgba(251,191,36,0.7)]" :
-                  "w-3 bg-white/[0.08]"
-                }`}
-              />
-            ))
-          )}
+      <div className="mt-6 w-full max-w-2xl">
+        <div className="w-full h-px bg-gradient-to-r from-transparent via-white/[0.10] to-transparent mb-3" />
+        <div className="flex flex-col items-center gap-2">
+          <div className="flex items-center gap-2">
+            {[
+              { status: "complete",    n: 2  },
+              { status: "in_progress", n: 1  },
+              { status: "not_started", n: 12 },
+              { status: "complete",    n: 1  },
+            ].map(({ status, n }) =>
+              Array.from({ length: n }).map((_, i) => (
+                <span
+                  key={`${status}-${i}`}
+                  className={`h-1 rounded-full transition-all ${
+                    status === "complete"    ? "w-5 bg-[#4ade80] shadow-[0_0_6px_rgba(74,222,128,0.7)]" :
+                    status === "in_progress" ? "w-5 bg-[#fbbf24] shadow-[0_0_6px_rgba(251,191,36,0.7)]" :
+                    "w-3 bg-white/[0.08]"
+                  }`}
+                />
+              ))
+            )}
+          </div>
+          <span className="text-[9px] font-semibold uppercase tracking-[0.2em] text-white/20 text-center">
+            3 of 16 phases complete<br />CV tracking active
+          </span>
         </div>
-        <span className="sm:ml-3 text-[9px] font-semibold uppercase tracking-[0.2em] text-white/20">
-          3 of 16 phases complete · CV tracking active
-        </span>
       </div>
 
       <p className="mt-3 max-w-xl text-center text-[9px] text-white/12 leading-relaxed">

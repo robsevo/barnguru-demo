@@ -779,11 +779,11 @@ function PlayerRadarChart({ data, teamColor }: { data: ProfileData; teamColor: s
       {/* Direct fixed dims on RadarChart — no ResponsiveContainer drift */}
       <div style={{ lineHeight: 0 }}>
         <RadarChart
-          width={300} height={300}
-          cx={150} cy={150}
-          outerRadius={95}
+          width={360} height={360}
+          cx={180} cy={180}
+          outerRadius={118}
           data={chartData}
-          margin={{ top: 20, right: 30, bottom: 20, left: 30 }}
+          margin={{ top: 28, right: 36, bottom: 28, left: 36 }}
           onMouseLeave={() => setActiveIdx(null)}
         >
           <PolarGrid stroke="rgba(255,255,255,0.07)" />
@@ -911,11 +911,11 @@ function GoalieRadarChart({ data, teamColor, nhlSvPct, nhlGaa }: { data: Profile
     <>
       <div style={{ lineHeight: 0 }}>
         <RadarChart
-          width={300} height={300}
-          cx={150} cy={150}
-          outerRadius={95}
+          width={360} height={360}
+          cx={180} cy={180}
+          outerRadius={118}
           data={chartData}
-          margin={{ top: 20, right: 30, bottom: 20, left: 30 }}
+          margin={{ top: 28, right: 36, bottom: 28, left: 36 }}
           onMouseLeave={() => setActiveIdx(null)}
         >
           <PolarGrid stroke="rgba(255,255,255,0.07)" />
@@ -1641,7 +1641,7 @@ export default function PlayerProfilePage() {
 
                 {/* Radar */}
                 {(data.xgf_per60 != null || data.cdr != null || data.battle_percentile != null) && (
-                  <div className="flex flex-col items-center" style={{ minWidth: 280 }}>
+                  <div className="flex flex-col items-center" style={{ minWidth: 340 }}>
                     <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/30 mb-2 text-center">Attribute Radar</p>
                     <PlayerRadarChart data={data} teamColor={teamColor} />
                   </div>
@@ -1993,7 +1993,7 @@ export default function PlayerProfilePage() {
           <div className="sm:col-span-2">
             <Card title="Performance Snapshot" icon="📊" style={cardStyle}>
               <div className="flex flex-wrap justify-center gap-6">
-                <div className="flex flex-col items-center" style={{ minWidth: 280 }}>
+                <div className="flex flex-col items-center" style={{ minWidth: 340 }}>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/30 mb-2 text-center">Goalie Radar</p>
                   <GoalieRadarChart data={data} teamColor={teamColor} nhlSvPct={nhlStats?.sv_pct} nhlGaa={nhlStats?.gaa} />
                 </div>

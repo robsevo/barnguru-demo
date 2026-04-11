@@ -382,7 +382,7 @@ export default function TeamPage() {
 
       {/* Header card */}
       <div
-        className="mb-6 rounded-2xl border border-white/[0.08] overflow-hidden"
+        className="mb-3 rounded-2xl border border-white/[0.08] overflow-hidden"
         style={{ background: `linear-gradient(160deg, ${tableDarkBg} 0%, #060708 65%)` }}
       >
         <div className="flex items-center gap-3 sm:gap-5 px-4 sm:px-5 pt-4 sm:pt-5 pb-3 sm:pb-4">
@@ -476,11 +476,11 @@ export default function TeamPage() {
             >Retry</button>
           </div>
         ) : (
-        <div className="space-y-8">
+        <div className="space-y-4">
 
           {/* Rotate hint — mobile only */}
-          <p className="sm:hidden text-[10px] text-white/25 text-center mb-4 flex items-center justify-center gap-1.5">
-            <span>↻</span> Rotate phone for more stats
+          <p className="sm:hidden text-[11px] text-white/60 text-center flex items-center justify-center gap-1.5">
+            <span>↻</span> Rotate for more stats
           </p>
 
           {/* Skaters table */}
@@ -531,7 +531,7 @@ export default function TeamPage() {
                       <td className="px-3 py-2.5 text-center w-10"><JerseyCell jersey={p.jersey} /></td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center gap-3">
-                          <Headshot src={p.headshot} firstName={p.first_name} lastName={p.last_name} teamColor={teamColor} bgColor={darkSecondary} />
+                          <Headshot src={p.headshot} firstName={p.first_name} lastName={p.last_name} teamColor={teamColor} bgColor={darkSecondary} size={44} />
                           <div className="flex flex-col min-w-0">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="text-[13px] font-semibold text-white/85 truncate">
@@ -616,7 +616,7 @@ export default function TeamPage() {
                       <td className="px-3 py-2.5 text-center w-10"><JerseyCell jersey={g.jersey} /></td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center gap-3">
-                          <Headshot src={g.headshot} firstName={g.first_name} lastName={g.last_name} teamColor={teamColor} bgColor={darkSecondary} />
+                          <Headshot src={g.headshot} firstName={g.first_name} lastName={g.last_name} teamColor={teamColor} bgColor={darkSecondary} size={44} />
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="text-[13px] font-semibold text-white/85">{g.first_name} {g.last_name}</span>
                             {injColor && (
