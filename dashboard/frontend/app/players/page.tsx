@@ -327,6 +327,12 @@ function TierBadge({ tier, small }: { tier: Tier; small?: boolean }) {
 
 const NHL_REMAP: Record<string, string> = { LA: "LAK", NJ: "NJD", SJ: "SJS", TB: "TBL" };
 
+const POS_MAP: Record<string, string> = { L: "LW", R: "RW" };
+function fmtPos(pos: string | null | undefined): string {
+  if (!pos) return "";
+  return POS_MAP[pos.toUpperCase()] ?? pos;
+}
+
 function TeamLogo({ team, size = 24, className = "", onTeamClick }: { team: string; size?: number; className?: string; onTeamClick?: (e: React.MouseEvent) => void }) {
   const [err, setErr] = useState(false);
   if (err) return <span className={`text-[10px] font-mono text-white/40 ${className}`}>{team}</span>;
@@ -508,13 +514,13 @@ function PlayerDetailCard({
             {data.team && <TeamLogo team={data.team} size={28} />}
             {data.team && <span className="text-sm font-semibold text-white/50">{data.team}</span>}
             {data.position && (
-              <span className="text-[10px] font-semibold text-white/35 border border-white/[0.12] rounded px-1.5 py-0.5">{data.position}</span>
+              <span className="text-[10px] font-semibold text-white/35 border border-white/[0.12] rounded px-1.5 py-0.5">{fmtPos(data.position)}</span>
             )}
             {data.shoots && (
               <span className="text-[10px] text-white/25 border border-white/[0.08] rounded px-1.5 py-0.5">Shoots {data.shoots}</span>
             )}
             {data.archetype_name && (
-              <span className="text-[10px] font-semibold text-[#C9A84C]/80 border border-[#C9A84C]/20 rounded px-1.5 py-0.5 bg-[#C9A84C]/05">
+              <span className="text-[10px] font-semibold text-[#a78bfa]/80 border border-[#a78bfa]/20 rounded px-1.5 py-0.5 bg-[#a78bfa]/[0.05]">
                 {data.archetype_name}
               </span>
             )}
@@ -523,8 +529,8 @@ function PlayerDetailCard({
           <div className="flex items-center gap-2 mt-2 flex-wrap">
             <FormBadge flag={formFlag} delta={ewmaAbove} />
             {hotScore > 0.5 && (
-              <span className="text-[10px] font-semibold text-[#C9A84C] bg-[#C9A84C]/10 border border-[#C9A84C]/25 rounded-full px-2.5 py-1">
-                ⚡ Hot Hand
+              <span className="text-[10px] font-semibold text-[#a78bfa] bg-[#a78bfa]/10 border border-[#a78bfa]/25 rounded-full px-2.5 py-1">
+                Hot Hand
               </span>
             )}
             {warRank && warRank <= 20 && (
@@ -760,7 +766,7 @@ function Section({
   defaultOpen = false,
 }: {
   title: string;
-  icon: string;
+  icon?: string;
   count?: number;
   children: React.ReactNode;
   className?: string;
@@ -768,17 +774,17 @@ function Section({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className={`rounded-2xl border border-white/[0.08] bg-gradient-to-b from-white/[0.02] to-transparent overflow-hidden ${className}`}>
+    <div className={`rounded-2xl border border-white/[0.08] bg-gradient-to-b from-white/[0.015] to-transparent overflow-hidden shadow-[0_4px_16px_rgba(0,0,0,0.50)] ${className}`}>
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-2 px-4 py-3 border-b border-white/[0.07] hover:bg-white/[0.02] transition-colors text-left"
+        className="w-full flex items-center gap-2.5 px-4 py-3 border-b border-white/[0.06] hover:bg-[#a78bfa]/[0.03] transition-colors text-left"
       >
-        <span className="text-base">{icon}</span>
-        <p className="text-sm font-semibold text-white/80">{title}</p>
+        <span className="w-0.5 h-4 rounded-full bg-[#a78bfa]/40 shrink-0" />
+        <p className="text-[11px] font-black uppercase tracking-[0.12em] text-white/70">{title}</p>
         {count !== undefined && (
-          <span className="text-[10px] font-mono text-white/25">{count}</span>
+          <span className="text-[9px] font-mono text-white/20">{count}</span>
         )}
-        <span className="ml-auto text-white/25 text-xs transition-transform duration-200" style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }}>▾</span>
+        <span className="ml-auto text-[#a78bfa]/40 text-[10px] transition-transform duration-200" style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }}>▾</span>
       </button>
       {open && <div className="p-3 space-y-1.5">{children}</div>}
     </div>
@@ -810,14 +816,14 @@ function InfoTip({ tip }: { tip: string }) {
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
         onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-1.5 text-[9px] text-white/25 hover:text-white/50 transition-colors mb-1"
+        className="flex items-center gap-1.5 text-[9px] text-[#a78bfa]/40 hover:text-[#a78bfa]/70 transition-colors mb-1"
       >
-        <span className="flex items-center justify-center w-4 h-4 rounded-full border border-white/[0.18] text-[9px] font-medium"
+        <span className="flex items-center justify-center w-4 h-4 rounded-full border border-[#a78bfa]/30 text-[9px] font-medium"
           style={{ fontFamily: "Georgia, serif" }}>i</span>
         <span className="text-[9px] uppercase tracking-widest">What&apos;s this?</span>
       </button>
       {open && (
-        <div className="absolute left-0 top-full mt-1 z-50 w-72 rounded-xl border border-white/[0.12] bg-[#0d0f13]/97 backdrop-blur-xl shadow-[0_8px_40px_rgba(0,0,0,0.85)] p-3">
+        <div className="absolute left-0 top-full mt-1 z-50 w-72 rounded-xl border border-[#a78bfa]/20 bg-[#0d0f13]/97 backdrop-blur-xl shadow-[0_8px_40px_rgba(0,0,0,0.85)] p-3">
           <p className="text-[10px] text-white/50 leading-relaxed">{tip}</p>
         </div>
       )}
@@ -831,40 +837,38 @@ function InfoTip({ tip }: { tip: string }) {
 // Cortex info pill
 // ---------------------------------------------------------------------------
 
-function CortexInfoPill() {
-  const [open, setOpen] = useState(false);
+function DNAStrand() {
   return (
-    <div>
-      <div className="flex items-center gap-2">
-        <h1 className="text-2xl font-bold text-white tracking-tight">Cortex</h1>
-        <div className="flex items-center gap-1">
-        <button
-          onClick={() => setOpen(o => !o)}
-          className="flex items-center justify-center w-6 h-6 rounded-full border-[2.5px] transition-all duration-200 text-lg font-light"
-          style={{
-            color: open ? "#a78bfa" : "rgba(167,139,250,0.80)",
-            borderColor: open ? "#a78bfa" : "rgba(167,139,250,0.80)",
-            background: open ? "rgba(167,139,250,0.12)" : "transparent",
-            boxShadow: open ? "0 0 14px rgba(167,139,250,0.40), 0 0 8px 2px rgba(255,255,255,0.25)" : "0 0 8px 2px rgba(255,255,255,0.25)",
-            fontFamily: "Georgia, serif",
-          }}
-          aria-label="What is Cortex?"
-        >
-          i
-        </button>
-        <span className="text-[9px] text-white/20 font-medium whitespace-nowrap">← what is cortex?</span>
-        </div>
-      </div>
-      {open && (
-        <p className="text-xs text-white/35 leading-relaxed max-w-sm mt-2 animate-in fade-in slide-in-from-top-1 duration-200">
-          Every player has a living neural network — built from xG models, RAPM, WAR, behavioral
-          patterns, and real-time form tracking. Watch a game and the AI watches with you, feeding
-          observations directly into the model. As each phase and feature is completed by the dev,
-          new layers of intelligence are added. The deeper the system gets, the sharper the simulations
-          become — and the sharper our edge over the oddsmakers.
-        </p>
-      )}
-    </div>
+    <svg width="22" height="46" viewBox="0 0 22 46" fill="none" aria-hidden="true" className="shrink-0 opacity-90">
+      {/* Strand A */}
+      <path d="M18 0 C6 3 4 7 4 11.5 C4 16 18 19 18 23 C18 27 4 30 4 34.5 C4 39 18 42 18 46"
+        stroke="#a78bfa" strokeWidth="2.2" strokeLinecap="round" fill="none"/>
+      {/* Strand B */}
+      <path d="M4 0 C16 3 18 7 18 11.5 C18 16 4 19 4 23 C4 27 18 30 18 34.5 C18 39 4 42 4 46"
+        stroke="#7c3aed" strokeWidth="2.2" strokeLinecap="round" fill="none"/>
+      {/* Base-pair rungs at turning points */}
+      <line x1="4" y1="0" x2="18" y2="0" stroke="rgba(167,139,250,0.28)" strokeWidth="1.5" strokeLinecap="round"/>
+      <line x1="4" y1="11.5" x2="18" y2="11.5" stroke="rgba(167,139,250,0.45)" strokeWidth="1.5" strokeLinecap="round"/>
+      <line x1="4" y1="23" x2="18" y2="23" stroke="rgba(167,139,250,0.45)" strokeWidth="1.5" strokeLinecap="round"/>
+      <line x1="4" y1="34.5" x2="18" y2="34.5" stroke="rgba(167,139,250,0.45)" strokeWidth="1.5" strokeLinecap="round"/>
+      <line x1="4" y1="46" x2="18" y2="46" stroke="rgba(167,139,250,0.28)" strokeWidth="1.5" strokeLinecap="round"/>
+      {/* Mid-cross rungs */}
+      <line x1="6.5" y1="5.75" x2="15.5" y2="5.75" stroke="rgba(167,139,250,0.20)" strokeWidth="1" strokeLinecap="round"/>
+      <line x1="6.5" y1="17.25" x2="15.5" y2="17.25" stroke="rgba(167,139,250,0.20)" strokeWidth="1" strokeLinecap="round"/>
+      <line x1="6.5" y1="28.75" x2="15.5" y2="28.75" stroke="rgba(167,139,250,0.20)" strokeWidth="1" strokeLinecap="round"/>
+      <line x1="6.5" y1="40.25" x2="15.5" y2="40.25" stroke="rgba(167,139,250,0.20)" strokeWidth="1" strokeLinecap="round"/>
+      {/* Node dots at turning points */}
+      <circle cx="18" cy="0" r="2.5" fill="#a78bfa" opacity="0.85"/>
+      <circle cx="4" cy="0" r="2.5" fill="#7c3aed" opacity="0.85"/>
+      <circle cx="4" cy="11.5" r="2.5" fill="#a78bfa" opacity="0.9"/>
+      <circle cx="18" cy="11.5" r="2.5" fill="#7c3aed" opacity="0.9"/>
+      <circle cx="18" cy="23" r="2.5" fill="#a78bfa" opacity="0.9"/>
+      <circle cx="4" cy="23" r="2.5" fill="#7c3aed" opacity="0.9"/>
+      <circle cx="4" cy="34.5" r="2.5" fill="#a78bfa" opacity="0.9"/>
+      <circle cx="18" cy="34.5" r="2.5" fill="#7c3aed" opacity="0.9"/>
+      <circle cx="18" cy="46" r="2.5" fill="#a78bfa" opacity="0.85"/>
+      <circle cx="4" cy="46" r="2.5" fill="#7c3aed" opacity="0.85"/>
+    </svg>
   );
 }
 
@@ -1035,10 +1039,27 @@ export default function PlayersPage() {
   };
 
   return (
-    <main className="min-h-screen p-4 sm:p-6 max-w-3xl mx-auto">
-      {/* Header */}
-      <div className="mb-5">
-        <CortexInfoPill />
+    <main className="min-h-screen p-3 sm:p-6 max-w-3xl mx-auto">
+
+      {/* ── Page Header ── */}
+      <div className="mb-5 rounded-xl border border-white/[0.07] bg-gradient-to-b from-white/[0.015] via-white/[0.005] to-transparent backdrop-blur-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_4px_24px_rgba(0,0,0,0.60)] overflow-hidden">
+        <div className="px-6 py-3 border-b border-white/[0.07] flex items-center justify-center gap-3">
+          <div className="h-px flex-1 bg-gradient-to-r from-transparent to-[#a78bfa]/20" />
+          <DNAStrand />
+          <p
+            className="font-black italic tracking-[0.10em] text-[22px] sm:text-[26px] bg-gradient-to-r from-white via-[#c4b5fd] to-[#a78bfa] bg-clip-text text-transparent leading-none"
+            style={{ fontFamily: "var(--font-condensed)" }}
+          >
+            CORTEX
+          </p>
+          <DNAStrand />
+          <div className="h-px flex-1 bg-gradient-to-l from-transparent to-[#a78bfa]/20" />
+        </div>
+        <div className="px-6 py-2.5 text-center">
+          <p className="text-[9px] font-light uppercase tracking-[0.28em] text-[#a78bfa]/40">
+            Player Intelligence · Advanced Models · Live Leaderboards
+          </p>
+        </div>
       </div>
 
       {/* Search bar */}
@@ -1054,7 +1075,7 @@ export default function PlayersPage() {
           onFocus={() => setShowSugg(true)}
           onBlur={() => setTimeout(() => setShowSugg(false), 150)}
           placeholder="Search any NHL player…"
-          className="w-full px-5 py-4 text-base bg-white/[0.05] border border-white/[0.12] rounded-2xl text-white placeholder:text-white/25 focus:outline-none focus:border-white/[0.28] focus:bg-white/[0.07] transition-all"
+          className="w-full px-5 py-4 text-base bg-white/[0.05] border border-white/[0.10] rounded-2xl text-white placeholder:text-white/25 focus:outline-none focus:border-[#a78bfa]/40 focus:bg-white/[0.06] transition-all"
         />
         {query && (
           <button
@@ -1078,7 +1099,7 @@ export default function PlayersPage() {
                 {p.team && <TeamLogo team={p.team} size={24} />}
                 <span className="text-sm font-medium text-white/80 flex-1">{p.name}</span>
                 <span className="text-[10px] font-mono text-white/30">{p.team}</span>
-                <span className="text-[10px] text-white/20">{p.position}</span>
+                <span className="text-[10px] text-white/20">{fmtPos(p.position)}</span>
               </button>
             ))}
           </div>
@@ -1129,7 +1150,7 @@ export default function PlayersPage() {
            <div className="space-y-1">
              {rising.map((p, i) => (
                <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
-                 {p.team && <TeamLogo team={p.team} size={24} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                 {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                  <div className="flex-1 min-w-0">
                    <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                    {p.delta != null && <p className="text-[9px] text-white/35 mt-0.5">+{p.delta.toFixed(1)} above avg{p.n_games ? ` · ${p.n_games} GP` : ""}</p>}
@@ -1148,7 +1169,7 @@ export default function PlayersPage() {
            <div className="space-y-1">
              {falling.map((p, i) => (
                <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
-                 {p.team && <TeamLogo team={p.team} size={24} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                 {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                  <div className="flex-1 min-w-0">
                    <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                    {p.delta != null && <p className="text-[9px] text-white/35 mt-0.5">{p.delta.toFixed(1)} vs avg{p.n_games ? ` · ${p.n_games} GP` : ""}</p>}
@@ -1169,7 +1190,7 @@ export default function PlayersPage() {
                const warColor = p.war != null && p.war >= 2 ? "#4ade80" : p.war != null && p.war >= 0 ? "#fbbf24" : "#f87171";
                return (
                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
-                   {p.team && <TeamLogo team={p.team} size={24} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                   {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                    <div className="flex-1 min-w-0">
                      <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                      <p className="text-[9px] text-white/35 mt-0.5">Ranked #{p.rank} in NHL</p>
@@ -1191,10 +1212,10 @@ export default function PlayersPage() {
                const statusColor = p.status === "Out" ? "#f87171" : p.status === "DTD" ? "#fbbf24" : p.status === "Questionable" ? "#fb923c" : "#94a3b8";
                return (
                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
-                   {p.team_code && <TeamLogo team={p.team_code} size={24} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team_code}`)} />}
+                   {p.team_code && <TeamLogo team={p.team_code} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team_code}`)} />}
                    <div className="flex-1 min-w-0">
                      <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
-                     <p className="text-[9px] text-white/35 mt-0.5">{p.position ?? ""}{p.return_date_estimate ? ` · ret. ${p.return_date_estimate}` : ""}</p>
+                     <p className="text-[9px] text-white/35 mt-0.5">{fmtPos(p.position)}{p.return_date_estimate ? ` · ret. ${p.return_date_estimate}` : ""}</p>
                    </div>
                    <span className="text-[8px] font-semibold uppercase shrink-0 px-1.5 py-0.5 rounded border" style={{ color: statusColor, borderColor: `${statusColor}40`, backgroundColor: `${statusColor}14` }}>{p.status ?? "—"}</span>
                  </div>
@@ -1236,10 +1257,10 @@ export default function PlayersPage() {
                  return (
                    <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.name)}>
                      <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                     {p.team && <TeamLogo team={p.team} size={24} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                     {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                      <div className="flex-1 min-w-0">
                        <p className="text-[11px] font-semibold text-white/80 truncate">{p.name}</p>
-                       <p className="text-[9px] text-white/35 mt-0.5">{p.position} · {p.team}</p>
+                       <p className="text-[9px] text-white/35 mt-0.5">{fmtPos(p.position)} · {p.team}</p>
                      </div>
                      <span className="text-[10px] font-bold tabular-nums shrink-0" style={{ color: "#a78bfa" }}>{p.value} {unit}</span>
                    </div>
@@ -1257,7 +1278,7 @@ export default function PlayersPage() {
            <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
              {qotList.map((p, i) => (
                <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
-                 {p.team && <TeamLogo team={p.team} size={24} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                 {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                  <div className="flex-1 min-w-0">
                    <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                    <p className="text-[9px] text-white/35 mt-0.5">
@@ -1299,7 +1320,7 @@ export default function PlayersPage() {
                    className="flex items-center gap-3 px-3 py-2 rounded-xl border"
                    style={{ backgroundColor: `${meta.color}08`, borderColor: `${meta.color}20` }}
                  >
-                   {t.team && <TeamLogo team={t.team} size={24} className="shrink-0" onTeamClick={() => router.push(`/teams/${t.team}`)} />}
+                   {t.team && <TeamLogo team={t.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${t.team}`)} />}
                    <p className="flex-1 text-[11px] text-white/70 truncate min-w-0">{desc}</p>
                    <span
                      className="text-[8px] font-semibold shrink-0 px-1.5 py-0.5 rounded border whitespace-nowrap"
@@ -1327,7 +1348,7 @@ export default function PlayersPage() {
                const color = high ? "#f87171" : med ? "#fbbf24" : "#94a3b8";
                return (
                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06]">
-                   {t.team && <TeamLogo team={t.team} size={24} className="shrink-0" onTeamClick={() => router.push(`/teams/${t.team}`)} />}
+                   {t.team && <TeamLogo team={t.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${t.team}`)} />}
                    <div className="flex-1 min-w-0">
                      <p className="text-[11px] font-semibold text-white/80">{t.team}</p>
                      <p className="text-[9px] text-white/35 mt-0.5">
@@ -1375,7 +1396,7 @@ export default function PlayersPage() {
                 return (
                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                    {p.team && <TeamLogo team={p.team} size={24} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                    {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                       <p className="text-[9px] text-white/35 mt-0.5">{p.games_played != null ? `${p.games_played} GP` : ""}</p>
@@ -1411,7 +1432,7 @@ export default function PlayersPage() {
                 return (
                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                    {p.team && <TeamLogo team={p.team} size={24} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                    {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                       <p className="text-[9px] text-white/35 mt-0.5">{p.games_played != null ? `${p.games_played} GP` : ""}</p>
@@ -1451,7 +1472,7 @@ export default function PlayersPage() {
                 return (
                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                    {p.team && <TeamLogo team={p.team} size={24} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                    {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                       <p className="text-[9px] text-white/35 mt-0.5">
@@ -1477,7 +1498,7 @@ export default function PlayersPage() {
                 return (
                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                    {p.team && <TeamLogo team={p.team} size={24} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                    {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                       {p.wpa_per60 != null && <p className="text-[9px] text-white/35 mt-0.5">WPA/60: {p.wpa_per60.toFixed(4)}</p>}
@@ -1508,7 +1529,7 @@ export default function PlayersPage() {
                   {ppList.map((p, i) => (
                     <div key={i} className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] transition-all cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                       <span className="text-[9px] font-mono text-white/25 w-4 shrink-0">{p.rank}</span>
-                      {p.team && <TeamLogo team={p.team} size={20} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                      {p.team && <TeamLogo team={p.team} size={28} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                       <p className="text-[11px] font-semibold text-white/80 flex-1 truncate">{p.player_name}</p>
                       <span className="text-[10px] font-bold tabular-nums shrink-0" style={{ color: "#fbbf24" }}>{p.xgf60?.toFixed(1) ?? "—"}</span>
                     </div>
@@ -1524,7 +1545,7 @@ export default function PlayersPage() {
                   {pkList.map((p, i) => (
                     <div key={i} className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] transition-all cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                       <span className="text-[9px] font-mono text-white/25 w-4 shrink-0">{p.rank}</span>
-                      {p.team && <TeamLogo team={p.team} size={20} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                      {p.team && <TeamLogo team={p.team} size={28} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                       <p className="text-[11px] font-semibold text-white/80 flex-1 truncate">{p.player_name}</p>
                       <span className="text-[10px] font-bold tabular-nums shrink-0" style={{ color: "#60a5fa" }}>{p.xgf60?.toFixed(1) ?? "—"}</span>
                     </div>
@@ -1545,7 +1566,7 @@ export default function PlayersPage() {
                 return (
                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                    {p.team && <TeamLogo team={p.team} size={24} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                    {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                       <p className="text-[9px] text-white/35 mt-0.5">
@@ -1573,7 +1594,7 @@ export default function PlayersPage() {
                 return (
                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                    {p.team && <TeamLogo team={p.team} size={24} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                    {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                       <p className="text-[9px] text-white/35 mt-0.5">{p.games_played != null ? `${p.games_played} GP · ` : ""}{above >= 0 ? "+" : ""}{above.toFixed(1)} vs avg</p>
@@ -1596,7 +1617,7 @@ export default function PlayersPage() {
                 return (
                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                    {p.team && <TeamLogo team={p.team} size={24} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                    {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                       <p className="text-[9px] text-white/35 mt-0.5">
@@ -1624,7 +1645,7 @@ export default function PlayersPage() {
             ] as const).map(({ k, label }) => (
               <button key={k} onClick={() => switchRapmCategory(k)}
                 className="px-2.5 py-1 rounded-lg text-[10px] font-semibold uppercase tracking-wide border transition-all duration-150"
-                style={rapmCategory === k ? { color:"#C9A84C", borderColor:"rgba(201,168,76,0.40)", backgroundColor:"rgba(201,168,76,0.10)" }
+                style={rapmCategory === k ? { color:"#a78bfa", borderColor:"rgba(167,139,250,0.40)", backgroundColor:"rgba(167,139,250,0.10)" }
                   : { color:"rgba(255,255,255,0.30)", borderColor:"rgba(255,255,255,0.08)", backgroundColor:"transparent" }}
               >{label}</button>
             ))}
@@ -1637,7 +1658,7 @@ export default function PlayersPage() {
                 return (
                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                    {p.team && <TeamLogo team={p.team} size={24} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                    {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                       <p className="text-[9px] text-white/35 mt-0.5">{p.gp != null ? `${p.gp} GP` : ""}{p.toi_ev != null ? ` · ${p.toi_ev.toFixed(0)} EV TOI` : ""}</p>
@@ -1660,7 +1681,7 @@ export default function PlayersPage() {
                 return (
                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                    {p.team && <TeamLogo team={p.team} size={24} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                    {p.team && <TeamLogo team={p.team} size={32} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
                       <p className="text-[9px] text-white/35 mt-0.5">{p.gp != null ? `${p.gp} GP` : ""}{p.rapm_ev_def != null ? ` · Def RAPM ${p.rapm_ev_def > 0 ? "+" : ""}${p.rapm_ev_def.toFixed(2)}` : ""}</p>

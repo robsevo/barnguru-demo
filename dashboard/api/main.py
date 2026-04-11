@@ -2777,39 +2777,57 @@ async def phase2_rapm_leaderboard(
 
 @app.get("/phase2/xga-leaderboard")
 async def phase2_xga_leaderboard(limit: int = 20) -> dict:
-    """xGA/60 leaderboard — best defenders by lowest on-ice xGA/60 (min 20 GP)."""
+    """xGA/60 leaderboard — best defenders by lowest on-ice xGA/60 (DZS-adjusted from CDR model, min 20 GP)."""
     import polars as pl
-    rapm_dir = _GRETZKY_DATA_DIR / "rapm"
-    files = sorted(rapm_dir.glob("rapm_*.parquet")) if rapm_dir.exists() else []
+    # Use CDR parquet — it has xga_60_adj (DZS-corrected on-ice xGA/60), which is
+    # the real on-ice suppression number. RAPM xga_60 is a marginal ridge-regression
+    # differential and is near zero by construction; not useful as a leaderboard.
+    cdr_dir = _GRETZKY_DATA_DIR / "cdr"
+    files = sorted(cdr_dir.glob("cdr_*.parquet")) if cdr_dir.exists() else []
     if not files:
         return {"players": [], "built": False}
     try:
         df = pl.read_parquet(files[-1])
-        if "xga_60" not in df.columns:
+        col = "xga_60_adj" if "xga_60_adj" in df.columns else "xga_60"
+        if col not in df.columns:
             return {"players": [], "built": False, "reason": "xga_60_missing"}
         name_lut = _build_name_lookup()
         MIN_GP = 20
         if "gp" in df.columns:
             df = df.filter(pl.col("gp") >= MIN_GP)
-        df = df.filter(pl.col("xga_60").is_not_null())
-        # Lower xGA/60 = better defensive player; sort ascending
-        ranked = df.sort("xga_60", descending=False).head(limit)
+        df = df.filter(pl.col(col).is_not_null()).filter(pl.col(col) > 0)
+        # Lower xGA/60 = better defensive suppression; sort ascending
+        ranked = df.sort(col, descending=False).head(limit)
+        # Build RAPM EV Def lookup for context column
+        rapm_lut: dict[int, float | None] = {}
+        rapm_dir = _GRETZKY_DATA_DIR / "rapm"
+        rapm_files = sorted(rapm_dir.glob("rapm_*.parquet")) if rapm_dir.exists() else []
+        if rapm_files:
+            try:
+                rdf = pl.read_parquet(rapm_files[-1], columns=["player_id", "rapm_ev_def"])
+                for r in rdf.to_dicts():
+                    pid2 = r.get("player_id")
+                    if pid2:
+                        rapm_lut[int(pid2)] = r.get("rapm_ev_def")
+            except Exception:
+                pass
         rows = []
         for i, r in enumerate(ranked.to_dicts()):
             pid  = r.get("player_id")
             name = r.get("player_name") or (name_lut.get(int(pid)) if pid else None) or f"id_{pid}"
+            rapm_def = rapm_lut.get(int(pid)) if pid else None
             rows.append({
                 "rank":       i + 1,
                 "player_id":  pid,
                 "player_name":name,
                 "team":       _abbr(r.get("team")),
-                "value":      round(float(r["xga_60"]), 2),
+                "value":      round(float(r[col]), 2),
                 "gp":         r.get("gp"),
-                "rapm_ev_def":round(float(r["rapm_ev_def"]), 3) if r.get("rapm_ev_def") is not None else None,
+                "rapm_ev_def":round(float(rapm_def), 3) if rapm_def is not None else None,
             })
         return {"players": rows, "built": True}
-    except Exception:
-        return {"players": [], "built": False}
+    except Exception as exc:
+        return {"players": [], "built": False, "error": str(exc)}
 
 
 # ---------------------------------------------------------------------------
