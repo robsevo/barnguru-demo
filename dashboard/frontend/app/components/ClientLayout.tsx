@@ -101,19 +101,20 @@ const NAME_CLASS: Record<PhaseStatus, string> = {
   not_started: "text-white/20",
 };
 
-// NAV_ITEMS for the sidebar
+// Nav items — Live Games dot is rendered dynamically based on live status
 const NAV_ITEMS = [
-  { href: "/",            label: "Home",         shortLabel: "Home",  dot: "bg-[#4ade80] shadow-[0_0_6px_rgba(74,222,128,0.9)]", active: (p: string) => p === "/" },
-  { href: "/gamecentre",  label: "Live Games",   shortLabel: "Live",  dot: "bg-white/50 shadow-[0_0_6px_rgba(220,225,230,0.6)]",  active: (p: string) => p === "/gamecentre" || p.startsWith("/game/") },
-  { href: "/standings",   label: "Standings",    shortLabel: "Stnd",  dot: "bg-[#fbbf24]/70 shadow-[0_0_5px_rgba(251,191,36,0.6)]", active: (p: string) => p === "/standings" },
-  { href: "/stats",       label: "Stats Leaders",shortLabel: "Stats", dot: "bg-white/35 shadow-[0_0_5px_rgba(210,215,220,0.5)]",   active: (p: string) => p === "/stats" },
-  { href: "/players",     label: "Cortex",       shortLabel: "Crtx",  dot: "bg-[#a78bfa] shadow-[0_0_6px_rgba(167,139,250,0.8)]",  active: (p: string) => p === "/players" || p.startsWith("/players/") },
-  { href: "/teams",       label: "Teams",        shortLabel: "Teams", dot: "bg-white/20",                                           active: (p: string) => p === "/teams" || p.startsWith("/teams/") },
+  { href: "/",            label: "Home",          shortLabel: "Home",  dot: "static", dotClass: "bg-white/20",                                                                active: (p: string) => p === "/" },
+  { href: "/gamecentre",  label: "Live Games",    shortLabel: "Live",  dot: "live",   dotClass: "",                                                                           active: (p: string) => p === "/gamecentre" || p.startsWith("/game/") },
+  { href: "/standings",   label: "Standings",     shortLabel: "Stnd",  dot: "static", dotClass: "bg-[#fbbf24]/70 shadow-[0_0_5px_rgba(251,191,36,0.6)]",                     active: (p: string) => p === "/standings" },
+  { href: "/stats",       label: "Stats Leaders", shortLabel: "Stats", dot: "static", dotClass: "bg-white/35 shadow-[0_0_5px_rgba(210,215,220,0.5)]",                        active: (p: string) => p === "/stats" },
+  { href: "/players",     label: "Cortex",        shortLabel: "Crtx",  dot: "static", dotClass: "bg-[#a78bfa] shadow-[0_0_6px_rgba(167,139,250,0.8)]",                       active: (p: string) => p === "/players" || p.startsWith("/players/") },
+  { href: "/teams",       label: "Teams",         shortLabel: "Teams", dot: "static", dotClass: "bg-white/20",                                                                active: (p: string) => p === "/teams" || p.startsWith("/teams/") },
 ];
 
 function InnerLayout({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [username, setUsername] = useState<string | null>(null);
+  const [hasLive, setHasLive] = useState(false);
   const pathname = usePathname();
   const { theme, clearTheme } = useTheme();
 
@@ -125,6 +126,26 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
       .then((r) => r.json())
       .then((d) => setUsername(d.username ?? null))
       .catch(() => {});
+  }, []);
+
+  // Poll scoreboard to know if any games are currently live
+  useEffect(() => {
+    let id: ReturnType<typeof setInterval>;
+    const check = () =>
+      fetch("/api/scoreboard")
+        .then(r => r.json())
+        .then(d => {
+          const live = (d.games ?? []).some(
+            (g: { game_state: string }) => g.game_state === "LIVE" || g.game_state === "CRIT"
+          );
+          setHasLive(live);
+          clearInterval(id);
+          id = setInterval(check, live ? 15_000 : 60_000);
+        })
+        .catch(() => {});
+    check();
+    id = setInterval(check, 60_000);
+    return () => clearInterval(id);
   }, []);
 
   return (
@@ -187,12 +208,17 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
             <p className="px-3 pt-1 pb-1.5 text-[9px] font-semibold uppercase tracking-[0.22em] text-white/15">
               Navigation
             </p>
-            {NAV_ITEMS.map(({ href, label, active, dot }) => {
+            {NAV_ITEMS.map(({ href, label, active, dot, dotClass }) => {
               const isActive = active(pathname);
+              const liveDot = dot === "live"
+                ? hasLive
+                  ? "bg-[#4ade80] shadow-[0_0_6px_rgba(74,222,128,0.9)] animate-pulse"
+                  : "bg-white/20"
+                : dotClass;
               return (
                 <Link key={href} href={href} onClick={() => setOpen(false)} className="block">
                   <div className={`flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all duration-150 ${isActive ? "bg-white/[0.08]" : "hover:bg-white/[0.04]"}`}>
-                    <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${dot}`} />
+                    <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${liveDot}`} />
                     <span className="text-[9px] font-semibold font-mono text-white/15 w-5 shrink-0">—</span>
                     <span className={`text-[11px] font-medium leading-tight ${isActive ? "text-white/90" : "text-white/60"}`}>
                       {label}
