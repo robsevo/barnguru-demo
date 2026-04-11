@@ -816,7 +816,7 @@ function Section({
       className={`rounded-2xl overflow-hidden shadow-[0_4px_16px_rgba(0,0,0,0.50)] ${className}`}
       style={{
         background: `linear-gradient(160deg, rgba(var(--card-base-r),var(--card-base-g),var(--card-base-b),0.90) 0%, rgba(var(--card-mid-r),var(--card-mid-g),var(--card-mid-b),0.97) 100%)`,
-        border: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.12)`,
+        border: `1px solid rgba(167,139,250,0.12)`,
       }}
     >
       <button
@@ -914,33 +914,40 @@ function CortexAbout() {
   );
 }
 
-function DNAStrand() {
+// Neural-network / brain icon — radiating nodes connected by axons
+function CortexIcon({ size = 32 }: { size?: number }) {
   return (
-    <svg width="26" height="32" viewBox="0 0 26 32" fill="none" aria-hidden="true" className="shrink-0">
-      {/* Strand A */}
-      <path d="M21 0 C5 3 3 7 3 10 C3 13 5 17 21 20 C21 20 5 23 3 26 C3 29 21 31 21 32"
-        stroke="#a78bfa" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
-      {/* Strand B */}
-      <path d="M5 0 C21 3 23 7 23 10 C23 13 21 17 5 20 C5 20 21 23 23 26 C23 29 5 31 5 32"
-        stroke="#7c3aed" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
-      {/* Rungs at turning points */}
-      <line x1="3" y1="0" x2="23" y2="0" stroke="rgba(167,139,250,0.30)" strokeWidth="2" strokeLinecap="round"/>
-      <line x1="3" y1="10" x2="23" y2="10" stroke="rgba(167,139,250,0.55)" strokeWidth="2" strokeLinecap="round"/>
-      <line x1="3" y1="20" x2="23" y2="20" stroke="rgba(167,139,250,0.55)" strokeWidth="2" strokeLinecap="round"/>
-      <line x1="3" y1="32" x2="23" y2="32" stroke="rgba(167,139,250,0.30)" strokeWidth="2" strokeLinecap="round"/>
-      {/* Mid rungs */}
-      <line x1="7" y1="5" x2="19" y2="5" stroke="rgba(167,139,250,0.22)" strokeWidth="1.5" strokeLinecap="round"/>
-      <line x1="7" y1="15" x2="19" y2="15" stroke="rgba(167,139,250,0.22)" strokeWidth="1.5" strokeLinecap="round"/>
-      <line x1="7" y1="26" x2="19" y2="26" stroke="rgba(167,139,250,0.22)" strokeWidth="1.5" strokeLinecap="round"/>
-      {/* Node dots */}
-      <circle cx="21" cy="0" r="3" fill="#a78bfa" opacity="0.9"/>
-      <circle cx="5" cy="0" r="3" fill="#7c3aed" opacity="0.9"/>
-      <circle cx="3" cy="10" r="3" fill="#a78bfa" opacity="0.95"/>
-      <circle cx="23" cy="10" r="3" fill="#7c3aed" opacity="0.95"/>
-      <circle cx="21" cy="20" r="3" fill="#a78bfa" opacity="0.95"/>
-      <circle cx="5" cy="20" r="3" fill="#7c3aed" opacity="0.95"/>
-      <circle cx="5" cy="32" r="3" fill="#a78bfa" opacity="0.9"/>
-      <circle cx="21" cy="32" r="3" fill="#7c3aed" opacity="0.9"/>
+    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" aria-hidden="true" className="shrink-0">
+      {/* Outer glow ring */}
+      <circle cx="18" cy="18" r="16" stroke="#a78bfa" strokeOpacity="0.12" strokeWidth="1" />
+      {/* Axon lines between nodes */}
+      <line x1="18" y1="4"  x2="30" y2="12" stroke="#a78bfa" strokeOpacity="0.35" strokeWidth="1.2" strokeLinecap="round"/>
+      <line x1="18" y1="4"  x2="6"  y2="12" stroke="#a78bfa" strokeOpacity="0.35" strokeWidth="1.2" strokeLinecap="round"/>
+      <line x1="30" y1="12" x2="32" y2="24" stroke="#7c3aed" strokeOpacity="0.40" strokeWidth="1.2" strokeLinecap="round"/>
+      <line x1="6"  y1="12" x2="4"  y2="24" stroke="#7c3aed" strokeOpacity="0.40" strokeWidth="1.2" strokeLinecap="round"/>
+      <line x1="32" y1="24" x2="22" y2="32" stroke="#a78bfa" strokeOpacity="0.35" strokeWidth="1.2" strokeLinecap="round"/>
+      <line x1="4"  y1="24" x2="14" y2="32" stroke="#a78bfa" strokeOpacity="0.35" strokeWidth="1.2" strokeLinecap="round"/>
+      <line x1="22" y1="32" x2="14" y2="32" stroke="#a78bfa" strokeOpacity="0.25" strokeWidth="1.2" strokeLinecap="round"/>
+      {/* Cross connections */}
+      <line x1="18" y1="4"  x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.20" strokeWidth="1" strokeLinecap="round"/>
+      <line x1="30" y1="12" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.20" strokeWidth="1" strokeLinecap="round"/>
+      <line x1="6"  y1="12" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.20" strokeWidth="1" strokeLinecap="round"/>
+      <line x1="32" y1="24" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.20" strokeWidth="1" strokeLinecap="round"/>
+      <line x1="4"  y1="24" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.20" strokeWidth="1" strokeLinecap="round"/>
+      <line x1="22" y1="32" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.20" strokeWidth="1" strokeLinecap="round"/>
+      <line x1="14" y1="32" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.20" strokeWidth="1" strokeLinecap="round"/>
+      {/* Outer nodes */}
+      <circle cx="18" cy="4"  r="2.8" fill="#a78bfa" opacity="0.90"/>
+      <circle cx="30" cy="12" r="2.4" fill="#7c3aed" opacity="0.85"/>
+      <circle cx="6"  cy="12" r="2.4" fill="#7c3aed" opacity="0.85"/>
+      <circle cx="32" cy="24" r="2.4" fill="#a78bfa" opacity="0.80"/>
+      <circle cx="4"  cy="24" r="2.4" fill="#a78bfa" opacity="0.80"/>
+      <circle cx="22" cy="32" r="2.4" fill="#7c3aed" opacity="0.85"/>
+      <circle cx="14" cy="32" r="2.4" fill="#7c3aed" opacity="0.85"/>
+      {/* Central hub — brightest node */}
+      <circle cx="18" cy="18" r="4"   fill="#a78bfa" opacity="0.15"/>
+      <circle cx="18" cy="18" r="2.8" fill="#a78bfa" opacity="0.95"/>
+      <circle cx="18" cy="18" r="1.4" fill="white"   opacity="0.60"/>
     </svg>
   );
 }
@@ -1113,26 +1120,33 @@ export default function PlayersPage() {
   };
 
   return (
-    <main className="min-h-screen p-3 sm:p-6 max-w-3xl mx-auto">
+    <main
+      className="min-h-screen p-3 sm:p-6 max-w-3xl mx-auto"
+      style={{
+        /* Purple-tinted card vars for this page — overrides brownish :root defaults */
+        "--card-base-r": "18", "--card-base-g": "14", "--card-base-b": "28",
+        "--card-mid-r":  "10", "--card-mid-g":  "8",  "--card-mid-b":  "16",
+      } as React.CSSProperties}
+    >
 
       {/* ── Page Header ── */}
       <div
-        className="mb-5 rounded-xl backdrop-blur-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_4px_24px_rgba(0,0,0,0.60)] overflow-hidden"
+        className="mb-5 rounded-xl backdrop-blur-sm shadow-[inset_0_1px_0_rgba(167,139,250,0.10),0_4px_24px_rgba(0,0,0,0.60)] overflow-hidden"
         style={{
-          background: `linear-gradient(160deg, rgba(var(--card-base-r),var(--card-base-g),var(--card-base-b),0.92) 0%, rgba(var(--card-mid-r),var(--card-mid-g),var(--card-mid-b),0.97) 100%)`,
-          border: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.10)`,
+          background: `linear-gradient(160deg, rgba(18,14,28,0.95) 0%, rgba(10,8,16,0.98) 100%)`,
+          border: `1px solid rgba(167,139,250,0.14)`,
         }}
       >
-        <div className="px-6 py-3 border-b border-white/[0.07] flex items-center justify-center gap-3">
+        <div className="px-6 py-3 border-b border-[#a78bfa]/[0.08] flex items-center justify-center gap-3">
           <div className="h-px flex-1 bg-gradient-to-r from-transparent to-[#a78bfa]/20" />
-          <DNAStrand />
+          <CortexIcon size={28} />
           <p
             className="font-black italic tracking-[0.10em] text-[22px] sm:text-[26px] bg-gradient-to-r from-white via-[#c4b5fd] to-[#a78bfa] bg-clip-text text-transparent leading-none"
             style={{ fontFamily: "var(--font-condensed)" }}
           >
             CORTEX
           </p>
-          <DNAStrand />
+          <CortexIcon size={28} />
           <div className="h-px flex-1 bg-gradient-to-l from-transparent to-[#a78bfa]/20" />
         </div>
         <div className="px-6 py-2.5 text-center">
@@ -1172,8 +1186,8 @@ export default function PlayersPage() {
           <div
             className="absolute top-full left-0 right-0 mt-1 z-50 rounded-xl backdrop-blur-xl shadow-[0_8px_40px_rgba(0,0,0,0.85)] overflow-hidden"
             style={{
-              background: `rgba(var(--card-mid-r),var(--card-mid-g),var(--card-mid-b),0.98)`,
-              border: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.15)`,
+              background: `rgba(10,8,16,0.98)`,
+              border: `1px solid rgba(167,139,250,0.18)`,
             }}
           >
             {suggestions.map(p => (

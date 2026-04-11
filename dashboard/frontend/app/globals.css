@@ -8,8 +8,8 @@
   --brand-b:         76;
 
   /* Container surface colors — overridden per-page/per-section for team tinting */
-  --card-base-r:     20;  --card-base-g:     16;  --card-base-b:     10;
-  --card-mid-r:      7;   --card-mid-g:      6;   --card-mid-b:      4;
+  --card-base-r:     13;  --card-base-g:     14;  --card-base-b:     18;
+  --card-mid-r:      8;   --card-mid-g:      9;   --card-mid-b:      11;
   --body-base-r:     9;   --body-base-g:     10;  --body-base-b:     12;
   --header-r:        7;   --header-g:        8;   --header-b:        9;
 

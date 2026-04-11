@@ -47,23 +47,30 @@ function AboutDisclaimer() {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-function MiniDNA() {
+// Mini neural-net icon for the mobile Cortex nav button
+function MiniCortex() {
   return (
-    <svg width="11" height="14" viewBox="0 0 26 32" fill="none" aria-hidden="true" className="shrink-0">
-      <path d="M21 0 C5 3 3 7 3 10 C3 13 5 17 21 20 C21 20 5 23 3 26 C3 29 21 31 21 32"
-        stroke="#a78bfa" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
-      <path d="M5 0 C21 3 23 7 23 10 C23 13 21 17 5 20 C5 20 21 23 23 26 C23 29 5 31 5 32"
-        stroke="#7c3aed" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
-      <line x1="3" y1="10" x2="23" y2="10" stroke="rgba(167,139,250,0.6)" strokeWidth="2" strokeLinecap="round"/>
-      <line x1="3" y1="20" x2="23" y2="20" stroke="rgba(167,139,250,0.6)" strokeWidth="2" strokeLinecap="round"/>
-      <circle cx="21" cy="0" r="3" fill="#a78bfa" opacity="0.9"/>
-      <circle cx="5" cy="0" r="3" fill="#7c3aed" opacity="0.9"/>
-      <circle cx="3" cy="10" r="3" fill="#a78bfa" opacity="0.95"/>
-      <circle cx="23" cy="10" r="3" fill="#7c3aed" opacity="0.95"/>
-      <circle cx="21" cy="20" r="3" fill="#a78bfa" opacity="0.95"/>
-      <circle cx="5" cy="20" r="3" fill="#7c3aed" opacity="0.95"/>
-      <circle cx="5" cy="32" r="3" fill="#a78bfa" opacity="0.9"/>
-      <circle cx="21" cy="32" r="3" fill="#7c3aed" opacity="0.9"/>
+    <svg width="13" height="13" viewBox="0 0 36 36" fill="none" aria-hidden="true" className="shrink-0">
+      <line x1="18" y1="4"  x2="30" y2="12" stroke="#a78bfa" strokeOpacity="0.50" strokeWidth="2" strokeLinecap="round"/>
+      <line x1="18" y1="4"  x2="6"  y2="12" stroke="#a78bfa" strokeOpacity="0.50" strokeWidth="2" strokeLinecap="round"/>
+      <line x1="30" y1="12" x2="32" y2="24" stroke="#7c3aed" strokeOpacity="0.55" strokeWidth="2" strokeLinecap="round"/>
+      <line x1="6"  y1="12" x2="4"  y2="24" stroke="#7c3aed" strokeOpacity="0.55" strokeWidth="2" strokeLinecap="round"/>
+      <line x1="32" y1="24" x2="18" y2="32" stroke="#a78bfa" strokeOpacity="0.50" strokeWidth="2" strokeLinecap="round"/>
+      <line x1="4"  y1="24" x2="18" y2="32" stroke="#a78bfa" strokeOpacity="0.50" strokeWidth="2" strokeLinecap="round"/>
+      <line x1="18" y1="4"  x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.25" strokeWidth="1.5" strokeLinecap="round"/>
+      <line x1="30" y1="12" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.25" strokeWidth="1.5" strokeLinecap="round"/>
+      <line x1="6"  y1="12" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.25" strokeWidth="1.5" strokeLinecap="round"/>
+      <line x1="32" y1="24" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.25" strokeWidth="1.5" strokeLinecap="round"/>
+      <line x1="4"  y1="24" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.25" strokeWidth="1.5" strokeLinecap="round"/>
+      <line x1="18" y1="32" x2="18" y2="18" stroke="#c4b5fd" strokeOpacity="0.25" strokeWidth="1.5" strokeLinecap="round"/>
+      <circle cx="18" cy="4"  r="3" fill="#a78bfa" opacity="0.90"/>
+      <circle cx="30" cy="12" r="2.5" fill="#7c3aed" opacity="0.85"/>
+      <circle cx="6"  cy="12" r="2.5" fill="#7c3aed" opacity="0.85"/>
+      <circle cx="32" cy="24" r="2.5" fill="#a78bfa" opacity="0.80"/>
+      <circle cx="4"  cy="24" r="2.5" fill="#a78bfa" opacity="0.80"/>
+      <circle cx="18" cy="32" r="3" fill="#7c3aed" opacity="0.90"/>
+      <circle cx="18" cy="18" r="3.5" fill="#a78bfa" opacity="0.95"/>
+      <circle cx="18" cy="18" r="1.6" fill="white"   opacity="0.55"/>
     </svg>
   );
 }
