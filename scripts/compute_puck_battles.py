@@ -83,100 +83,87 @@ def _load_edge(data_dir: Path, season: int) -> pl.DataFrame | None:
 def _build_player_stats_from_pbp(pbp_df: pl.DataFrame, season: int) -> pl.DataFrame:
     """Aggregate per-player hits and blocked shots from NHL PBP data.
 
+    Uses dedicated hitter_id / blocker_id columns written by the updated PBP
+    parser (pbp_parser.py >= 2026-04). Falls back gracefully when those columns
+    are absent (old parquets).
+
     Returns DataFrame with: player_id, team, hits, blocked_shots, toi_ev, season.
     """
     if len(pbp_df) == 0:
         return pl.DataFrame()
 
-    # Look for hit events
-    has_event_type = "event_type" in pbp_df.columns or "event" in pbp_df.columns
-    event_col = "event_type" if "event_type" in pbp_df.columns else "event" if "event" in pbp_df.columns else None
-
-    # Look for player columns
-    player_col = next((c for c in ["player_id", "playerId", "shooter_id"] if c in pbp_df.columns), None)
-    team_col   = next((c for c in ["team", "teamAbbrev", "home_team"] if c in pbp_df.columns), None)
-    toi_col    = next((c for c in ["toi_ev", "toi", "TOI"] if c in pbp_df.columns), None)
-
-    if player_col is None:
-        return pl.DataFrame()
-
+    event_col = next((c for c in ["event_type", "event"] if c in pbp_df.columns), None)
     frames: list[pl.DataFrame] = []
 
-    # Hits
-    if event_col and has_event_type:
+    # ── Hits via dedicated hitter_id column (new parser) ──────────────────
+    if "hitter_id" in pbp_df.columns and event_col:
         hit_events = pbp_df.filter(
-            pl.col(event_col).str.to_lowercase().str.contains("hit")
-        )
-        if len(hit_events) > 0 and player_col in hit_events.columns:
+            pl.col(event_col).str.to_lowercase() == "hit"
+        ).filter(pl.col("hitter_id").is_not_null())
+        if len(hit_events) > 0:
             hits_agg = (
                 hit_events
-                .group_by(player_col)
-                .agg(pl.col(player_col).count().alias("hits"))
-                .rename({player_col: "player_id"})
+                .group_by("hitter_id")
+                .agg(pl.len().alias("hits"))
+                .rename({"hitter_id": "player_id"})
+                .with_columns(pl.col("player_id").cast(pl.Int64))
             )
             frames.append(hits_agg)
 
-    # Blocked shots
-    if event_col and has_event_type:
+    # ── Blocked shots via dedicated blocker_id column (new parser) ─────────
+    if "blocker_id" in pbp_df.columns and event_col:
         block_events = pbp_df.filter(
-            pl.col(event_col).str.to_lowercase().str.contains("block")
-        )
-        if len(block_events) > 0 and player_col in block_events.columns:
+            pl.col(event_col).str.to_lowercase() == "shot"
+        ).filter(pl.col("blocker_id").is_not_null())
+        if len(block_events) > 0:
             blocks_agg = (
                 block_events
-                .group_by(player_col)
-                .agg(pl.col(player_col).count().alias("blocked_shots"))
-                .rename({player_col: "player_id"})
+                .group_by("blocker_id")
+                .agg(pl.len().alias("blocked_shots"))
+                .rename({"blocker_id": "player_id"})
+                .with_columns(pl.col("player_id").cast(pl.Int64))
             )
             frames.append(blocks_agg)
 
     if not frames:
-        # PBP doesn't have expected format — return minimal skeleton
-        unique_players = pbp_df.select(pl.col(player_col).cast(pl.Int64).alias("player_id")).unique()
-        return unique_players.with_columns([
-            pl.lit(float("nan")).alias("hits"),
-            pl.lit(float("nan")).alias("blocked_shots"),
-            pl.lit(1800.0).alias("toi_ev"),  # default: 30 min
-            pl.lit(season).cast(pl.Int64).alias("season"),
-        ])
+        print("    [warn] No hitter_id/blocker_id columns found — PBP may need re-ingest.")
+        return pl.DataFrame()
 
     # Join hits and blocks
     result = frames[0]
     for f in frames[1:]:
         result = result.join(f, on="player_id", how="outer_coalesce")
 
-    # Fill missing stats
     for col in ["hits", "blocked_shots"]:
         if col not in result.columns:
             result = result.with_columns(pl.lit(0.0).alias(col))
         else:
-            result = result.with_columns(pl.col(col).fill_null(0.0))
+            result = result.with_columns(pl.col(col).cast(pl.Float64).fill_null(0.0))
 
-    # Approximate TOI: 30 min default if no TOI data
-    if toi_col and toi_col in pbp_df.columns and player_col in pbp_df.columns:
-        toi_df = (
-            pbp_df
-            .group_by(player_col)
-            .agg(pl.col(toi_col).mean().alias("toi_ev"))
-            .rename({player_col: "player_id"})
-        )
-        result = result.join(toi_df, on="player_id", how="left")
-    if "toi_ev" not in result.columns:
-        result = result.with_columns(pl.lit(1800.0).alias("toi_ev"))
+    # Default TOI (30 min); no reliable per-player TOI in PBP without shifts join
+    result = result.with_columns(pl.lit(1800.0).alias("toi_ev"))
 
-    # Add team if available
-    if team_col and team_col in pbp_df.columns and player_col in pbp_df.columns:
-        team_df = (
+    # Add team — use event_owner_team_id from hit events
+    if "hitter_id" in pbp_df.columns and "event_owner_team_id" in pbp_df.columns and event_col:
+        hit_team = (
             pbp_df
-            .group_by(player_col)
-            .agg(pl.col(team_col).first().alias("team"))
-            .rename({player_col: "player_id"})
+            .filter(pl.col(event_col).str.to_lowercase() == "hit")
+            .filter(pl.col("hitter_id").is_not_null())
+            .group_by("hitter_id")
+            .agg(pl.col("event_owner_team_id").first())
+            .rename({"hitter_id": "player_id", "event_owner_team_id": "_team_id"})
+            .with_columns(pl.col("player_id").cast(pl.Int64))
         )
-        result = result.join(team_df, on="player_id", how="left")
-    if "team" not in result.columns:
+        result = result.join(hit_team, on="player_id", how="left")
+        result = result.with_columns(
+            pl.col("_team_id").cast(pl.Utf8).fill_null("UNK").alias("team")
+        ).drop("_team_id")
+    else:
         result = result.with_columns(pl.lit("UNK").alias("team"))
 
     result = result.with_columns(pl.lit(season).cast(pl.Int64).alias("season"))
+    # Drop rows where player_id is null (shouldn't happen but guard)
+    result = result.filter(pl.col("player_id").is_not_null())
     return result
 
 

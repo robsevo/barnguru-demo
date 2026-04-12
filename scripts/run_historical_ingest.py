@@ -50,13 +50,17 @@ async def _ingest_season(
     *,
     concurrency: int,
     force: bool,
+    force_all: bool = False,
 ) -> None:
     from data.historical_ingestor import HistoricalIngestor
     from data.nhl_client import NHLClient
 
     ingestor = HistoricalIngestor(base / "raw", concurrency=concurrency)
 
-    if force:
+    if force_all:
+        cleared = ingestor.clear_all(season)
+        print(f"  Cleared all {cleared} manifest entries for season {season} (--force-all)")
+    elif force:
         cleared = ingestor.clear_errors()
         if cleared:
             print(f"  Cleared {cleared} error entries from manifest (--force)")
@@ -116,6 +120,11 @@ def main() -> None:
         action="store_true",
         help="Clear error entries from manifest so they are re-fetched",
     )
+    parser.add_argument(
+        "--force-all",
+        action="store_true",
+        help="Clear ALL manifest entries (including ok) to force a full re-ingest",
+    )
     args = parser.parse_args()
 
     base = _data_dir()
@@ -143,7 +152,8 @@ def main() -> None:
                     base,
                     season,
                     concurrency=args.concurrency,
-                    force=args.force,
+                    force=args.force or args.force_all,
+                    force_all=args.force_all,
                 )
             )
         except Exception as exc:
