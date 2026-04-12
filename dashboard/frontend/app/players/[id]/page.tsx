@@ -1200,11 +1200,11 @@ function ShotMapViz({ shots, teamColor }: { shots: ShotPoint[]; teamColor: strin
       {/* Goals — filled circle + bright white ring so they pop clearly */}
       {goals.map((s, i) => (
         <g key={`g${i}`}>
-          <circle cx={s.x} cy={sy(s.y)} r={3.8}
+          <circle cx={s.x} cy={sy(s.y)} r={2.6}
             fill="white" fillOpacity={0.9} />
-          <circle cx={s.x} cy={sy(s.y)} r={3.8}
-            fill="none" stroke={teamColor} strokeWidth="1.2" strokeOpacity={0.9} />
-          <circle cx={s.x} cy={sy(s.y)} r={2}
+          <circle cx={s.x} cy={sy(s.y)} r={2.6}
+            fill="none" stroke={teamColor} strokeWidth="1.0" strokeOpacity={0.9} />
+          <circle cx={s.x} cy={sy(s.y)} r={1.3}
             fill={teamColor} fillOpacity={0.95} />
         </g>
       ))}
@@ -1218,10 +1218,10 @@ function ShotMapViz({ shots, teamColor }: { shots: ShotPoint[]; teamColor: strin
       <text x="6.5" y="84.5" fontSize="3.8" fill="rgba(0,30,60,0.5)" fontFamily="monospace">High xG</text>
 
       {/* Goal legend */}
-      <circle cx="63" cy="74.5" r="3.8" fill="white" fillOpacity="0.9" />
-      <circle cx="63" cy="74.5" r="3.8" fill="none" stroke={teamColor} strokeWidth="1.2" strokeOpacity="0.9" />
-      <circle cx="63" cy="74.5" r="2" fill={teamColor} fillOpacity="0.95" />
-      <text x="68.5" y="78" fontSize="3.8" fill="rgba(0,30,60,0.5)" fontFamily="monospace">Goal</text>
+      <circle cx="63" cy="74.5" r="2.6" fill="white" fillOpacity="0.9" />
+      <circle cx="63" cy="74.5" r="2.6" fill="none" stroke={teamColor} strokeWidth="1.0" strokeOpacity="0.9" />
+      <circle cx="63" cy="74.5" r="1.3" fill={teamColor} fillOpacity="0.95" />
+      <text x="67.5" y="78" fontSize="3.8" fill="rgba(0,30,60,0.5)" fontFamily="monospace">Goal</text>
     </svg>
   );
 }
