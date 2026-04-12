@@ -1211,17 +1211,17 @@ function ShotMapViz({ shots, teamColor }: { shots: ShotPoint[]; teamColor: strin
 
       {/* Legend */}
       <circle cx="3" cy="68" r="1.8" fill="#38bdf8" fillOpacity="0.65" stroke="#38bdf8" strokeWidth="0.5" strokeOpacity="0.3" />
-      <text x="6.5" y="71.5" fontSize="3.8" fill="rgba(0,30,60,0.5)" fontFamily="monospace">Low xG</text>
+      <text x="6.5" y="71.5" fontSize="3.5" fill="rgba(10,20,40,0.4)" fontFamily="Barlow, sans-serif" fontWeight="600" letterSpacing="0.04em">LOW xG</text>
       <circle cx="3" cy="74.5" r="1.8" fill="#f97316" fillOpacity="0.65" stroke="#f97316" strokeWidth="0.5" strokeOpacity="0.3" />
-      <text x="6.5" y="78" fontSize="3.8" fill="rgba(0,30,60,0.5)" fontFamily="monospace">Med xG</text>
+      <text x="6.5" y="78" fontSize="3.5" fill="rgba(10,20,40,0.4)" fontFamily="Barlow, sans-serif" fontWeight="600" letterSpacing="0.04em">MED xG</text>
       <circle cx="3" cy="81" r="1.8" fill="#ef4444" fillOpacity="0.65" stroke="#ef4444" strokeWidth="0.5" strokeOpacity="0.3" />
-      <text x="6.5" y="84.5" fontSize="3.8" fill="rgba(0,30,60,0.5)" fontFamily="monospace">High xG</text>
+      <text x="6.5" y="84.5" fontSize="3.5" fill="rgba(10,20,40,0.4)" fontFamily="Barlow, sans-serif" fontWeight="600" letterSpacing="0.04em">HIGH xG</text>
 
       {/* Goal legend */}
       <circle cx="63" cy="74.5" r="2.6" fill="white" fillOpacity="0.9" />
       <circle cx="63" cy="74.5" r="2.6" fill="none" stroke={teamColor} strokeWidth="1.0" strokeOpacity="0.9" />
       <circle cx="63" cy="74.5" r="1.3" fill={teamColor} fillOpacity="0.95" />
-      <text x="67.5" y="78" fontSize="3.8" fill="rgba(0,30,60,0.5)" fontFamily="monospace">Goal</text>
+      <text x="67.5" y="78" fontSize="3.5" fill="rgba(10,20,40,0.4)" fontFamily="Barlow, sans-serif" fontWeight="600" letterSpacing="0.04em">GOAL</text>
     </svg>
   );
 }
