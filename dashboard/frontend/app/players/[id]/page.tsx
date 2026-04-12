@@ -1126,114 +1126,105 @@ function EwmaTrendChart({ xgf60, leagueAvg = 4.09, teamColor }: {
 
 interface ShotPoint { x: number; y: number; xg: number; goal: boolean; type: string; }
 
-/** Half-rink SVG shot map — proper ice surface, dots coloured by xG, goals as stars */
+/** Half-rink SVG shot map — proper ice surface, dots coloured by xG, goals as rings */
 function ShotMapViz({ shots, teamColor }: { shots: ShotPoint[]; teamColor: string }) {
   // NHL coords: x 0→100 (center ice → end boards), y -42.5→42.5
-  // SVG viewBox "0 0 100 85" — 1 SVG unit = 1 NHL foot in this half
-  // sx = x (direct), sy = y + 42.5
-  const sx = (x: number) => x;
+  // SVG viewBox "0 0 100 85" — 1 SVG unit = 1 NHL foot
   const sy = (y: number) => y + 42.5;
 
   const xgColor = (xg: number) => {
-    if (xg >= 0.2)  return "#ef4444";  // high danger — red
-    if (xg >= 0.08) return "#f97316";  // medium — orange
-    return "#3b82f6";                   // low — blue
+    if (xg >= 0.2)  return "#ef4444";
+    if (xg >= 0.08) return "#f97316";
+    return "#38bdf8";
   };
 
-  const pts = shots.slice(-400);
+  // Render shots back-to-front so high-xG dots sit on top
+  const pts = [...shots].sort((a, b) => a.xg - b.xg).slice(-400);
+  const goals = pts.filter(s => s.goal);
+  const saves = pts.filter(s => !s.goal);
 
   return (
     <svg
       viewBox="0 0 100 85"
       width="100%"
       className="block mx-auto max-w-[420px]"
-      style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.55))" }}
+      style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}
     >
-      <defs>
-        {/* Clip to right-half rink shape: straight left edge, rounded right end */}
-        <clipPath id="half-rink-clip">
-          <path d="M 0,0 L 86,0 Q 100,0 100,14 L 100,71 Q 100,85 86,85 L 0,85 Z" />
-        </clipPath>
-      </defs>
-
       {/* Ice surface */}
       <path d="M 0,0 L 86,0 Q 100,0 100,14 L 100,71 Q 100,85 86,85 L 0,85 Z"
-        fill="#daeef8" stroke="#9bbdd4" strokeWidth="0.8" />
+        fill="#d6ecf6" stroke="#8fb8d0" strokeWidth="0.8" />
 
-      {/* Blue line (NHL x=25) */}
-      <line x1="25" y1="2" x2="25" y2="83"
-        stroke="#1155bb" strokeWidth="1.2" opacity="0.8" />
+      {/* Blue line */}
+      <line x1="25" y1="2" x2="25" y2="83" stroke="#1155bb" strokeWidth="1.4" opacity="0.7" />
 
-      {/* Goal line (NHL x=89) */}
-      <line x1="89" y1="11" x2="89" y2="74"
-        stroke="#cc2222" strokeWidth="0.9" opacity="0.85" />
+      {/* Goal line */}
+      <line x1="89" y1="11" x2="89" y2="74" stroke="#cc2222" strokeWidth="0.9" opacity="0.8" />
 
       {/* Trapezoid */}
       <polygon points="100,28.5 89,33.5 89,51.5 100,56.5"
-        fill="rgba(204,34,34,0.05)" stroke="#cc2222" strokeWidth="0.55" opacity="0.55" />
+        fill="none" stroke="#cc2222" strokeWidth="0.5" opacity="0.4" />
 
-      {/* Crease (arc toward center from goal line) */}
+      {/* Crease */}
       <path d="M 89 36 A 8 8 0 0 0 89 49"
-        fill="rgba(30,100,200,0.10)" stroke="#1155bb" strokeWidth="0.8" opacity="0.8" />
+        fill="rgba(30,100,200,0.09)" stroke="#1155bb" strokeWidth="0.8" opacity="0.75" />
 
       {/* Net */}
       <rect x="89" y="38.5" width="6" height="8" rx="1"
-        fill="rgba(200,200,200,0.55)" stroke="#888" strokeWidth="0.65" />
+        fill="rgba(180,180,180,0.5)" stroke="#777" strokeWidth="0.6" />
 
-      {/* Offensive zone faceoff circles */}
-      <circle cx="69" cy="20.5" r="9" fill="none"
-        stroke="#cc2222" strokeWidth="0.65" opacity="0.45" />
-      <circle cx="69" cy="64.5" r="9" fill="none"
-        stroke="#cc2222" strokeWidth="0.65" opacity="0.45" />
-      <circle cx="69" cy="20.5" r="0.9" fill="#cc2222" opacity="0.6" />
-      <circle cx="69" cy="64.5" r="0.9" fill="#cc2222" opacity="0.6" />
+      {/* Faceoff circles */}
+      <circle cx="69" cy="20.5" r="9" fill="none" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <circle cx="69" cy="64.5" r="9" fill="none" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <circle cx="69" cy="20.5" r="0.85" fill="#cc2222" opacity="0.55" />
+      <circle cx="69" cy="64.5" r="0.85" fill="#cc2222" opacity="0.55" />
+      <circle cx="20" cy="20.5" r="0.85" fill="#cc2222" opacity="0.35" />
+      <circle cx="20" cy="64.5" r="0.85" fill="#cc2222" opacity="0.35" />
 
-      {/* Neutral zone faceoff dots */}
-      <circle cx="20" cy="20.5" r="0.9" fill="#cc2222" opacity="0.4" />
-      <circle cx="20" cy="64.5" r="0.9" fill="#cc2222" opacity="0.4" />
+      {/* Center ice boundary */}
+      <line x1="0" y1="0" x2="0" y2="85" stroke="#cc2222" strokeWidth="1.2" opacity="0.85" />
 
-      {/* Left edge — center ice boundary */}
-      <line x1="0" y1="0" x2="0" y2="85" stroke="#cc2222" strokeWidth="1.2" opacity="0.9" />
+      {/* Shot dots — rendered low-xG first so high-danger sits on top */}
+      {saves.map((s, i) => (
+        <circle
+          key={i}
+          cx={s.x} cy={sy(s.y)}
+          r={1.8}
+          fill={xgColor(s.xg)}
+          fillOpacity={0.55}
+          stroke={xgColor(s.xg)}
+          strokeWidth="0.5"
+          strokeOpacity={0.25}
+        />
+      ))}
 
-      {/* Shot dots */}
-      {pts.map((s, i) => {
-        const cx = sx(s.x);
-        const cy = sy(s.y);
-        if (s.goal) {
-          const r1 = 2.8; const r2 = 1.3; const arms = 5;
-          const starPts = Array.from({ length: arms * 2 }, (_, j) => {
-            const angle = (j * Math.PI) / arms - Math.PI / 2;
-            const r = j % 2 === 0 ? r1 : r2;
-            return `${cx + r * Math.cos(angle)},${cy + r * Math.sin(angle)}`;
-          }).join(" ");
-          return (
-            <polygon key={i} points={starPts} fill={teamColor} opacity={0.95}
-              stroke="rgba(255,255,255,0.5)" strokeWidth="0.4" />
-          );
-        }
-        return (
-          <circle key={i} cx={cx} cy={cy} r={1.6}
-            fill={xgColor(s.xg)} opacity={0.65} />
-        );
-      })}
+      {/* Goals — filled circle + bright white ring so they pop clearly */}
+      {goals.map((s, i) => (
+        <g key={`g${i}`}>
+          <circle cx={s.x} cy={sy(s.y)} r={3.8}
+            fill="white" fillOpacity={0.9} />
+          <circle cx={s.x} cy={sy(s.y)} r={3.8}
+            fill="none" stroke={teamColor} strokeWidth="1.2" strokeOpacity={0.9} />
+          <circle cx={s.x} cy={sy(s.y)} r={2}
+            fill={teamColor} fillOpacity={0.95} />
+        </g>
+      ))}
 
-      {/* xG legend — bottom-left on ice */}
-      <circle cx="3" cy="68" r="1.6" fill="#3b82f6" opacity="0.75" />
-      <text x="6.5" y="71.5" fontSize="3.8" fill="rgba(0,30,60,0.45)" fontFamily="monospace">Low xG</text>
-      <circle cx="3" cy="74" r="1.6" fill="#f97316" opacity="0.75" />
-      <text x="6.5" y="77.5" fontSize="3.8" fill="rgba(0,30,60,0.45)" fontFamily="monospace">Med xG</text>
-      <circle cx="3" cy="80" r="1.6" fill="#ef4444" opacity="0.75" />
-      <text x="6.5" y="83.5" fontSize="3.8" fill="rgba(0,30,60,0.45)" fontFamily="monospace">High xG</text>
+      {/* Legend */}
+      <circle cx="3" cy="68" r="1.8" fill="#38bdf8" fillOpacity="0.65" stroke="#38bdf8" strokeWidth="0.5" strokeOpacity="0.3" />
+      <text x="6.5" y="71.5" fontSize="3.8" fill="rgba(0,30,60,0.5)" fontFamily="monospace">Low xG</text>
+      <circle cx="3" cy="74.5" r="1.8" fill="#f97316" fillOpacity="0.65" stroke="#f97316" strokeWidth="0.5" strokeOpacity="0.3" />
+      <text x="6.5" y="78" fontSize="3.8" fill="rgba(0,30,60,0.5)" fontFamily="monospace">Med xG</text>
+      <circle cx="3" cy="81" r="1.8" fill="#ef4444" fillOpacity="0.65" stroke="#ef4444" strokeWidth="0.5" strokeOpacity="0.3" />
+      <text x="6.5" y="84.5" fontSize="3.8" fill="rgba(0,30,60,0.5)" fontFamily="monospace">High xG</text>
 
-      {/* Goal star legend */}
-      <polygon
-        points="72,80.5 73.1,77.4 74.2,80.5 71.3,78.6 75.1,78.6"
-        fill={teamColor} opacity={0.95} stroke="rgba(255,255,255,0.4)" strokeWidth="0.3" />
-      <text x="76.5" y="83.5" fontSize="3.8" fill="rgba(0,30,60,0.45)" fontFamily="monospace">Goal</text>
+      {/* Goal legend */}
+      <circle cx="63" cy="74.5" r="3.8" fill="white" fillOpacity="0.9" />
+      <circle cx="63" cy="74.5" r="3.8" fill="none" stroke={teamColor} strokeWidth="1.2" strokeOpacity="0.9" />
+      <circle cx="63" cy="74.5" r="2" fill={teamColor} fillOpacity="0.95" />
+      <text x="68.5" y="78" fontSize="3.8" fill="rgba(0,30,60,0.5)" fontFamily="monospace">Goal</text>
     </svg>
   );
 }
-
 /** Offensive zone tendency map — 5-zone coloured cells */
 function ZoneTendencyMap({ data, teamColor }: { data: ProfileData; teamColor: string }) {
   const slot    = data.nn_shoot_slot_pct    ?? 0;
