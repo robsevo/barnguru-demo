@@ -1152,7 +1152,7 @@ function ShotMapViz({ shots, teamColor }: { shots: ShotPoint[]; teamColor: strin
     >
       {/* Ice surface */}
       <path d="M 0,0 L 86,0 Q 100,0 100,14 L 100,71 Q 100,85 86,85 L 0,85 Z"
-        fill="#d6ecf6" stroke="#8fb8d0" strokeWidth="0.8" />
+        fill="#f8fbff" stroke="#c8d8e8" strokeWidth="0.8" />
 
       {/* Blue line */}
       <line x1="25" y1="2" x2="25" y2="83" stroke="#1155bb" strokeWidth="1.4" opacity="0.7" />
