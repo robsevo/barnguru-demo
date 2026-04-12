@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { logoUrl, TEAM_COLORS } from "@/utils/nhl";
 import { useScoreHidden, useHideAllScores } from "@/utils/scoreVisibility";
+import { useTheme } from "@/utils/themeContext";
 
 interface Game {
   game_id: number;
@@ -369,6 +370,7 @@ export default function ScoreboardBar() {
   const [canLeft, setCanLeft]   = useState(false);
   const [canRight, setCanRight] = useState(false);
   const { hideAll, toggleAll: toggleHideAll } = useHideAllScores();
+  const { theme, clearTheme } = useTheme();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const updateArrows = () => {
@@ -434,6 +436,14 @@ export default function ScoreboardBar() {
     <div className="select-none">
       {/* Label strip */}
       <div className="flex items-center justify-center gap-2 border-b border-[#C9A84C]/[0.18] h-8 relative" style={{ background: "linear-gradient(to bottom, rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.04), transparent)" }}>
+        {theme && (
+          <button
+            onClick={clearTheme}
+            className="absolute left-2 text-[9px] font-black uppercase tracking-[0.14em] px-2 py-[3px] rounded-md border transition-all duration-200 text-white/30 border-white/[0.10] bg-white/[0.03] hover:text-white/60 hover:border-white/[0.20] hover:bg-white/[0.06]"
+          >
+            Reset Theme
+          </button>
+        )}
         <span className={`h-2 w-2 rounded-full shrink-0 border transition-all duration-300 ${
           hasLive
             ? "bg-[#4ade80]/80 border-[#4ade80]/60 shadow-[0_0_7px_rgba(74,222,128,0.75)] animate-pulse"

@@ -1317,6 +1317,7 @@ export default function PlayersPage() {
 
         {/* Hot Streaks */}
         <Section title="Hot Streak" count={rising?.length}>
+          <InfoTip tip="EWMA xGF/60 trending upward over last 5–10 games vs. the player's own season baseline. Delta = how far above their own average they are running right now. Bayesian-shrunk. Source: GRTZKY model 2.13." />
           {rising === null ? <SectionLoading /> :
            rising.length === 0 ? <SectionEmpty msg="Nothing to report yet." /> : (
            <div className="space-y-1">
@@ -1432,6 +1433,7 @@ export default function PlayersPage() {
 
         {/* Cold Streaks */}
         <Section title="Cold Streak" count={falling?.length}>
+          <InfoTip tip="EWMA xGF/60 trending downward over last 5–10 games vs. the player's own season baseline. Delta = how far below their own average they are running right now. Bayesian-shrunk. Source: GRTZKY model 2.13." />
           {falling === null ? <SectionLoading /> :
            falling.length === 0 ? <SectionEmpty msg="Nothing to report yet." /> : (
            <div className="space-y-1">
@@ -1451,6 +1453,7 @@ export default function PlayersPage() {
 
         {/* Top Performers */}
         <Section title="WAR Rankings" count={warList?.length}>
+          <InfoTip tip="Wins Above Replacement. Combines offensive (xGF) and defensive (xGA) contributions relative to a replacement-level player at the same position. League average = 0; elite forwards/D-men typically 3–6 WAR. Source: GRTZKY model 2.25." />
           {warList === null ? <SectionLoading /> :
            warList.length === 0 ? <SectionEmpty msg="Run compute-war to populate." /> : (
            <div className="space-y-1">
@@ -1495,6 +1498,7 @@ export default function PlayersPage() {
 
         {/* Quality of Teammates */}
         <Section title="Quality of Teammates" count={qotList?.length}>
+          <InfoTip tip="Quality of Teammates (QoT): average RAPM of a player's on-ice linemates at even strength, weighted by shared ice time. High QoT = plays with skilled partners. Compare with QoC (Quality of Competition) to understand context. Source: GRTZKY model 2.3." />
           {qotList === null ? <SectionLoading /> :
            qotList.length === 0 ? <SectionEmpty msg="Run train-matchup to populate." /> : (
            <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
@@ -1559,6 +1563,7 @@ export default function PlayersPage() {
 
         {/* Team Disruption */}
         <Section title="Team Disruption">
+          <InfoTip tip="Roster Disruption Index (RDI): measures how much a team's lineup has been destabilized by trades, injuries, and call-ups over the last 30 days. High RDI = chemistry disrupted, depth tested. Correlates with short-term performance drops. Source: GRTZKY model 2.19." />
           {rdi === null ? <SectionLoading /> :
            rdi.filter(t => (t.n_moves_30d ?? 0) > 0).length === 0 ? (
              <SectionEmpty msg="No significant roster movement in the last 30 days." />
