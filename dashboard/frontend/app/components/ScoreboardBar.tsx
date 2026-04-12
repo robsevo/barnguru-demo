@@ -136,25 +136,34 @@ function useCountdown(g: Game): { text: string; secs: number } | null {
 // ---------------------------------------------------------------------------
 // Team logo
 // ---------------------------------------------------------------------------
-function Logo({ abbrev, size = 28 }: { abbrev: string; size?: number }) {
+function Logo({ abbrev, size = 28, smSize }: { abbrev: string; size?: number; smSize?: number }) {
   const [err, setErr] = useState(false);
   if (err)
     return (
-      <span style={{ width: size, height: size }} className="flex items-center justify-center text-[9px] font-black text-white/20">
+      <span style={{ width: smSize ?? size, height: smSize ?? size }} className="flex items-center justify-center text-[9px] font-black text-white/20">
         {abbrev.slice(0, 3)}
       </span>
     );
-  return (
+  const makeImg = (imgSize: number) => (
     <img
       src={logoUrl(abbrev)}
       alt={abbrev}
-      width={size}
-      height={size}
-      style={{ width: size, height: size, filter: "drop-shadow(0 0 8px rgba(255,255,255,0.70)) drop-shadow(0 2px 4px rgba(0,0,0,0.60))" }}
+      width={imgSize}
+      height={imgSize}
+      style={{ width: imgSize, height: imgSize, filter: "drop-shadow(0 0 8px rgba(255,255,255,0.70)) drop-shadow(0 2px 4px rgba(0,0,0,0.60))" }}
       className="shrink-0 object-contain"
       onError={() => setErr(true)}
     />
   );
+  if (smSize) {
+    return (
+      <>
+        <span className="sm:hidden inline-flex">{makeImg(size)}</span>
+        <span className="hidden sm:inline-flex">{makeImg(smSize)}</span>
+      </>
+    );
+  }
+  return makeImg(size);
 }
 
 // ---------------------------------------------------------------------------
@@ -181,8 +190,8 @@ function GameCard({ g }: { g: Game }) {
 
   // Glossy glass cards — shiny effect, strong button feel
   const cardCls = live
-    ? "border-[1.5px] border-[#4ade80]/[0.38] bg-gradient-to-b from-white/[0.20] via-white/[0.08] to-transparent backdrop-blur-sm cursor-pointer active:scale-[0.97] transition-transform duration-100 shadow-[0_10px_40px_rgba(0,0,0,0.90),0_0_24px_rgba(74,222,128,0.18),0_2px_6px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.32),inset_0_-1px_0_rgba(0,0,0,0.40),inset_1px_0_0_rgba(255,255,255,0.10),inset_-1px_0_0_rgba(255,255,255,0.10)] hover:shadow-[0_14px_48px_rgba(0,0,0,0.95),0_0_32px_rgba(74,222,128,0.28),0_2px_6px_rgba(0,0,0,0.70),inset_0_1px_0_rgba(255,255,255,0.36),inset_0_-1px_0_rgba(0,0,0,0.45)] hover:border-[#4ade80]/[0.55] hover:-translate-y-px"
-    : "border-[1.5px] border-[#C9A84C]/[0.30] bg-gradient-to-b from-[#C9A84C]/[0.06] via-white/[0.04] to-transparent backdrop-blur-sm cursor-pointer active:scale-[0.97] transition-transform duration-100 shadow-[0_8px_32px_rgba(0,0,0,0.85),0_0_18px_rgba(201,168,76,0.12),0_2px_6px_rgba(0,0,0,0.60),inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-1px_0_rgba(0,0,0,0.40),inset_1px_0_0_rgba(201,168,76,0.04),inset_-1px_0_0_rgba(201,168,76,0.04)] hover:shadow-[0_12px_40px_rgba(0,0,0,0.90),0_0_24px_rgba(201,168,76,0.18),0_2px_6px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.25)] hover:border-[#C9A84C]/[0.50] hover:-translate-y-px";
+    ? "border-[1.5px] border-[#4ade80]/[0.38] bg-gradient-to-b from-white/[0.20] via-white/[0.08] to-transparent backdrop-blur-sm cursor-pointer active:scale-[0.97] transition-all duration-150 shadow-[0_10px_40px_rgba(0,0,0,0.90),0_0_24px_rgba(74,222,128,0.18),0_2px_6px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.32),inset_0_-1px_0_rgba(0,0,0,0.40),inset_1px_0_0_rgba(255,255,255,0.10),inset_-1px_0_0_rgba(255,255,255,0.10)] hover:shadow-[0_10px_40px_rgba(0,0,0,0.95),0_0_32px_rgba(74,222,128,0.28),inset_0_1px_0_rgba(255,255,255,0.36),inset_0_-1px_0_rgba(0,0,0,0.45)] hover:border-[#4ade80]/[0.55] hover:bg-gradient-to-b hover:from-white/[0.24] hover:via-white/[0.10]"
+    : "border-[1.5px] border-[#C9A84C]/[0.30] bg-gradient-to-b from-[#C9A84C]/[0.06] via-white/[0.04] to-transparent backdrop-blur-sm cursor-pointer active:scale-[0.97] transition-all duration-150 shadow-[0_8px_32px_rgba(0,0,0,0.85),0_0_18px_rgba(201,168,76,0.12),0_2px_6px_rgba(0,0,0,0.60),inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-1px_0_rgba(0,0,0,0.40),inset_1px_0_0_rgba(201,168,76,0.04),inset_-1px_0_0_rgba(201,168,76,0.04)] hover:shadow-[0_8px_32px_rgba(0,0,0,0.90),0_0_24px_rgba(201,168,76,0.22),inset_0_1px_0_rgba(255,255,255,0.25)] hover:border-[#C9A84C]/[0.50] hover:from-[#C9A84C]/[0.10] hover:via-white/[0.06]";
 
   const homeClr = TEAM_COLORS[g.home_team] ?? "#C9A84C";
   const awayClr = TEAM_COLORS[g.away_team] ?? "#94a3b8";
@@ -221,7 +230,7 @@ function GameCard({ g }: { g: Game }) {
               : undefined,
           }}
         >
-          <Logo abbrev={abbrev} size={27} />
+          <Logo abbrev={abbrev} size={27} smSize={34} />
           <span className={`text-[9px] font-black tracking-wide ${isLosing ? "text-white/20" : "text-white/80"}`}>
             {abbrev}{onPP && (
               <span className="text-[7px] text-[#f87171] animate-pulse ml-0.5">
@@ -337,7 +346,7 @@ function DateSep({ date }: { date: string }) {
 // ---------------------------------------------------------------------------
 function Arrow({ dir, onClick, visible }: { dir: "left" | "right"; onClick: () => void; visible: boolean }) {
   return (
-    <div className="hidden sm:flex shrink-0 w-7 h-full items-center justify-center">
+    <div className="flex shrink-0 w-7 h-full items-center justify-center">
       <button
         onClick={onClick}
         aria-label={dir === "left" ? "Scroll left" : "Scroll right"}

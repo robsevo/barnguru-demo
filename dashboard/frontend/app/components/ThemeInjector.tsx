@@ -60,11 +60,24 @@ function applyCortexVars(root: HTMLElement) {
 }
 
 export default function ThemeInjector() {
-  const { theme, cortexPinned } = useTheme();
+  const { theme, cortexPinned, previewActive, clearPreview } = useTheme();
   const pathname = usePathname();
   const isCortexPage = pathname.startsWith("/players");
   // Apply cortex if: on /players page OR user pinned it site-wide (and no team theme overrides)
   const useCortex = !theme && (isCortexPage || cortexPinned);
+
+  // Clear preview when navigating away from the team+player area.
+  // This lets team→player navigation keep the preview alive while ensuring
+  // it's cleaned up when the user goes anywhere else (standings, home, etc.).
+  useEffect(() => {
+    const inTeamOrPlayerProfile =
+      pathname.startsWith("/teams/") ||
+      /^\/players\/.+/.test(pathname);  // /players/[id] but NOT /players (Cortex)
+    if (!inTeamOrPlayerProfile && previewActive) {
+      clearPreview();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   useEffect(() => {
     const root = document.documentElement;

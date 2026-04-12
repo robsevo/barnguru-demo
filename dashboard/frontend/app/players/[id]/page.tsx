@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useRouter } from "next/navigation";
-import { logoUrl, TEAM_COLORS, TEAM_SECONDARY } from "@/utils/nhl";
+import { logoUrl, TEAM_COLORS, TEAM_SECONDARY, normalizePlayerName } from "@/utils/nhl";
+import { useTheme } from "@/utils/themeContext";
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis,
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
@@ -348,7 +349,7 @@ function TierBadge({ tier }: { tier: Tier; small?: boolean }) {
 // Player type derivation
 // ---------------------------------------------------------------------------
 
-function derivePlayerType(data: ProfileData): string | null {
+function derivePlayerType(data: ProfileData, nhlStats?: { gp: number; goals: number; points: number } | null): string | null {
   if (data.is_goalie) return null;
   const pos = (data.position ?? "").toUpperCase();
   const isD = pos === "D" || pos === "LD" || pos === "RD";
@@ -360,10 +361,24 @@ function derivePlayerType(data: ProfileData): string | null {
   const cdr        = data.cdr           ?? 0;
 
   if (isD) {
+    const xgf60   = data.xgf_per60  ?? 0;
+    const shots60 = data.shots_per60 ?? 0;
+    // game_log PPG is reliable regardless of whether RAPM parquet has xgf/shots columns
+    const ppg     = data.game_log?.summary.ppg ?? 0;
+    // NHL API season PPG is the most reliable offensive signal for D —
+    // guaranteed to be populated and reflects actual current-season production.
+    const nhlPpg  = (nhlStats && nhlStats.gp > 0) ? nhlStats.points / nhlStats.gp : 0;
+    // A D scoring 0.50+ PPG is unambiguously an offensive contributor;
+    // RAPM per-60 stats may miss playmakers who generate through passing not shots.
+    const hasOffense = (xgf60 >= 2.4)
+      || (goals60 >= 0.30)
+      || (shots60 >= 2.6)
+      || (ppg >= 0.50)
+      || (nhlPpg >= 0.50);
     if (rapmOff >= 1.0 && rapmDef >= 0.8) return "Elite Two-Way D";
-    if (rapmOff >= 0.8)                   return "Offensive Defenseman";
-    if (rapmDef >= 0.8 || cdr >= 0.5)     return "Defensive Defenseman";
+    if (rapmOff >= 0.8 || (hasOffense && rapmOff > -0.3)) return "Offensive Defenseman";
     if (rapmOff >= 0.3 && rapmDef >= 0.3) return "Two-Way Defenseman";
+    if ((rapmDef >= 0.8 || cdr >= 0.5) && !hasOffense) return "Defensive Defenseman";
     return null;
   }
 
@@ -507,13 +522,13 @@ function StatRow({ label, value, tier, sub, tip }: {
       <div className="flex items-center justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
-            <p className="text-sm font-medium text-white/65">{label}</p>
+            <p className="text-[12px] font-medium text-white/65">{label}</p>
             {tip && <StatInfoTip label={label} tip={tip} />}
           </div>
           {sub && <p className="text-[9px] text-white/30 mt-0.5">{sub}</p>}
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
-          <span className="text-sm font-semibold font-mono text-white/85">{value}</span>
+          <span className="text-[12px] font-semibold font-mono text-white/85">{value}</span>
           {tier && <TierBadge tier={tier} />}
         </div>
       </div>
@@ -526,10 +541,10 @@ function Card({ title, icon, children, className = "", style }: {
 }) {
   return (
     <div className={`rounded-2xl overflow-hidden ${className}`} style={style ?? { border: "1px solid rgba(255,255,255,0.08)", background: "linear-gradient(to bottom, rgba(255,255,255,0.025), transparent)" }}>
-      <div className="px-5 py-3.5 border-b border-white/[0.07] flex items-center justify-center">
-        <p className="text-sm font-semibold text-white/80 text-center">{title}</p>
+      <div className="px-4 py-3 border-b border-white/[0.07] flex items-center justify-center">
+        <p className="text-[13px] font-semibold text-white/80 text-center">{title}</p>
       </div>
-      <div className="p-5">{children}</div>
+      <div className="p-3 sm:p-5">{children}</div>
     </div>
   );
 }
@@ -749,25 +764,51 @@ interface RadarEntry { subject: string; A: number; raw: string; tip: string; }
 
 function PlayerRadarChart({ data, teamColor }: { data: ProfileData; teamColor: string }) {
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
+  const [chartSize, setChartSize] = useState(300);
+  useEffect(() => {
+    const update = () => setChartSize(Math.min(300, window.innerWidth - 56));
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
 
   // Derive per-60 from raw season counts when model fields are null
   const derivedG60   = (data.goals_per60  != null) ? data.goals_per60
                      : (data.goals  != null && data.toi_ev != null && data.toi_ev > 0) ? (data.goals  / data.toi_ev * 60) : null;
   const derivedSh60  = (data.shots_per60  != null) ? data.shots_per60
                      : (data.shots  != null && data.toi_ev != null && data.toi_ev > 0) ? (data.shots  / data.toi_ev * 60) : null;
-  const offenseVal   = data.xgf_per60 ?? (derivedG60 != null ? derivedG60 * 6 : null) ?? (derivedSh60 != null ? derivedSh60 * 0.5 : null) ?? (data.xg_sum != null ? data.xg_sum * 0.4 : null);
-  const offenseRaw   = data.xgf_per60 != null ? `${data.xgf_per60.toFixed(2)} xGF/60`
-                     : derivedG60    != null ? `${derivedG60.toFixed(2)} G/60`
-                     : derivedSh60   != null ? `${derivedSh60.toFixed(1)} Sh/60`
-                     : data.xg_sum   != null ? `${data.xg_sum.toFixed(2)} xG (season)` : "—";
+
+  // Offense: use per-60 rate stats only — xg_sum is a season cumulative total and CANNOT
+  // be used as a per-60 proxy (inflates scores for players with more games / model data only).
+  // ewma_xgf60 is a good per-60 fallback when the RAPM model hasn't run yet.
+  const offenseVal = data.xgf_per60
+    ?? data.ewma_xgf60
+    ?? (derivedG60  != null ? derivedG60  * 6   : null)   // 1 G/60 ≈ 6 xGF/60 (league-avg shot quality)
+    ?? (derivedSh60 != null ? derivedSh60 * 0.5 : null);  // rough proxy; drops out if TOI unknown too
+  const offenseRaw = data.xgf_per60 != null ? `${data.xgf_per60.toFixed(2)} xGF/60`
+    : data.ewma_xgf60 != null ? `${data.ewma_xgf60.toFixed(2)} xGF/60 (EWMA)`
+    : derivedG60     != null ? `${derivedG60.toFixed(2)} G/60`
+    : derivedSh60    != null ? `${derivedSh60.toFixed(1)} Sh/60`
+    : "—";
+
+  // Physical: battle_percentile is the gold standard (requires puck-battles model).
+  // Fall back to hits + blocks per 60 when percentile data is missing.
+  // Calibration: 10 hits/60 = ~80th pct physical, 1.5 blocks/60 = moderate contribution.
+  const physicalFallbackA = (data.hits_per60 != null || data.blocks_per60 != null)
+    ? Math.min(100, Math.round((data.hits_per60 ?? 0) * 8 + (data.blocks_per60 ?? 0) * 12))
+    : 0;
+  const physicalA   = data.battle_percentile != null ? Math.round(clamp01(data.battle_percentile / 100) * 100) : physicalFallbackA;
+  const physicalRaw = data.battle_percentile != null ? `${data.battle_percentile.toFixed(0)}th pct`
+    : data.hits_per60 != null ? `${data.hits_per60.toFixed(1)} hits/60`
+    : "—";
 
   const chartData: RadarEntry[] = [
-    { subject: "Offense",  A: offenseVal != null ? Math.round(clamp01(offenseVal / 8) * 100) : 0,                                                                                                         raw: offenseRaw,                                                                                                                             tip: "Expected goals generated per 60 min at 5v5. League avg ~4.1." },
-    { subject: "Finish",   A: data.finishing != null ? Math.round(clamp01((data.finishing + 10) / 20) * 100) : 0,                                                                                         raw: data.finishing != null ? `${data.finishing > 0 ? "+" : ""}${data.finishing.toFixed(1)} vs xG` : "—",                                  tip: "Goals above what shot quality predicts — pure finishing skill." },
-    { subject: "Defense",  A: (data.cdr ?? data.rapm_ev_def) != null ? Math.round(clamp01(((data.cdr ?? data.rapm_ev_def ?? 0) + 2) / 4) * 100) : 0,                                                     raw: data.cdr != null ? `${data.cdr > 0 ? "+" : ""}${data.cdr.toFixed(2)} CDR` : "—",                                                      tip: "Composite Defensive Rating — shot suppression + RAPM defensive." },
-    { subject: "Physical", A: data.battle_percentile != null ? Math.round(clamp01(data.battle_percentile / 100) * 100) : 0,                                                                               raw: data.battle_percentile != null ? `${data.battle_percentile.toFixed(0)}th pct` : "—",                                                  tip: "Puck battle percentile — hits, blocks, and contested zone battles." },
-    { subject: "Sp.Teams", A: (data.special_teams_pp != null || data.special_teams_pk != null) ? Math.round(clamp01(((data.special_teams_pp ?? 0) + (data.special_teams_pk ?? 0) + 2) / 4) * 100) : 0, raw: data.special_teams_pp != null ? `PP ${data.special_teams_pp > 0 ? "+" : ""}${data.special_teams_pp.toFixed(2)}` : "—",             tip: "Combined power play + penalty kill impact rating." },
-    { subject: "Form",     A: data.hot_hand_score != null ? Math.round(clamp01((data.hot_hand_score + 2) / 4) * 100) : 0,                                                                                 raw: data.hot_hand_score != null ? `${data.hot_hand_score.toFixed(2)} hot hand` : "—",                                                      tip: "Recent form score — statistical hot/cold streak over last 5 games." },
+    { subject: "Offense",  A: offenseVal != null ? Math.round(clamp01(offenseVal / 8) * 100) : 0, raw: offenseRaw,   tip: "Expected goals generated per 60 min at 5v5. League avg ~4.1." },
+    { subject: "Finish",   A: data.finishing != null ? Math.round(clamp01((data.finishing + 10) / 20) * 100) : 0,   raw: data.finishing != null ? `${data.finishing > 0 ? "+" : ""}${data.finishing.toFixed(1)} vs xG` : "—",       tip: "Goals above what shot quality predicts — pure finishing skill." },
+    { subject: "Defense",  A: (data.cdr ?? data.rapm_ev_def) != null ? Math.round(clamp01(((data.cdr ?? data.rapm_ev_def ?? 0) + 2) / 4) * 100) : 0, raw: data.cdr != null ? `${data.cdr > 0 ? "+" : ""}${data.cdr.toFixed(2)} CDR` : "—", tip: "Composite Defensive Rating — shot suppression + RAPM defensive." },
+    { subject: "Physical", A: physicalA, raw: physicalRaw, tip: "Puck battle percentile — hits, blocks, and contested zone battles. Uses hits+blocks/60 when percentile model data is unavailable." },
+    { subject: "Sp.Teams", A: (data.special_teams_pp != null || data.special_teams_pk != null) ? Math.round(clamp01(((data.special_teams_pp ?? 0) + (data.special_teams_pk ?? 0) + 2) / 4) * 100) : 0, raw: data.special_teams_pp != null ? `PP ${data.special_teams_pp > 0 ? "+" : ""}${data.special_teams_pp.toFixed(2)}` : "—", tip: "Combined power play + penalty kill impact rating." },
+    { subject: "Form",     A: data.hot_hand_score != null ? Math.round(clamp01((data.hot_hand_score + 2) / 4) * 100) : 0, raw: data.hot_hand_score != null ? `${data.hot_hand_score.toFixed(2)} hot hand` : "—", tip: "Recent form score — statistical hot/cold streak over last 5 games." },
   ];
 
   if (chartData.every(d => d.A === 0)) return null;
@@ -776,14 +817,14 @@ function PlayerRadarChart({ data, teamColor }: { data: ProfileData; teamColor: s
 
   return (
     <>
-      {/* Direct fixed dims on RadarChart — no ResponsiveContainer drift */}
+      {/* Viewport-aware fixed dims — avoids ResponsiveContainer drift */}
       <div style={{ lineHeight: 0 }}>
         <RadarChart
-          width={360} height={360}
-          cx={180} cy={180}
-          outerRadius={118}
+          width={chartSize} height={chartSize}
+          cx={chartSize / 2} cy={chartSize / 2}
+          outerRadius={Math.round(chartSize * 0.328)}
           data={chartData}
-          margin={{ top: 28, right: 36, bottom: 28, left: 36 }}
+          margin={{ top: Math.round(chartSize * 0.078), right: Math.round(chartSize * 0.1), bottom: Math.round(chartSize * 0.078), left: Math.round(chartSize * 0.1) }}
           onMouseLeave={() => setActiveIdx(null)}
         >
           <PolarGrid stroke="rgba(255,255,255,0.07)" />
@@ -854,6 +895,13 @@ function PlayerRadarChart({ data, teamColor }: { data: ProfileData; teamColor: s
 
 function GoalieRadarChart({ data, teamColor, nhlSvPct, nhlGaa }: { data: ProfileData; teamColor: string; nhlSvPct?: number; nhlGaa?: number }) {
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
+  const [chartSize, setChartSize] = useState(300);
+  useEffect(() => {
+    const update = () => setChartSize(Math.min(300, window.innerWidth - 56));
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
 
   // sv_pct fields are stored as 0-1 decimals (e.g. 0.8995, 0.7413)
   // Normalization floors/ranges calibrated against real MoneyPuck league data
@@ -911,11 +959,11 @@ function GoalieRadarChart({ data, teamColor, nhlSvPct, nhlGaa }: { data: Profile
     <>
       <div style={{ lineHeight: 0 }}>
         <RadarChart
-          width={360} height={360}
-          cx={180} cy={180}
-          outerRadius={118}
+          width={chartSize} height={chartSize}
+          cx={chartSize / 2} cy={chartSize / 2}
+          outerRadius={Math.round(chartSize * 0.328)}
           data={chartData}
-          margin={{ top: 28, right: 36, bottom: 28, left: 36 }}
+          margin={{ top: Math.round(chartSize * 0.078), right: Math.round(chartSize * 0.1), bottom: Math.round(chartSize * 0.078), left: Math.round(chartSize * 0.1) }}
           onMouseLeave={() => setActiveIdx(null)}
         >
           <PolarGrid stroke="rgba(255,255,255,0.07)" />
@@ -1073,18 +1121,182 @@ function EwmaTrendChart({ xgf60, leagueAvg = 4.09, teamColor }: {
 }
 
 // ---------------------------------------------------------------------------
+// Shot / zone visualizations
+// ---------------------------------------------------------------------------
+
+interface ShotPoint { x: number; y: number; xg: number; goal: boolean; type: string; }
+
+/** Half-rink SVG shot map — dots coloured by xG, goals as star markers */
+function ShotMapViz({ shots, teamColor }: { shots: ShotPoint[]; teamColor: string }) {
+  // NHL coords: x 0→100 (offensive half), y -42.5→42.5
+  // SVG viewport: 400w × 340h, goal at x=89 mapped to SVG ~340px
+  const W = 400; const H = 340;
+  // map rink x [25,100] → SVG x [0,W], rink y [-42.5,42.5] → SVG y [0,H]
+  const rx = (x: number) => ((x - 25) / 75) * W;
+  const ry = (y: number) => ((y + 42.5) / 85) * H;
+
+  const xgColor = (xg: number) => {
+    if (xg >= 0.2) return "#ef4444";   // high danger — red
+    if (xg >= 0.08) return "#f97316";  // medium — orange
+    return "#3b82f6";                   // low — blue
+  };
+
+  // Deduplicate / limit to last 400 shots for performance
+  const pts = shots.slice(-400);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full max-w-[360px] mx-auto" style={{ filter: "drop-shadow(0 2px 12px rgba(0,0,0,0.6))" }}>
+      {/* Rink outline */}
+      <rect x={0} y={0} width={W} height={H} rx={8} fill="#0a0d12" stroke="rgba(255,255,255,0.07)" strokeWidth={1} />
+      {/* Centre ice line */}
+      <line x1={0} y1={H/2} x2={W} y2={H/2} stroke="rgba(255,255,255,0.05)" strokeWidth={1} />
+      {/* Blue line at rink x=25 → SVG x=0 edge, so we mark rink x=25 */}
+      {/* Goal line at rink x=89 */}
+      <line x1={rx(89)} y1={0} x2={rx(89)} y2={H} stroke="rgba(239,68,68,0.25)" strokeWidth={1.5} strokeDasharray="4 3" />
+      {/* Crease arc */}
+      <path d={`M ${rx(89)} ${ry(-3)} A ${(6/85)*H} ${(6/85)*H} 0 0 1 ${rx(89)} ${ry(3)}`}
+        fill="none" stroke="rgba(239,68,68,0.3)" strokeWidth={1.5} />
+      {/* Faceoff circles */}
+      {[[-22, 20], [-22, -20], [0, 0]].map(([cx, cy], i) => (
+        <circle key={i} cx={rx(cx + 25)} cy={ry(cy)} r={(15/85)*H}
+          fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth={1} />
+      ))}
+      {/* Shot dots */}
+      {pts.map((s, i) => {
+        const sx = rx(s.x); const sy = ry(s.y);
+        if (s.goal) {
+          // Star marker for goals
+          const r1 = 6; const r2 = 3; const arms = 5;
+          const pts2 = Array.from({ length: arms * 2 }, (_, j) => {
+            const angle = (j * Math.PI) / arms - Math.PI / 2;
+            const r = j % 2 === 0 ? r1 : r2;
+            return `${sx + r * Math.cos(angle)},${sy + r * Math.sin(angle)}`;
+          }).join(" ");
+          return <polygon key={i} points={pts2} fill={teamColor} opacity={0.9}
+            stroke="rgba(255,255,255,0.4)" strokeWidth={0.5} />;
+        }
+        return <circle key={i} cx={sx} cy={sy} r={3.5}
+          fill={xgColor(s.xg)} opacity={0.55} />;
+      })}
+      {/* Legend */}
+      <circle cx={12} cy={H - 36} r={3.5} fill="#3b82f6" opacity={0.7} />
+      <text x={20} y={H - 32} fontSize={8} fill="rgba(255,255,255,0.35)">Low xG</text>
+      <circle cx={12} cy={H - 22} r={3.5} fill="#f97316" opacity={0.7} />
+      <text x={20} y={H - 18} fontSize={8} fill="rgba(255,255,255,0.35)">Med xG</text>
+      <circle cx={12} cy={H - 8} r={3.5} fill="#ef4444" opacity={0.7} />
+      <text x={20} y={H - 4} fontSize={8} fill="rgba(255,255,255,0.35)">High xG</text>
+      {/* Goal star legend */}
+      <polygon points={`${W-50},${H-10} ${W-48},${H-15} ${W-46},${H-10} ${W-52},${H-13} ${W-44},${H-13}`}
+        fill={teamColor} opacity={0.9} />
+      <text x={W - 42} y={H - 5} fontSize={8} fill="rgba(255,255,255,0.35)">Goal</text>
+    </svg>
+  );
+}
+
+/** Offensive zone tendency map — 5-zone coloured cells */
+function ZoneTendencyMap({ data, teamColor }: { data: ProfileData; teamColor: string }) {
+  const slot    = data.nn_shoot_slot_pct    ?? 0;
+  const perim   = data.nn_shoot_perimeter_pct ?? 0;
+  const net     = data.nn_drive_net_pct     ?? 0;
+  const corner  = data.nn_battle_corner_pct ?? 0;
+  const hold    = data.nn_hold_corner_pct   ?? 0;
+
+  const zones = [
+    { label: "Net Front",  pct: net,    x: 155, y: 100, w: 60,  h: 60,  color: "#fbbf24" },
+    { label: "Slot",       pct: slot,   x: 115, y: 60,  w: 140, h: 85,  color: teamColor  },
+    { label: "Perimeter",  pct: perim,  x: 10,  y: 10,  w: 340, h: 200, color: "#94a3b8"  },
+    { label: "L Corner",   pct: corner, x: 10,  y: 150, w: 90,  h: 70,  color: "#38bdf8"  },
+    { label: "R Corner",   pct: hold,   x: 260, y: 150, w: 90,  h: 70,  color: "#38bdf8"  },
+  ];
+
+  return (
+    <svg viewBox="0 0 360 230" className="w-full max-w-[340px] mx-auto">
+      {/* Background */}
+      <rect x={0} y={0} width={360} height={230} rx={8} fill="#0a0d12" stroke="rgba(255,255,255,0.07)" strokeWidth={1} />
+      {/* Rink outline */}
+      <rect x={10} y={10} width={340} height={200} rx={12} fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth={1.5} />
+      {/* Goal crease */}
+      <rect x={160} y={160} width={40} height={40} rx={4} fill="rgba(239,68,68,0.12)" stroke="rgba(239,68,68,0.3)" strokeWidth={1} />
+      {/* Zone overlays — rendered back-to-front so smaller zones appear on top */}
+      {[zones[2], zones[0], zones[3], zones[4], zones[1]].map((z, i) => (
+        <g key={i}>
+          <rect x={z.x} y={z.y} width={z.w} height={z.h} rx={4}
+            fill={z.color} fillOpacity={Math.min(z.pct / 45, 1) * 0.35}
+            stroke={z.color} strokeOpacity={Math.min(z.pct / 45, 1) * 0.6} strokeWidth={1} />
+          <text x={z.x + z.w / 2} y={z.y + z.h / 2 - 4} textAnchor="middle" fontSize={7}
+            fill="rgba(255,255,255,0.45)" fontWeight="bold" letterSpacing="1">
+            {z.label.toUpperCase()}
+          </text>
+          <text x={z.x + z.w / 2} y={z.y + z.h / 2 + 9} textAnchor="middle" fontSize={10}
+            fill="rgba(255,255,255,0.75)" fontWeight="bold">
+            {z.pct.toFixed(0)}%
+          </text>
+        </g>
+      ))}
+      {/* Goal line */}
+      <line x1={10} y1={170} x2={350} y2={170} stroke="rgba(239,68,68,0.2)" strokeWidth={1} strokeDasharray="3 2" />
+    </svg>
+  );
+}
+
+/** Full-rink skating zone time split */
+function SkatingZoneMap({ data }: { data: ProfileData }) {
+  const oz = data.skating_zone_time_oz_pct ?? 0;
+  const dz = data.skating_zone_time_dz_pct ?? 0;
+  const nz = Math.max(0, 100 - oz - dz);
+
+  const zones = [
+    { label: "Offensive Zone", pct: oz, color: "#4ade80", y: 10, h: 90 },
+    { label: "Neutral Zone",   pct: nz, color: "#fbbf24", y: 105, h: 50 },
+    { label: "Defensive Zone", pct: dz, color: "#f87171", y: 160, h: 90 },
+  ];
+
+  return (
+    <svg viewBox="0 0 200 260" className="w-full max-w-[180px] mx-auto">
+      <rect x={0} y={0} width={200} height={260} rx={8} fill="#0a0d12" stroke="rgba(255,255,255,0.07)" strokeWidth={1} />
+      {/* Rink outline */}
+      <rect x={20} y={10} width={160} height={240} rx={14}
+        fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth={1.5} />
+      {/* Blue lines */}
+      <line x1={20} y1={100} x2={180} y2={100} stroke="rgba(99,179,237,0.35)" strokeWidth={1.5} />
+      <line x1={20} y1={160} x2={180} y2={160} stroke="rgba(99,179,237,0.35)" strokeWidth={1.5} />
+      {/* Red line */}
+      <line x1={20} y1={130} x2={180} y2={130} stroke="rgba(239,68,68,0.25)" strokeWidth={1.5} />
+      {/* Zone fills */}
+      {zones.map((z, i) => (
+        <g key={i}>
+          <rect x={20} y={z.y} width={160} height={z.h} rx={i === 0 ? 14 : i === 2 ? 14 : 0}
+            fill={z.color} fillOpacity={Math.min(z.pct / 45, 1) * 0.22} />
+          <text x={100} y={z.y + z.h / 2 - 5} textAnchor="middle" fontSize={7}
+            fill="rgba(255,255,255,0.40)" fontWeight="bold" letterSpacing="1">
+            {z.label.toUpperCase()}
+          </text>
+          <text x={100} y={z.y + z.h / 2 + 10} textAnchor="middle" fontSize={13}
+            fill={z.color} fillOpacity={0.85} fontWeight="bold">
+            {z.pct.toFixed(0)}%
+          </text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Profile Page
 // ---------------------------------------------------------------------------
 
 export default function PlayerProfilePage() {
   const params = useParams();
   const router = useRouter();
-  // The route param is a URL-encoded player name (e.g. "Nathan%20MacKinnon")
-  const playerName = decodeURIComponent(params.id as string);
+  const { theme, cortexPinned, setPreviewTheme } = useTheme();
+  // The route param is a URL-encoded player name (e.g. "Nathan%20MacKinnon").
+  // Normalize accents so old bookmarks / direct URLs with ý, é, etc. still resolve.
+  const playerName = normalizePlayerName(decodeURIComponent(params.id as string));
 
   const [data, setData] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [imgErr, setImgErr] = useState(false);
+  const [shots, setShots] = useState<ShotPoint[]>([]);
   // Current-season stats fetched from nhl-team route
   const [nhlStats, setNhlStats] = useState<{
     gp: number; goals: number; assists: number; points: number; plus_minus: number;
@@ -1107,6 +1319,18 @@ export default function PlayerProfilePage() {
     draft_pick: number | null;
     draft_overall: number | null;
     draft_team: string | null;
+    current_team_abbrev: string | null;
+  } | null>(null);
+  // Live team override — NHL API is source of truth for current team
+  const [liveTeam, setLiveTeam] = useState<string | null>(null);
+
+  // Contract data from CapWages
+  const [contract, setContract] = useState<{
+    cap_hit: number | null;
+    contract_type: string;
+    expiry_status: string;
+    expiry_year: number | null;
+    years_remaining: number | null;
   } | null>(null);
 
   // Search bar state
@@ -1129,7 +1353,7 @@ export default function PlayerProfilePage() {
   function goToPlayer(name: string) {
     setSearchQ("");
     setShowSugg(false);
-    router.push(`/players/${encodeURIComponent(name)}`);
+    router.push(`/players/${encodeURIComponent(normalizePlayerName(name))}`);
   }
 
   useEffect(() => {
@@ -1150,11 +1374,23 @@ export default function PlayerProfilePage() {
       .catch(() => setLoading(false));
   }, [playerName]);
 
+  // Apply the player's team theme site-wide as a preview (reverts on navigate away).
+  // Re-fires when liveTeam overrides a stale model team (e.g. traded player).
+  // Cortex pin takes priority — don't override it.
+  useEffect(() => {
+    const t = liveTeam ?? data?.team;
+    if (!t || cortexPinned) return;
+    const primary   = TEAM_COLORS[t]    ?? "#94a3b8";
+    const secondary = TEAM_SECONDARY?.[t] ?? primary;
+    setPreviewTheme({ abbrev: t, primaryColor: primary, secondaryColor: secondary, logoUrl: logoUrl(t) });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.team, liveTeam]);
+
   // Once we know the team, fetch current-season stats and injury status
   useEffect(() => {
     if (!data?.team) return;
     const team = data.team;
-    const fullName = (data.player_name ?? "").toLowerCase();
+    const fullName = normalizePlayerName(data.player_name ?? "").toLowerCase();
 
     // Current-season stats + jersey from nhl-team route
     fetch(`/api/nhl-team/${team}`)
@@ -1162,8 +1398,8 @@ export default function PlayerProfilePage() {
       .then(d => {
         const all = [...(d.skaters ?? []), ...(d.goalies ?? [])] as Record<string, unknown>[];
         const match = all.find(p => {
-          const fn = String(p.first_name ?? "").toLowerCase();
-          const ln = String(p.last_name ?? "").toLowerCase();
+          const fn = normalizePlayerName(String(p.first_name ?? "")).toLowerCase();
+          const ln = normalizePlayerName(String(p.last_name ?? "")).toLowerCase();
           return fullName.includes(fn) && fullName.includes(ln);
         });
         if (match) {
@@ -1190,6 +1426,21 @@ export default function PlayerProfilePage() {
       })
       .catch(() => {});
 
+    // Contract data from CapWages via puckpedia proxy
+    fetch(`/api/puckpedia/${team}`)
+      .then(r => r.json())
+      .then(d => {
+        const players = (d.players ?? []) as { name: string; cap_hit: number | null; contract_type: string; expiry_status: string; expiry_year: number | null; years_remaining: number | null }[];
+        const last = fullName.split(" ").pop() ?? "";
+        const first = fullName.split(" ")[0] ?? "";
+        const match = players.find(p => {
+          const pn = p.name.toLowerCase();
+          return pn.includes(last) && pn.includes(first);
+        });
+        if (match) setContract(match);
+      })
+      .catch(() => {});
+
     // Injury report for this team
     fetch(`/api/injuries/${team}`)
       .then(r => r.json())
@@ -1209,13 +1460,30 @@ export default function PlayerProfilePage() {
     if (!data?.player_id) return;
     fetch(`/api/player-nhl/${data.player_id}`)
       .then(r => r.json())
-      .then(d => { if (!d.error) setBio(d); })
+      .then(d => {
+        if (!d.error) {
+          setBio(d);
+          // If NHL API reports a different team than the model parquet, use the live one
+          if (d.current_team_abbrev && d.current_team_abbrev !== data?.team) {
+            setLiveTeam(d.current_team_abbrev);
+          }
+        }
+      })
+      .catch(() => {});
+  }, [data?.player_id]);
+
+  // Fetch shot data for shot map visualization
+  useEffect(() => {
+    if (!data?.player_id) return;
+    fetch(`/api/player-shots/${data.player_id}`)
+      .then(r => r.json())
+      .then(d => { if (d.shots?.length) setShots(d.shots); })
       .catch(() => {});
   }, [data?.player_id]);
 
   if (loading) {
     return (
-      <main className="min-h-screen p-4 sm:p-6 max-w-3xl mx-auto">
+      <main className="min-h-screen p-4 sm:p-6 max-w-3xl mx-auto w-full overflow-x-hidden">
         <div className="mb-5 flex items-center gap-3">
           <div className="h-24 w-24 rounded-full bg-white/[0.06] animate-pulse shrink-0" />
           <div className="space-y-2 flex-1">
@@ -1232,8 +1500,25 @@ export default function PlayerProfilePage() {
 
   if (!data) {
     return (
-      <main className="min-h-screen p-4 sm:p-6 max-w-3xl mx-auto flex items-center justify-center">
-        <p className="text-white/40">Player not found.</p>
+      <main className="min-h-screen p-4 sm:p-6 max-w-3xl mx-auto w-full overflow-x-hidden flex items-center justify-center">
+        <div className="flex flex-col items-center gap-5 text-center max-w-sm">
+          <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] px-6 py-8 space-y-3">
+            <p className="text-[15px] font-bold text-white/60">Player not found</p>
+            <p className="text-[12px] text-white/30 leading-relaxed">
+              <span className="text-white/50 font-semibold">{playerName}</span> may be in the minors, a prospect with little to no NHL games played, or not yet in our model data.
+            </p>
+            <p className="text-[10px] text-white/18">Try searching from the team&apos;s Depth Chart tab.</p>
+          </div>
+          <button
+            onClick={() => router.back()}
+            className="flex items-center gap-2 px-4 py-2 rounded-full border border-white/[0.12] bg-white/[0.04] text-[11px] font-semibold text-white/50 hover:text-white/80 hover:border-white/[0.22] hover:bg-white/[0.07] transition-all duration-150"
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M8 2L4 6L8 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            Go back
+          </button>
+        </div>
       </main>
     );
   }
@@ -1243,8 +1528,18 @@ export default function PlayerProfilePage() {
   const headshotUrl = !imgErr && data.player_id && data.team
     ? `https://assets.nhle.com/mugs/nhl/${sy}${sy + 1}/${data.team}/${data.player_id}.png`
     : null;
-  const teamColor      = TEAM_COLORS[data.team ?? ""]      ?? "#ffffff";
-  const teamSecondary  = TEAM_SECONDARY[data.team ?? ""]   ?? "#1a1a2e";
+  // Theme priority: player's own team colour by default.
+  // If cortexPinned (user explicitly set the Cortex theme), cortex purple wins.
+  // A globally pinned team theme does NOT override the player's own team colour —
+  // the player page always reflects the player's identity first.
+  const CORTEX_PRIMARY   = "#a78bfa";
+  const CORTEX_SECONDARY = "#2e1065";
+  // liveTeam overrides the stale model team when NHL API reports a trade
+  const displayTeam         = liveTeam ?? data.team ?? "";
+  const playerTeamColor     = TEAM_COLORS[displayTeam]    ?? "#94a3b8";
+  const playerTeamSecondary = TEAM_SECONDARY?.[displayTeam] ?? "#0f0a1e";
+  const teamColor     = cortexPinned ? CORTEX_PRIMARY   : playerTeamColor;
+  const teamSecondary = cortexPinned ? CORTEX_SECONDARY : playerTeamSecondary;
   // Dark theme colors — same logic as team page
   const teamDarkBg     = darkBlend(darkerOfPP(teamColor, teamSecondary), 0.92);
   const cardStyle: React.CSSProperties = {
@@ -1257,7 +1552,7 @@ export default function PlayerProfilePage() {
   };
 
   const ewmaAbove  = data.ewma_xgf60 != null ? data.ewma_xgf60 - 4.09 : null;
-  const playerType = derivePlayerType(data);
+  const playerType = derivePlayerType(data, nhlStats);
 
   // "Why hot" blurb
   let formBlurb: string | null = null;
@@ -1293,7 +1588,7 @@ export default function PlayerProfilePage() {
   }
 
   return (
-    <main className="min-h-screen p-4 sm:p-6 max-w-3xl mx-auto">
+    <main className="min-h-screen p-4 sm:p-6 max-w-3xl mx-auto w-full overflow-x-hidden w-full overflow-x-hidden">
 
       {/* ── Search bar — team-colored ── */}
       <div className="flex justify-center mb-5">
@@ -1336,7 +1631,7 @@ export default function PlayerProfilePage() {
                   {p.team && <TeamLogo team={p.team} size={20} />}
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-white/80 truncate">{p.name}</p>
-                    <p className="text-[10px] text-white/30">{p.team} · {p.position}</p>
+                    <p className="text-[10px] text-white/30">{p.team} · {p.position === "L" ? "LW" : p.position === "R" ? "RW" : p.position}</p>
                   </div>
                   <span className="text-[10px] text-white/15 shrink-0">→</span>
                 </button>
@@ -1400,9 +1695,9 @@ export default function PlayerProfilePage() {
 
           {/* Team logo | #jersey | position — centered */}
           <div className="flex items-center justify-center gap-2 mb-2 flex-wrap">
-            {data.team && (
-              <button onClick={() => router.push(`/teams/${data.team}`)} className="shrink-0 hover:opacity-80 transition-opacity">
-                <TeamLogo team={data.team} size={52} />
+            {displayTeam && (
+              <button onClick={() => router.push(`/teams/${displayTeam}`)} className="shrink-0 hover:opacity-80 transition-opacity">
+                <TeamLogo team={displayTeam} size={52} />
               </button>
             )}
             {(bio?.jersey_number ?? nhlStats?.jersey ?? data.jersey_number) != null && (
@@ -1416,7 +1711,9 @@ export default function PlayerProfilePage() {
             {data.position && (
               <>
                 <span className="text-white/20 text-xs">|</span>
-                <span className="text-sm font-semibold text-white/50">{data.position}</span>
+                <span className="text-sm font-semibold text-white/50">
+                  {data.position === "L" ? "LW" : data.position === "R" ? "RW" : data.position}
+                </span>
               </>
             )}
           </div>
@@ -1581,13 +1878,29 @@ export default function PlayerProfilePage() {
             ? `${dy}${dt ? `, ${dt}` : ""}${dov != null ? ` (${ordinal(dov)} overall)` : ""}${dr ? `, ${ordinal(dr)} round${dp ? `, ${ordinal(dp)} pick` : ""}` : ""}`
             : null;
 
+          const fmtCapHit = (n: number) => {
+            const abs = Math.abs(n);
+            if (abs >= 1_000_000) return `$${(abs / 1_000_000).toFixed(2)}M`;
+            if (abs >= 1_000) return `$${(abs / 1_000).toFixed(0)}K`;
+            return `$${abs}`;
+          };
+          const contractStr = contract?.cap_hit
+            ? [
+                fmtCapHit(contract.cap_hit),
+                contract.contract_type || null,
+                contract.expiry_status || null,
+                contract.expiry_year   ? `exp. ${contract.expiry_year}` : null,
+              ].filter(Boolean).join(" · ")
+            : null;
+
           const rows: [string, string][] = [
-            ...(heightFmt ? [["Height", heightFmt] as [string,string]] : []),
-            ...(weightLbs ? [["Weight", `${weightLbs} lb`] as [string,string]] : []),
-            ...(birthFmt  ? [["Born",   `${birthFmt}${age != null ? ` (Age: ${age})` : ""}`] as [string,string]] : []),
-            ...(bp        ? [["Birthplace", bp] as [string,string]] : []),
-            ...(sc        ? [[isGoalie ? "Catches" : "Shoots", sc] as [string,string]] : []),
-            ...(draftFmt  ? [["Draft", draftFmt] as [string,string]] : []),
+            ...(heightFmt   ? [["Height", heightFmt] as [string,string]] : []),
+            ...(weightLbs   ? [["Weight", `${weightLbs} lb`] as [string,string]] : []),
+            ...(birthFmt    ? [["Born",   `${birthFmt}${age != null ? ` (Age: ${age})` : ""}`] as [string,string]] : []),
+            ...(bp          ? [["Birthplace", bp] as [string,string]] : []),
+            ...(sc          ? [[isGoalie ? "Catches" : "Shoots", sc] as [string,string]] : []),
+            ...(draftFmt    ? [["Draft", draftFmt] as [string,string]] : []),
+            ...(contractStr ? [["Cap Hit", contractStr] as [string,string]] : []),
           ];
 
           if (rows.length === 0) return null;
@@ -1617,10 +1930,10 @@ export default function PlayerProfilePage() {
       </div>
 
       {/* ── Cards grid ── */}
-      <div className="mt-5 grid gap-4 sm:grid-cols-2">
+      <div className="mt-5 grid gap-4 sm:grid-cols-2 min-w-0 overflow-x-hidden">
 
         {/* Tier legend — worst → best */}
-        <div className="sm:col-span-2 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl" style={{ border: `1px solid ${teamColor}15`, background: `${teamDarkBg}80` }}>
+        <div className="sm:col-span-2 flex items-center justify-center gap-1 flex-wrap px-3 py-2 rounded-xl" style={{ border: `1px solid ${teamColor}15`, background: `${teamDarkBg}80` }}>
           <span className="text-[8px] text-white/20 uppercase tracking-wider font-semibold shrink-0 mr-0.5">Scale</span>
           {([["Low","Low"],["Below Average","Below Avg"],["Average","Avg"],["Above Average","Above Avg"],["Elite","Elite"]] as [Tier,string][]).map(([t, label], i, arr) => (
             <div key={t} className="flex items-center gap-1.5">
@@ -1641,7 +1954,7 @@ export default function PlayerProfilePage() {
 
                 {/* Radar */}
                 {(data.xgf_per60 != null || data.cdr != null || data.battle_percentile != null) && (
-                  <div className="flex flex-col items-center" style={{ minWidth: 340 }}>
+                  <div className="flex flex-col items-center w-full overflow-x-auto" style={{ scrollbarWidth: "none" }}>
                     <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/30 mb-2 text-center">Attribute Radar</p>
                     <PlayerRadarChart data={data} teamColor={teamColor} />
                   </div>
@@ -1649,7 +1962,7 @@ export default function PlayerProfilePage() {
 
                 {/* Game log bar chart */}
                 {gl && gl.games.length >= 3 && (
-                  <div className="flex-1" style={{ minWidth: 260 }}>
+                  <div className="flex-1 min-w-0">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/30 mb-2 text-center">
                       Last {Math.min(gl.games.length, 10)} Games — G+A
                     </p>
@@ -1679,6 +1992,71 @@ export default function PlayerProfilePage() {
                   <EwmaTrendChart xgf60={data.ewma_xgf60} teamColor={teamColor} />
                 </div>
               )}
+            </Card>
+          </div>
+        )}
+
+        {/* ── Shot Map card ── */}
+        {!isGoalie && (
+          <div className="sm:col-span-2">
+            <Card title="Shot Map" icon="🎯" style={cardStyle}>
+              {shots.length > 0 ? (
+                <>
+                  <p className="text-[9px] text-white/25 uppercase tracking-wider text-center mb-3">
+                    Arena-adjusted shot locations · last 2 seasons · {shots.length} shots · {shots.filter(s => s.goal).length} goals
+                  </p>
+                  <ShotMapViz shots={shots} teamColor={teamColor} />
+                </>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-10 gap-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-white/20">Shot data syncing</p>
+                  <p className="text-[9px] text-white/15 text-center max-w-[220px]">
+                    MoneyPuck shot locations load after the data sync runs. Check back after the next sync.
+                  </p>
+                </div>
+              )}
+            </Card>
+          </div>
+        )}
+
+        {/* ── Zone tendency + skating zone side by side ── */}
+        {!isGoalie && (
+          <div className="sm:col-span-2">
+            <Card title="Zone Tendencies" icon="🗺️" style={cardStyle}>
+              <div className="flex flex-col sm:flex-row gap-6 items-start justify-center">
+                <div className="flex-1 min-w-0">
+                  <p className="text-[9px] font-semibold uppercase tracking-wider text-white/30 mb-2 text-center">
+                    Offensive Zone Tendency
+                  </p>
+                  {data.nn_shoot_slot_pct != null ? (
+                    <>
+                      <ZoneTendencyMap data={data} teamColor={teamColor} />
+                      <p className="text-[8px] text-white/20 text-center mt-2">% of offensive actions by zone</p>
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-8 gap-1.5">
+                      <p className="text-[9px] text-white/20 uppercase tracking-wider">Model not yet trained</p>
+                      <p className="text-[8px] text-white/12 text-center">Available after Phase 2 model run</p>
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0 flex flex-col items-center">
+                  <p className="text-[9px] font-semibold uppercase tracking-wider text-white/30 mb-2 text-center">
+                    Ice Time By Zone
+                  </p>
+                  {data.skating_zone_time_oz_pct != null ? (
+                    <>
+                      <SkatingZoneMap data={data} />
+                      <p className="text-[8px] text-white/20 text-center mt-2">% of skating time per zone</p>
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-8 gap-1.5">
+                      <p className="text-[9px] text-white/20 uppercase tracking-wider">Model not yet trained</p>
+                      <p className="text-[8px] text-white/12 text-center">Available after Phase 2 model run</p>
+                    </div>
+                  )}
+                </div>
+              </div>
             </Card>
           </div>
         )}
@@ -1993,7 +2371,7 @@ export default function PlayerProfilePage() {
           <div className="sm:col-span-2">
             <Card title="Performance Snapshot" icon="📊" style={cardStyle}>
               <div className="flex flex-wrap justify-center gap-6">
-                <div className="flex flex-col items-center" style={{ minWidth: 340 }}>
+                <div className="flex flex-col items-center w-full overflow-x-auto" style={{ scrollbarWidth: "none" }}>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/30 mb-2 text-center">Goalie Radar</p>
                   <GoalieRadarChart data={data} teamColor={teamColor} nhlSvPct={nhlStats?.sv_pct} nhlGaa={nhlStats?.gaa} />
                 </div>

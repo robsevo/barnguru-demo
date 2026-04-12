@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
-import { TEAM_COLORS, TEAM_SECONDARY, logoUrl, fmtPos } from "@/utils/nhl";
+import { useRouter } from "next/navigation";
+import { TEAM_COLORS, TEAM_SECONDARY, logoUrl, fmtPos, normalizePlayerName } from "@/utils/nhl";
 
 interface Leader {
   rank: number;
@@ -124,13 +125,13 @@ function TeamLogo({ abbrev }: { abbrev: string }) {
   );
 }
 
-function LeaderRow({ leader, cat, maxValue }: { leader: Leader; cat: string; maxValue: number }) {
+function LeaderRow({ leader, cat, maxValue, onPlayerClick }: { leader: Leader; cat: string; maxValue: number; onPlayerClick: (name: string) => void }) {
   const teamColor = TEAM_COLORS[leader.team] ?? "#C9A84C";
   const val = numericValue(leader.value);
   const barPct = maxValue > 0 ? (val / maxValue) * 100 : 0;
 
   return (
-    <tr className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors group">
+    <tr className="border-b border-white/[0.04] hover:bg-white/[0.04] transition-colors group cursor-pointer" onClick={() => onPlayerClick(leader.name)}>
       {/* Rank */}
       <td className="px-3 sm:px-4 py-3 sm:py-2.5 w-10 text-right">
         <span className={`text-[13px] sm:text-[14px] font-black tabular-nums ${rankColor(leader.rank)}`}>{leader.rank}</span>
@@ -200,6 +201,11 @@ const CALDER_CATS: { key: CalderCat; label: string }[] = [
 ];
 
 export default function StatsPage() {
+  const router = useRouter();
+  const handlePlayerClick = useCallback((name: string) => {
+    router.push(`/players/${encodeURIComponent(normalizePlayerName(name))}`);
+  }, [router]);
+
   const [playerTab, setPlayerTab]     = useState<PlayerTab>("skaters");
   const [skaterCat, setSkaterCat]     = useState<SkaterCat>("points");
   const [goalieCat, setGoalieCat]     = useState<GoalieCat>("wins");
@@ -329,7 +335,7 @@ export default function StatsPage() {
   const maxVal = displayedLeaders.length > 0 ? Math.max(...displayedLeaders.map(l => numericValue(l.value))) : 1;
 
   return (
-    <main className="min-h-screen flex flex-col px-3 sm:px-8 pt-6 pb-12 max-w-[700px] sm:max-w-[1100px] mx-auto w-full">
+    <main className="min-h-screen flex flex-col px-3 sm:px-8 pt-6 pb-12 max-w-[700px] sm:max-w-[1100px] mx-auto w-full overflow-x-hidden">
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <div>
@@ -398,6 +404,11 @@ export default function StatsPage() {
       {error && (
         <div className="rounded-xl border border-[#ef4444]/20 bg-[#ef4444]/[0.04] p-4 mb-4 text-[12px] text-[#ef4444]/70">{error}</div>
       )}
+
+      {/* Rotate hint — mobile only */}
+      <p className="sm:hidden text-[10px] text-white/25 text-center mb-3 flex items-center justify-center gap-1.5">
+        <span>↻</span> Rotate phone for more stats
+      </p>
 
       {/* Table */}
       <div className="rounded-xl border border-[#C9A84C]/[0.15] bg-gradient-to-b from-white/[0.015] via-white/[0.005] to-transparent overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.7),0_2px_8px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(220,228,240,0.07),inset_0_-1px_0_rgba(0,0,0,0.35),0_0_0_1px_rgba(190,198,205,0.04)]">
@@ -478,7 +489,7 @@ export default function StatsPage() {
               </tr>
             ) : (
               displayedLeaders.map(leader => (
-                <LeaderRow key={leader.id} leader={leader} cat={currentCat} maxValue={maxVal} />
+                <LeaderRow key={leader.id} leader={leader} cat={currentCat} maxValue={maxVal} onPlayerClick={handlePlayerClick} />
               ))
             )}
           </tbody>

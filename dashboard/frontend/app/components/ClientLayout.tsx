@@ -109,12 +109,12 @@ const NAME_CLASS: Record<PhaseStatus, string> = {
 
 // Nav items — Live Games dot is rendered dynamically based on live status
 const NAV_ITEMS = [
-  { href: "/",            label: "Home",          shortLabel: "Home",  dot: "static", dotClass: "bg-white/20",                                                                active: (p: string) => p === "/" },
-  { href: "/gamecentre",  label: "Live Games",    shortLabel: "Live",  dot: "live",   dotClass: "",                                                                           active: (p: string) => p === "/gamecentre" || p.startsWith("/game/") },
-  { href: "/standings",   label: "Standings",     shortLabel: "Stnd",  dot: "static", dotClass: "bg-[#fbbf24]/70 shadow-[0_0_5px_rgba(251,191,36,0.6)]",                     active: (p: string) => p === "/standings" },
-  { href: "/stats",       label: "Stats Leaders", shortLabel: "Stats", dot: "static", dotClass: "bg-white/35 shadow-[0_0_5px_rgba(210,215,220,0.5)]",                        active: (p: string) => p === "/stats" },
-  { href: "/players",     label: "Cortex",        shortLabel: "Crtx",  dot: "static", dotClass: "bg-[#a78bfa] shadow-[0_0_6px_rgba(167,139,250,0.8)]",                       active: (p: string) => p === "/players" || p.startsWith("/players/") },
-  { href: "/teams",       label: "Teams",         shortLabel: "Teams", dot: "static", dotClass: "bg-white/20",                                                                active: (p: string) => p === "/teams" || p.startsWith("/teams/") },
+  { href: "/",              label: "Home",          shortLabel: "Home",   dot: "static", dotClass: "bg-white/20",                                                              active: (p: string) => p === "/" },
+  { href: "/gamecentre",    label: "Live",          shortLabel: "Live",   dot: "live",   dotClass: "",                                                                         active: (p: string) => p === "/gamecentre" || p.startsWith("/game/") },
+  { href: "/league/teams",  label: "Teams",         shortLabel: "Teams",  dot: "static", dotClass: "bg-white/20",                                                              active: (p: string) => p.startsWith("/league") || p.startsWith("/teams/") },
+  { href: "/standings",     label: "Standings",     shortLabel: "Stnd",   dot: "static", dotClass: "bg-[#fbbf24]/70 shadow-[0_0_5px_rgba(251,191,36,0.6)]",                   active: (p: string) => p === "/standings" },
+  { href: "/stats",         label: "Stats Leaders", shortLabel: "Stats",  dot: "static", dotClass: "bg-white/35 shadow-[0_0_5px_rgba(210,215,220,0.5)]",                      active: (p: string) => p === "/stats" },
+  { href: "/players",       label: "Cortex",        shortLabel: "Crtx",   dot: "static", dotClass: "bg-[#a78bfa] shadow-[0_0_6px_rgba(167,139,250,0.8)]",                     active: (p: string) => p === "/players" || p.startsWith("/players/") },
 ];
 
 function InnerLayout({ children }: { children: React.ReactNode }) {
@@ -122,7 +122,7 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
   const [username, setUsername] = useState<string | null>(null);
   const [hasLive, setHasLive] = useState(false);
   const pathname = usePathname();
-  const { theme, clearTheme, cortexPinned } = useTheme();
+  const { theme, clearTheme, cortexPinned, setCortexPinned } = useTheme();
   const isCortexPage = pathname.startsWith("/players");
   const isCortexMode = !theme && (isCortexPage || cortexPinned);
   const brandHex = theme?.primaryColor ?? (isCortexMode ? "#a78bfa" : "#C9A84C");
@@ -271,6 +271,35 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
               </>
             )}
 
+            {/* Cortex theme section — shown when Cortex is pinned and no team theme */}
+            {!theme && cortexPinned && (
+              <>
+                <div className="mx-3 mt-3 mb-1.5 border-t border-white/[0.06]" />
+                <p className="px-3 pt-1 pb-1.5 text-[9px] font-semibold uppercase tracking-[0.22em] text-white/15">
+                  Theme
+                </p>
+                <div className="mx-2 px-3 py-2 rounded-lg"
+                  style={{ background: `rgba(167,139,250,0.06)`, border: `1px solid rgba(167,139,250,0.18)` }}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <svg width="16" height="16" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                        <path d="M24 10 C18 10 11 14 9 20 C7 25 9 31 13 34 C17 37 21 37 24 37" stroke="#a78bfa" strokeWidth="2" strokeLinecap="round" fill="none"/>
+                        <path d="M24 10 C30 10 37 14 39 20 C41 25 39 31 35 34 C31 37 27 37 24 37" stroke="#a78bfa" strokeWidth="2" strokeLinecap="round" fill="none"/>
+                        <circle cx="24" cy="24" r="3.2" fill="#a78bfa" fillOpacity="0.95"/>
+                      </svg>
+                      <span className="text-[10px] font-bold text-[#a78bfa]">CORTEX</span>
+                    </div>
+                    <button
+                      onClick={() => { setCortexPinned(false); setOpen(false); }}
+                      className="text-[8px] font-semibold uppercase tracking-wider px-2 py-1 rounded border text-white/30 border-white/[0.10] hover:text-[#f87171]/70 hover:border-[#f87171]/30 transition-all duration-150"
+                    >
+                      GRTZKY
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+
             {/* Dev + Phases — rob only */}
             {username === "rob" && (
               <>
@@ -352,7 +381,7 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
 
         {/* Main content */}
         <div
-          className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ease-in-out
+          className={`flex-1 flex flex-col min-w-0 overflow-x-hidden transition-all duration-300 ease-in-out
             ${open ? "ml-64" : "ml-0"}`}
         >
           {/* Top bar */}
@@ -368,24 +397,26 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
             <button
               onClick={() => setOpen((o) => !o)}
               className="flex flex-col justify-center gap-[5px] w-7 h-7 rounded-md transition-colors duration-200 shrink-0 items-center"
-              style={{ background: open ? `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.08)` : undefined }}
+              style={{ background: open ? (theme ? "rgba(255,255,255,0.08)" : `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.08)`) : undefined }}
               aria-label="Toggle navigation"
             >
-              <span className="block h-[2px] w-[16px] rounded-full transition-all duration-200 origin-center"
-                style={{ background: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.60)`, transform: open ? "rotate(45deg) translateY(7px)" : undefined }} />
-              <span className="block h-[2px] w-[16px] rounded-full transition-all duration-200"
-                style={{ background: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.60)`, opacity: open ? 0 : 1, transform: open ? "scaleX(0)" : undefined }} />
-              <span className="block h-[2px] w-[16px] rounded-full transition-all duration-200 origin-center"
-                style={{ background: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.60)`, transform: open ? "rotate(-45deg) translateY(-7px)" : undefined }} />
+              {(["rotate(45deg) translateY(7px)", undefined, "rotate(-45deg) translateY(-7px)"] as const).map((transform, i) => (
+                <span key={i} className="block h-[2px] w-[16px] rounded-full transition-all duration-200 origin-center"
+                  style={{
+                    background: theme ? "rgba(255,255,255,0.65)" : `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.60)`,
+                    transform: open ? transform : undefined,
+                    opacity: (i === 1 && open) ? 0 : 1,
+                  }} />
+              ))}
             </button>
 
             {/* Logo + name */}
             <Link href="/" className="inline-flex items-center shrink-0 pr-1">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               {theme ? (
-                <img src={theme.logoUrl} alt={theme.abbrev} className="h-8 sm:h-9 w-auto object-contain block" />
+                <img src={theme.logoUrl} alt={theme.abbrev} className="h-7 sm:h-8 w-auto object-contain block" />
               ) : isCortexMode ? (
-                <svg width="36" height="36" viewBox="0 0 48 48" fill="none" aria-hidden="true" className="shrink-0">
+                <svg width="36" height="36" viewBox="0 0 48 48" fill="none" aria-hidden="true" className="shrink-0 lg:!w-[42px] lg:!h-[42px]">
                   <path d="M24 2 L42 12 L42 36 L24 46 L6 36 L6 12 Z" stroke="#a78bfa" strokeWidth="0.9" strokeOpacity="0.28" fill="#a78bfa" fillOpacity="0.03"/>
                   <circle cx="24" cy="24" r="17" stroke="#a78bfa" strokeWidth="0.6" strokeOpacity="0.12" fill="none"/>
                   <path d="M24 10 C18 10 11 14 9 20 C7 25 9 31 13 34 C17 37 21 37 24 37" stroke="#a78bfa" strokeWidth="1.8" strokeLinecap="round" fill="rgba(167,139,250,0.07)"/>
@@ -408,14 +439,14 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                   <circle cx="24" cy="24" r="1.6" fill="white"   fillOpacity="0.72"/>
                 </svg>
               ) : (
-                <img src="/logo-circle.png" alt="GRTZKY" className="h-9 sm:h-10 w-auto block" />
+                <img src="/logo-circle.png" alt="GRTZKY" className="h-7 sm:h-8 w-auto block" />
               )}
               <span
                 className="h-5 w-px shrink-0 mx-2"
                 style={{ background: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.30)` }}
               />
               <span
-                className="font-black italic tracking-[0.06em] text-[11px] sm:text-[17px] bg-clip-text text-transparent leading-none pr-1.5"
+                className="font-black italic tracking-[0.06em] text-[11px] sm:text-[17px] lg:text-[20px] bg-clip-text text-transparent leading-none pr-1.5"
                 style={{
                   fontFamily: "var(--font-condensed)",
                   backgroundImage: isCortexMode
@@ -439,10 +470,11 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
             <div className="ml-auto flex items-center gap-0.5 sm:gap-1 shrink-0">
               {(
                 [
-                  { href: "/gamecentre", labelSm: "Live",  label: "Games",     active: pathname === "/gamecentre" || pathname.startsWith("/game/") },
-                  { href: "/standings",  labelSm: "Stnd",  label: "Standings", active: pathname === "/standings" },
-                  { href: "/stats",      labelSm: "Stats", label: "Stats",     active: pathname === "/stats" },
-                  { href: "/players",    labelSm: "Crtx",  label: "Cortex",    active: pathname === "/players" || pathname.startsWith("/players/") },
+                  { href: "/gamecentre",   labelSm: "Live",  label: "Live",      active: pathname === "/gamecentre" || pathname.startsWith("/game/") },
+                  { href: "/league/teams", labelSm: "Teams", label: "Teams",     active: pathname.startsWith("/league") || pathname.startsWith("/teams/") },
+                  { href: "/standings",    labelSm: "Stnd",  label: "Standings", active: pathname === "/standings" },
+                  { href: "/stats",        labelSm: "Stats", label: "Stats",     active: pathname === "/stats" },
+                  { href: "/players",      labelSm: "Crtx",  label: "Cortex",    active: pathname === "/players" || pathname.startsWith("/players/") },
                 ] as const
               ).map(({ href, labelSm, label, active }) => {
                 const isCortex = label === "Cortex";
@@ -457,8 +489,7 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                           : "text-[#a78bfa]/50 border-[#a78bfa]/20 bg-[#a78bfa]/[0.04] hover:text-[#a78bfa]/80 hover:border-[#a78bfa]/40 hover:bg-[#a78bfa]/10"
                       }`}
                     >
-                      <span className="sm:hidden"><MiniCortex /></span>
-                      <span className="hidden sm:inline">{label}</span>
+                      <MiniCortex />
                     </Link>
                   );
                 }
@@ -467,16 +498,25 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                     key={href}
                     href={href}
                     className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md text-[8px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border flex items-center justify-center"
-                    style={active ? {
+                    style={active ? (theme ? {
+                      background: "rgba(255,255,255,0.18)",
+                      color: "#ffffff",
+                      borderColor: "rgba(255,255,255,0.45)",
+                      boxShadow: "0 0 8px rgba(255,255,255,0.12)",
+                    } : {
                       background: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.15)`,
                       color: brandHex,
                       borderColor: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.40)`,
                       boxShadow: `0 0 8px rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.15)`,
+                    }) : (theme ? {
+                      color: "rgba(255,255,255,0.55)",
+                      borderColor: "rgba(255,255,255,0.15)",
+                      background: "rgba(255,255,255,0.05)",
                     } : {
                       color: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.45)`,
                       borderColor: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.15)`,
                       background: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.04)`,
-                    }}
+                    })}
                   >
                     <span className="sm:hidden">{labelSm}</span>
                     <span className="hidden sm:inline">{label}</span>
@@ -488,7 +528,7 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                   await fetch("/api/auth/logout", { method: "POST" });
                   window.location.href = "/login";
                 }}
-                className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md text-[8px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border text-white/25 border-white/[0.08] hover:text-[#f87171]/70 hover:border-[#f87171]/25 hover:bg-[#f87171]/[0.05]"
+                className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md text-[8px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border text-[#f87171]/70 border-[#f87171]/25 bg-[#f87171]/[0.05] hover:text-[#f87171] hover:border-[#f87171]/50 hover:bg-[#f87171]/[0.10]"
               >
                 <span className="sm:hidden">✕</span>
                 <span className="hidden sm:inline">Logout</span>

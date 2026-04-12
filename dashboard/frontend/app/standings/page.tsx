@@ -54,28 +54,45 @@ function playoffStatus(row: StandingRow): "division" | "wildcard" | "bubble" | "
   return "out";
 }
 
-function TeamLogoImg({ abbrev, size = 20 }: { abbrev: string; size?: number }) {
+function TeamLogoImg({ abbrev, size = 20, smSize, linkToTeam = false }: { abbrev: string; size?: number; smSize?: number; linkToTeam?: boolean }) {
   const [err, setErr] = useState(false);
-  if (err) return <span className="text-[10px] font-black text-white/30" style={{ width: size }}>{abbrev}</span>;
-  return (
-    <img src={logoUrl(abbrev)} alt={abbrev} width={size} height={size}
-      style={{ width: size, height: size, filter: "drop-shadow(0 0 4px rgba(255,255,255,0.22))" }}
+  if (err) return <span className="text-[10px] font-black text-white/30" style={{ width: smSize ?? size }}>{abbrev}</span>;
+  const makeImg = (imgSize: number) => (
+    <img src={logoUrl(abbrev)} alt={abbrev} width={imgSize} height={imgSize}
+      style={{ width: imgSize, height: imgSize, filter: "drop-shadow(0 0 4px rgba(255,255,255,0.22))" }}
       className="object-contain shrink-0"
       onError={() => setErr(true)} />
   );
+  const img = smSize ? (
+    <><span className="sm:hidden inline-flex">{makeImg(size)}</span><span className="hidden sm:inline-flex">{makeImg(smSize)}</span></>
+  ) : makeImg(size);
+  if (linkToTeam) {
+    return (
+      <Link
+        href={`/teams/${abbrev}`}
+        onClick={e => e.stopPropagation()}
+        className="shrink-0 hover:opacity-80 transition-opacity"
+        title={`View ${abbrev} team page`}
+      >
+        {img}
+      </Link>
+    );
+  }
+  return img;
 }
 
 function ClinchBadge({ indicator }: { indicator: string }) {
   if (!indicator) return null;
+  // NHL API sends "p" for Presidents' Trophy — normalise to "z" (purple) to match glossary
+  const display = indicator === "p" ? "z" : indicator;
   const colors: Record<string, string> = {
     x: "bg-[#4ade80]/20 text-[#4ade80] border-[#4ade80]/30",
     y: "bg-[#f472b6]/15 text-[#f472b6]/90 border-[#f472b6]/25",
     z: "bg-[#a78bfa]/20 text-[#a78bfa] border-[#a78bfa]/30",
-    p: "bg-[#fbbf24]/20 text-[#fbbf24] border-[#fbbf24]/30",
   };
   return (
-    <span className={`text-[8px] font-black uppercase px-1 py-0.5 rounded border ${colors[indicator] ?? "bg-white/10 text-white/40 border-white/10"}`}>
-      {indicator}
+    <span className={`text-[8px] font-black uppercase px-1 py-0.5 rounded border ${colors[display] ?? "bg-white/10 text-white/40 border-white/10"}`}>
+      {display}
     </span>
   );
 }
@@ -145,7 +162,7 @@ function PlayoffRaceConference({ name, rows }: { name: string; rows: StandingRow
       <div className="flex items-center gap-2.5 px-3 py-2 border-b border-white/[0.04] hover:bg-white/[0.03] transition-colors">
         <span className="text-[11px] font-black text-white/20 w-4 shrink-0 tabular-nums">{idx + 1}</span>
         <div className="w-1 h-5 rounded-full shrink-0" style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}99, 0 0 2px ${color}` }} />
-        <TeamLogoImg abbrev={row.team} size={30} />
+        <TeamLogoImg abbrev={row.team} size={30} smSize={38} linkToTeam />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
             <span className="text-[14px] font-bold text-white/85">{row.team}</span>
@@ -200,7 +217,7 @@ function PlayoffRaceConference({ name, rows }: { name: string; rows: StandingRow
             <div key={row.team} className="flex items-center gap-2.5 px-3 py-2 border-b border-white/[0.04] hover:bg-white/[0.03] transition-colors">
               <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded border ${row.wildcard_rank === 1 ? "text-[#C9A84C]/90 border-[#C9A84C]/30 bg-[#C9A84C]/10" : "text-[#38bdf8]/80 border-[#38bdf8]/25 bg-[#38bdf8]/8"}`}>WC{row.wildcard_rank}</span>
               <div className="w-1 h-5 rounded-full shrink-0" style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}99, 0 0 2px ${color}` }} />
-              <TeamLogoImg abbrev={row.team} size={30} />
+              <TeamLogoImg abbrev={row.team} size={30} smSize={38} linkToTeam />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
                   <span className="text-[14px] font-bold text-white/85">{row.team}</span>
@@ -232,7 +249,7 @@ function PlayoffRaceConference({ name, rows }: { name: string; rows: StandingRow
                 <div key={row.team} className="flex items-center gap-2.5 px-3 py-2 border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors opacity-70">
                   <span className="text-[11px] font-black text-white/15 w-4 shrink-0">—</span>
                   <div className="w-1 h-5 rounded-full shrink-0" style={{ backgroundColor: color, opacity: 0.5, boxShadow: `0 0 4px ${color}80` }} />
-                  <TeamLogoImg abbrev={row.team} size={30} />
+                  <TeamLogoImg abbrev={row.team} size={30} smSize={38} linkToTeam />
                   <div className="flex-1 min-w-0">
                     <div className="text-[14px] font-bold text-white/60">{row.team}</div>
                     <div className="text-[10px] text-white/38 font-mono">{row.w}-{row.l}-{row.otl}</div>
@@ -288,7 +305,7 @@ function PlayoffBracket({ rows }: { rows: StandingRow[] }) {
       <div className={`flex items-center gap-2.5 px-3 py-2.5 min-h-[52px] ${divider ? "border-b border-[#C9A84C]/[0.15]" : ""}`}>
         <SeedBadge seed={seed} />
         <div className="w-0.5 h-7 rounded-full shrink-0" style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}bb` }} />
-        <TeamLogoImg abbrev={row.team} size={32} />
+        <TeamLogoImg abbrev={row.team} size={32} smSize={42} linkToTeam />
         <div className="flex-1 min-w-0">
           <div className="text-[13px] font-bold text-white/90 leading-none">{row.team}</div>
           <div className="text-[9px] text-white/30 font-mono mt-0.5">{row.w}-{row.l}-{row.otl}</div>
@@ -474,8 +491,7 @@ function StandingTableRow({ row, rank, showRank }: { row: StandingRow; rank?: nu
         <div className="flex items-center gap-1.5">
           <PlayoffDot status={status} />
           <div className="w-1 h-4 rounded-full shrink-0" style={{ backgroundColor: color, boxShadow: `0 0 5px ${color}80` }} />
-          <span className="block sm:hidden"><TeamLogoImg abbrev={row.team} size={26} /></span>
-          <span className="hidden sm:block"><TeamLogoImg abbrev={row.team} size={28} /></span>
+          <TeamLogoImg abbrev={row.team} size={26} smSize={36} linkToTeam />
           <span className="text-[12px] font-bold text-white/85 whitespace-nowrap">{row.team}</span>
           <span className="text-[10px] text-white/30 hidden sm:inline truncate max-w-[90px]">{row.team_name}</span>
           {row.div_rank <= 3 && (
@@ -646,7 +662,7 @@ export default function StandingsPage() {
   );
 
   return (
-    <main className="min-h-screen flex flex-col px-3 pt-6 pb-12 max-w-[1300px] mx-auto w-full">
+    <main className="min-h-screen flex flex-col px-3 pt-6 pb-12 max-w-[1300px] mx-auto w-full overflow-x-hidden">
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <div>
@@ -717,6 +733,11 @@ export default function StandingsPage() {
           ))}
         </div>
       </div>
+
+      {/* Rotate hint — mobile only */}
+      <p className="sm:hidden text-[10px] text-white/25 text-center mb-3 flex items-center justify-center gap-1.5">
+        <span>↻</span> Rotate phone for more stats
+      </p>
 
       {view === "hunt" ? (
         /* ── Playoff Race ── */

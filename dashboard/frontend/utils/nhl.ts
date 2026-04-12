@@ -1,5 +1,14 @@
 // Shared NHL utilities — used by ScoreboardBar, GoalFeed, and game centre pages.
 
+/**
+ * Strip diacritical marks (accents) from a player name before using it in a URL.
+ * NHL API returns names like "Slafkovský" but our parquet uses "Slafkovsky".
+ * NFD decomposition splits ý→y+combining-acute, then we drop the combining marks.
+ */
+export function normalizePlayerName(name: string): string {
+  return name.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
 export const NHL_CODE: Record<string, string> = {
   LA: "LAK",
   NJ: "NJD",

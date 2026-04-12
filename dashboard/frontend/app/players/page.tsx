@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { TEAM_COLORS, TEAM_SECONDARY, logoUrl } from "@/utils/nhl";
+import { TEAM_COLORS, TEAM_SECONDARY, logoUrl, normalizePlayerName } from "@/utils/nhl";
 import { useTheme } from "@/utils/themeContext";
 
 function darkBlend(hex: string, darkness = 0.88): string {
@@ -430,22 +430,22 @@ function RecentGamesTable({ log, loading }: { log: GameLog | null; loading: bool
           const scored = g.goals > 0 || g.assists > 0;
           return (
             <div key={i}
-              className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[11px] transition-colors
+              className={`flex items-center gap-1.5 sm:gap-2.5 px-2 sm:px-3 py-1.5 rounded-lg text-[10px] transition-colors
                 ${scored ? "bg-white/[0.04] border border-white/[0.07]" : "bg-white/[0.02] border border-white/[0.04]"}`}
             >
-              <span className="text-white/30 font-mono w-20 shrink-0 tabular-nums">{g.date.slice(5)}</span>
+              <span className="text-white/30 font-mono w-12 shrink-0 tabular-nums">{g.date.slice(5)}</span>
               <span className="text-white/30 font-mono shrink-0">{g.home_road === "H" ? "vs" : "@"}</span>
-              <TeamLogo team={g.opponent} size={16} />
-              <span className="text-white/40 font-mono shrink-0 w-10">{g.opponent}</span>
+              <TeamLogo team={g.opponent} size={14} />
+              <span className="text-white/40 font-mono shrink-0 w-8">{g.opponent}</span>
               <span className="flex-1" />
-              <span className={`font-semibold tabular-nums w-12 text-right ${scored ? "text-white/80" : "text-white/25"}`}>
+              <span className={`font-semibold tabular-nums w-10 text-right shrink-0 ${scored ? "text-white/80" : "text-white/25"}`}>
                 {g.goals}G {g.assists}A
               </span>
               {g.pp_points > 0 && (
-                <span className="text-[9px] text-[#fbbf24]/60 font-mono shrink-0">PP</span>
+                <span className="text-[8px] text-[#fbbf24]/60 font-mono shrink-0">PP</span>
               )}
-              <span className="text-white/25 font-mono w-12 text-right shrink-0">{g.toi}</span>
-              <span className="text-white/25 font-mono w-8 text-right shrink-0"
+              <span className="hidden sm:inline text-white/25 font-mono w-12 text-right shrink-0">{g.toi}</span>
+              <span className="hidden sm:inline text-white/25 font-mono w-8 text-right shrink-0"
                 style={{ color: g.plus_minus > 0 ? "rgba(74,222,128,0.6)" : g.plus_minus < 0 ? "rgba(248,113,113,0.6)" : undefined }}>
                 {g.plus_minus > 0 ? `+${g.plus_minus}` : g.plus_minus}
               </span>
@@ -518,7 +518,7 @@ function PlayerDetailCard({
       }}
     >
       {/* Header */}
-      <div className="flex items-start gap-4 px-5 pt-4 pb-3 border-b border-white/[0.07]">
+      <div className="flex items-start gap-3 px-3 sm:px-5 pt-4 pb-3 border-b border-white/[0.07]">
         {/* Headshot */}
         <div className="shrink-0">
           {headshotUrl ? (
@@ -526,11 +526,11 @@ function PlayerDetailCard({
               src={headshotUrl}
               alt={data.player_name ?? ""}
               onError={() => setImgErr(true)}
-              className="h-20 w-20 rounded-full object-cover object-top"
+              className="h-16 w-16 sm:h-20 sm:w-20 rounded-full object-cover object-top"
               style={{ background: "#111" }}
             />
           ) : (
-            <div className="h-20 w-20 rounded-full bg-white/10 flex items-center justify-center">
+            <div className="h-16 w-16 sm:h-20 sm:w-20 rounded-full bg-white/10 flex items-center justify-center">
               <span className="text-2xl font-bold text-white/30">{(data.player_name ?? "?")[0]}</span>
             </div>
           )}
@@ -538,7 +538,7 @@ function PlayerDetailCard({
 
         {/* Name + meta */}
         <div className="flex-1 min-w-0 pt-1">
-          <h2 className="text-xl font-bold text-white leading-tight">{data.player_name}</h2>
+          <h2 className="text-[16px] sm:text-xl font-bold text-white leading-tight">{data.player_name}</h2>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             {data.team && <TeamLogo team={data.team} size={28} />}
             {data.team && <span className="text-sm font-semibold text-white/50">{data.team}</span>}
@@ -591,7 +591,7 @@ function PlayerDetailCard({
       )}
 
       {/* Stats grid */}
-      <div className="px-5 py-3">
+      <div className="px-3 sm:px-5 py-3">
         {isGoalie ? (
           <div className="space-y-0">
             {data.gsax != null && (
@@ -669,7 +669,7 @@ function PlayerDetailCard({
 
       {/* Recent games */}
       {data.player_id && (
-        <div className="px-5 pb-4 border-t border-white/[0.05] pt-3">
+        <div className="px-3 sm:px-5 pb-4 border-t border-white/[0.05] pt-3">
           <p className="text-[10px] font-semibold text-white/40 uppercase tracking-wider mb-1">Recent Games</p>
           <RecentGamesTable log={log} loading={logLoading} />
         </div>
@@ -692,8 +692,8 @@ function StatRow({
   return (
     <div className="flex items-center justify-between py-2 border-b border-white/[0.05] last:border-0 gap-3">
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-white/60">{label}</p>
-        {sub && <p className="text-[9px] text-white/30 mt-0.5">{sub}</p>}
+        <p className="text-[12px] font-medium text-white/60">{label}</p>
+        {sub && <p className="text-[9px] text-white/30 mt-0.5 leading-snug">{sub}</p>}
       </div>
       <div className="flex items-center gap-2 shrink-0">
         <span className="text-sm font-semibold font-mono text-white/80">{value}</span>
@@ -814,17 +814,17 @@ function Section({
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div
-      className={`rounded-2xl overflow-hidden shadow-[0_4px_16px_rgba(0,0,0,0.50)] ${className}`}
+      className={`rounded-2xl overflow-hidden w-full shadow-[0_4px_16px_rgba(0,0,0,0.50)] ${className}`}
       style={{
         background: `linear-gradient(160deg, rgba(var(--card-base-r),var(--card-base-g),var(--card-base-b),0.90) 0%, rgba(var(--card-mid-r),var(--card-mid-g),var(--card-mid-b),0.97) 100%)`,
-        border: `1px solid rgba(167,139,250,0.12)`,
+        border: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.14)`,
       }}
     >
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-2.5 px-4 py-3 border-b border-white/[0.06] hover:bg-[#a78bfa]/[0.03] transition-colors text-left"
+        className="w-full flex items-center gap-2.5 px-4 py-3 border-b border-white/[0.06] hover:bg-white/[0.03] transition-colors text-left"
       >
-        <span className="w-0.5 h-4 rounded-full bg-[#a78bfa]/40 shrink-0" />
+        <span className="w-0.5 h-4 rounded-full shrink-0" style={{ background: `rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.50)` }} />
         <p className="text-[11px] font-black uppercase tracking-[0.12em] text-white/70">{title}</p>
         {count !== undefined && (
           <span className="text-[9px] font-mono text-white/20">{count}</span>
@@ -931,7 +931,12 @@ function CortexAbout() {
             patterns, and real-time form tracking. Watch a game and the AI watches with you, feeding
             observations directly into the model. As each phase and feature is completed by the dev,
             new layers of intelligence are added. The deeper the system gets, the sharper the
-            simulations become — and the sharper the edge over the oddsmakers.
+            simulations become — and the sharper the edge over the oddsmakers.{" "}
+            <span className="text-[#c4b5fd]/60">
+              Unfamiliar with a stat? Pull up any player and hover the{" "}
+              <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-[#a78bfa]/50 text-[#a78bfa] text-[8px] font-black leading-none align-middle mx-0.5">i</span>
+              {" "}next to it for a plain-language explanation.
+            </span>
           </p>
         </div>
       </div>
@@ -1118,11 +1123,11 @@ export default function PlayersPage() {
   // Navigate to full profile page by player name
   const loadPlayer = useCallback((name: string) => {
     setShowSugg(false);
-    router.push(`/players/${encodeURIComponent(name)}`);
+    router.push(`/players/${encodeURIComponent(normalizePlayerName(name))}`);
   }, [router]);
 
   const handleRowClick = useCallback((name: string) => {
-    router.push(`/players/${encodeURIComponent(name)}`);
+    router.push(`/players/${encodeURIComponent(normalizePlayerName(name))}`);
   }, [router]);
 
   // Dynamic metric switch handlers
@@ -1153,9 +1158,11 @@ export default function PlayersPage() {
 
   return (
     <main
-      className="min-h-screen p-3 sm:p-6 max-w-3xl mx-auto"
+      className="min-h-screen p-3 sm:p-6 max-w-3xl mx-auto w-full overflow-x-hidden"
       style={{
-        /* Purple-tinted card vars for this page — overrides brownish :root defaults */
+        /* Force Cortex purple brand vars — overrides any active team theme on this page */
+        "--brand-r": "167", "--brand-g": "139", "--brand-b": "250",
+        "--brand-hex": "#a78bfa",
         "--card-base-r": "18", "--card-base-g": "14", "--card-base-b": "28",
         "--card-mid-r":  "10", "--card-mid-g":  "8",  "--card-mid-b":  "16",
       } as React.CSSProperties}
@@ -1183,7 +1190,7 @@ export default function PlayersPage() {
           <div className="h-px flex-1 bg-gradient-to-l from-transparent to-[#a78bfa]/20" />
         </div>
         <div className="px-6 py-2.5 text-center">
-          <p className="text-[9px] font-light uppercase tracking-[0.28em] text-[#a78bfa]/40">
+          <p className="text-[9px] font-light uppercase tracking-[0.14em] text-[#a78bfa]/40">
             Player Intelligence · Advanced Models · Live Leaderboards
           </p>
         </div>
@@ -1194,8 +1201,12 @@ export default function PlayersPage() {
 
       {/* Search bar */}
       <div className="relative mb-5">
-        <div className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none z-10">
-          <CortexIcon size={20} />
+        <div className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none z-10"
+          style={{ color: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.55)` }}>
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" strokeWidth="1.6"/>
+            <line x1="12.5" y1="12.5" x2="17" y2="17" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+          </svg>
         </div>
         <input
           ref={inputRef}
@@ -1206,28 +1217,30 @@ export default function PlayersPage() {
             if (e.key === "Escape") setShowSugg(false);
           }}
           onFocus={e => {
-            e.currentTarget.style.border = `1px solid rgba(167,139,250,0.60)`;
-            e.currentTarget.style.boxShadow = `0 0 22px rgba(167,139,250,0.14), inset 0 0 10px rgba(124,58,237,0.05)`;
-            e.currentTarget.style.background = `rgba(40,28,68,0.70)`;
+            e.currentTarget.style.border = `1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.55)`;
+            e.currentTarget.style.boxShadow = `0 0 22px rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.12)`;
+            e.currentTarget.style.background = `rgba(var(--card-base-r), var(--card-base-g), var(--card-base-b), 0.85)`;
             setShowSugg(true);
           }}
           onBlur={e => {
-            e.currentTarget.style.border = `1px solid rgba(167,139,250,0.25)`;
+            e.currentTarget.style.border = `1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.22)`;
             e.currentTarget.style.boxShadow = ``;
-            e.currentTarget.style.background = `rgba(35,24,58,0.55)`;
+            e.currentTarget.style.background = `rgba(var(--card-base-r), var(--card-base-g), var(--card-base-b), 0.60)`;
             setTimeout(() => setShowSugg(false), 150);
           }}
           placeholder="Search any NHL player…"
-          className="w-full pl-11 pr-5 py-4 text-base rounded-2xl text-white placeholder:text-[#a78bfa]/35 focus:outline-none transition-[border,box-shadow]"
+          className="w-full pl-11 pr-5 py-4 text-base rounded-2xl text-white focus:outline-none transition-[border,box-shadow]"
           style={{
-            background: `rgba(35,24,58,0.55)`,
-            border: `1px solid rgba(167,139,250,0.25)`,
+            background: `rgba(var(--card-base-r), var(--card-base-g), var(--card-base-b), 0.60)`,
+            border: `1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.22)`,
+            color: "rgba(255,255,255,0.85)",
           }}
         />
         {query && (
           <button
             onClick={() => { setQuery(""); setSelectedPlayer(null); setPlayerNotFound(false); inputRef.current?.focus(); }}
-            className="absolute right-4 top-1/2 -translate-y-1/2 text-[#a78bfa]/30 hover:text-[#a78bfa]/70 transition-colors text-lg"
+            className="absolute right-4 top-1/2 -translate-y-1/2 transition-colors text-lg"
+            style={{ color: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.35)` }}
           >✕</button>
         )}
 
@@ -1236,8 +1249,8 @@ export default function PlayersPage() {
           <div
             className="absolute top-full left-0 right-0 mt-1 z-50 rounded-xl backdrop-blur-xl shadow-[0_8px_40px_rgba(0,0,0,0.85)] overflow-hidden"
             style={{
-              background: `rgba(10,8,16,0.98)`,
-              border: `1px solid rgba(167,139,250,0.18)`,
+              background: `rgba(var(--card-mid-r), var(--card-mid-g), var(--card-mid-b), 0.98)`,
+              border: `1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.18)`,
             }}
           >
             {suggestions.map(p => (

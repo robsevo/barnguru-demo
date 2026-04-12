@@ -654,9 +654,10 @@ async def scoreboard() -> dict:
     _today             = date.fromisoformat(today_str)
     yesterday_str      = (_today - timedelta(days=1)).isoformat()
     two_days_ago_str   = (_today - timedelta(days=2)).isoformat()
-    keep_dates         = {today_str, yesterday_str, two_days_ago_str}
+    tomorrow_str       = (_today + timedelta(days=1)).isoformat()
+    keep_dates         = {today_str, yesterday_str, two_days_ago_str, tomorrow_str}
 
-    # Flatten last 2 days + today
+    # Flatten last 2 days + today + tomorrow
     all_games: list[dict] = []
     date_labels: dict = {}
     for bucket in games_by_date:
@@ -1508,9 +1509,33 @@ async def phase2_player(
             "message": "Run scripts/train_xg_model.py to train the xG model first.",
         }
 
+    import unicodedata
+
+    def _norm(s: str) -> str:
+        """Lowercase + strip accents (e.g. ý→y, é→e) for fuzzy name matching."""
+        return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode().lower().strip()
+
     df = pl.read_parquet(parquets[-1])
-    name_lower = name.strip().lower()
-    row = df.filter(pl.col("shooter_name").str.to_lowercase() == name_lower)
+    name_lower = _norm(name)
+    # Exact match first (fast path)
+    row = df.filter(pl.col("shooter_name").str.to_lowercase() == name.strip().lower())
+    # Accent-normalised fallback — handles NHL API names like "Slafkovský" vs parquet "Slafkovsky"
+    if row.is_empty():
+        row = df.filter(
+            pl.col("shooter_name").map_elements(
+                lambda n: _norm(n or "") == name_lower, return_dtype=pl.Boolean
+            )
+        )
+    # Truncation fallback — parquet may have a prefix-truncated name (e.g. "Juraj Slafkovsk"
+    # instead of "Juraj Slafkovsky"). Try matching any parquet name that is a prefix of the
+    # search name (up to 3 chars shorter) so the full/correct name always resolves to the data.
+    if row.is_empty():
+        row = df.filter(
+            pl.col("shooter_name").map_elements(
+                lambda n: bool(n and name_lower.startswith(_norm(n)) and 0 < len(name_lower) - len(_norm(n)) <= 3),
+                return_dtype=pl.Boolean,
+            )
+        )
 
     if row.is_empty():
         # Check if this is a goalie — fall back to goalie_stats parquet
@@ -1814,39 +1839,89 @@ def _build_name_lookup() -> dict[int, str]:
     """Build player_id → player_name lookup from all available parquets."""
     import polars as pl
     lookup: dict[int, str] = {}
-    # RAPM (most complete for skaters)
-    for p in sorted((_GRETZKY_DATA_DIR / "rapm").glob("rapm_*.parquet")):
-        try:
-            df = pl.read_parquet(p, columns=["player_id", "player_name"])
-            for r in df.to_dicts():
-                pid, name = r.get("player_id"), r.get("player_name") or ""
-                if pid and name and not name.startswith("player_"):
-                    lookup[int(pid)] = name
-        except Exception:
-            pass
-    # Goalie stats (covers goalies missing from RAPM)
-    goalie_dir = _module_dir("goalie_stats")
-    for p in sorted(goalie_dir.glob("goalie_stats_*.parquet")):
-        try:
-            df = pl.read_parquet(p, columns=["player_id", "player_name"])
-            for r in df.to_dicts():
-                pid, name = r.get("player_id"), r.get("player_name") or ""
-                if pid and name and int(pid) not in lookup:
-                    lookup[int(pid)] = name
-        except Exception:
-            pass
-    # Goalie ratings (another goalie source)
-    goalie_ratings_dir = _GRETZKY_DATA_DIR / "goalie_ratings"
-    for p in sorted(goalie_ratings_dir.glob("goalie_ratings_*.parquet")):
-        try:
-            df = pl.read_parquet(p, columns=["player_id", "player_name"])
-            for r in df.to_dicts():
-                pid, name = r.get("player_id"), r.get("player_name") or ""
-                if pid and name and int(pid) not in lookup:
-                    lookup[int(pid)] = name
-        except Exception:
-            pass
+
+    def _ingest(path_glob, only_if_missing: bool = False) -> None:
+        for p in sorted(path_glob):
+            try:
+                df = pl.read_parquet(p, columns=["player_id", "player_name"])
+                for r in df.to_dicts():
+                    pid, name = r.get("player_id"), r.get("player_name") or ""
+                    if not pid or not name or name.startswith("player_"):
+                        continue
+                    key = int(pid)
+                    if only_if_missing and key in lookup:
+                        continue
+                    lookup[key] = name
+            except Exception:
+                pass
+
+    # Broadest real-name sources first (zero placeholders) ─────────────────
+    _ingest((_GRETZKY_DATA_DIR / "bayes_ratings").glob("*.parquet"))
+    _ingest((_GRETZKY_DATA_DIR / "skating_baseline").glob("*.parquet"), only_if_missing=True)
+    _ingest((_GRETZKY_DATA_DIR / "war").glob("*.parquet"), only_if_missing=True)
+    _ingest((_GRETZKY_DATA_DIR / "special_teams").glob("*.parquet"), only_if_missing=True)
+
+    # RAPM — fills in any remaining skaters (may have some placeholders,
+    # which are filtered by _ingest's startswith check)
+    _ingest((_GRETZKY_DATA_DIR / "rapm").glob("rapm_*.parquet"), only_if_missing=True)
+
+    # Goalies (missing from skater-only sources)
+    _ingest(_module_dir("goalie_stats").glob("goalie_stats_*.parquet"), only_if_missing=True)
+    _ingest((_GRETZKY_DATA_DIR / "goalie_ratings").glob("goalie_ratings_*.parquet"), only_if_missing=True)
+
+    # Persistent NHL API cache — resolves any IDs still missing after parquet pass
+    _cache_path = _GRETZKY_DATA_DIR / "player_name_cache.json"
+    try:
+        import json
+        cache: dict[str, str] = {}
+        if _cache_path.exists():
+            cache = json.loads(_cache_path.read_text())
+        for k, v in cache.items():
+            key = int(k)
+            if key not in lookup and v and not v.startswith("player_"):
+                lookup[key] = v
+    except Exception:
+        pass
+
     return lookup
+
+
+def _resolve_names_via_nhl_api(player_ids: list[int]) -> None:
+    """Fetch real names for unresolved player IDs from the NHL API and persist to cache.
+
+    Call this from async endpoints after noticing placeholder names:
+        asyncio.create_task(_resolve_names_async([pid1, pid2]))
+    """
+    import json, httpx
+    cache_path = _GRETZKY_DATA_DIR / "player_name_cache.json"
+    try:
+        cache: dict[str, str] = {}
+        if cache_path.exists():
+            cache = json.loads(cache_path.read_text())
+        updated = False
+        for pid in player_ids:
+            key = str(pid)
+            if key in cache:
+                continue
+            try:
+                r = httpx.get(
+                    f"https://api-web.nhle.com/v1/player/{pid}/landing",
+                    timeout=5.0, headers={"User-Agent": "GRTZKY/1.0"},
+                )
+                if r.status_code == 200:
+                    d = r.json()
+                    first = (d.get("firstName") or {}).get("default", "")
+                    last  = (d.get("lastName")  or {}).get("default", "")
+                    name  = f"{first} {last}".strip()
+                    if name:
+                        cache[key] = name
+                        updated = True
+            except Exception:
+                pass
+        if updated:
+            cache_path.write_text(json.dumps(cache, indent=2))
+    except Exception:
+        pass
 
 
 _FRANCHISE_ABBR: dict[int, str] = {
@@ -2313,6 +2388,9 @@ async def phase2_regime_alerts(limit: int = 10) -> dict:
             .to_dicts()
         )
 
+        # Collect any still-unresolved IDs for background NHL API resolution
+        _unresolved_ids: list[int] = []
+
         for r in rows:
             pid = r.get("player_id")
             raw_name = r.get("player_name", "")
@@ -2320,7 +2398,9 @@ async def phase2_regime_alerts(limit: int = 10) -> dict:
             if pid and (not raw_name or raw_name.startswith("player_")):
                 raw_name = name_lookup.get(int(pid), raw_name)
             if not raw_name or raw_name.startswith("player_"):
-                continue  # skip unresolvable
+                if pid:
+                    _unresolved_ids.append(int(pid))
+                continue  # skip unresolvable for now
             direction = "breakout" if r.get("regime_state") == "up_shift" else "crash"
             alerts.append({
                 "player_id":     int(pid) if pid else None,
@@ -2333,6 +2413,15 @@ async def phase2_regime_alerts(limit: int = 10) -> dict:
             })
             if len(alerts) >= limit:
                 break
+
+        # Fire-and-forget: resolve any still-missing IDs so next call has them
+        if _unresolved_ids:
+            import threading
+            threading.Thread(
+                target=_resolve_names_via_nhl_api,
+                args=(_unresolved_ids,),
+                daemon=True,
+            ).start()
 
         return {"alerts": alerts, "status": "ok"}
     except Exception:
@@ -3415,6 +3504,21 @@ async def phase2_players() -> dict:
                 pid = int(r["player_id"]) if has_id and r.get("player_id") is not None else None
                 players[name] = {"name": name, "team": r.get("team") or "", "position": "G", "player_id": pid}
 
+    # Dedup: if one name is a strict prefix of another (truncated data artifact),
+    # keep only the longer (complete) name, preserving player_id if available.
+    names = list(players.keys())
+    to_remove: set[str] = set()
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            short, long_ = (a, b) if len(a) < len(b) else (b, a)
+            if long_.startswith(short) and len(long_) - len(short) <= 3:
+                # Merge: ensure the longer name has the best player_id
+                if players[long_].get("player_id") is None and players[short].get("player_id") is not None:
+                    players[long_]["player_id"] = players[short]["player_id"]
+                to_remove.add(short)
+    for k in to_remove:
+        players.pop(k, None)
+
     return {"players": sorted(players.values(), key=lambda p: p["name"])}
 
 
@@ -4044,20 +4148,19 @@ async def game_centre(game_id: int) -> dict:
             # Only plot shots inside the attacking blue line (25 ft from centre).
             # Outliers from the neutral/defensive zone are NHL API data artefacts
             # (e.g. dump-ins labelled as missed-shots) and look wrong on the map.
-            if nx < 25:
-                continue
-            pid_key = "scoringPlayerId" if ev_type == "goal" else "shootingPlayerId"
-            shooter = roster.get(details.get(pid_key), "")
-            shots_for_map.append({
-                "team":       team_abbrev,
-                "event_type": ev_type,
-                "x":          nx,
-                "y":          ny,
-                "shooter":    shooter,
-                "result":     ev_type.replace("-", " "),
-                "period":     p_num2,
-                "time":       time_str,
-            })
+            if nx >= 25:
+                pid_key = "scoringPlayerId" if ev_type == "goal" else "shootingPlayerId"
+                shooter = roster.get(details.get(pid_key), "")
+                shots_for_map.append({
+                    "team":       team_abbrev,
+                    "event_type": ev_type,
+                    "x":          nx,
+                    "y":          ny,
+                    "shooter":    shooter,
+                    "result":     ev_type.replace("-", " "),
+                    "period":     p_num2,
+                    "time":       time_str,
+                })
 
         # ── Plays feed (skip noise) ────────────────────────────────────────
         if ev_type in _SKIP_PLAYS:
@@ -6033,4 +6136,45 @@ async def cv_turnover_events(game_id: int):
         return {"game_id": game_id, "rows": _df_to_records(acc.turnover_events(game_id))}
     except Exception as exc:
         return {"game_id": game_id, "rows": [], "error": str(exc)}
+
+
+@app.get("/player-shots/{player_id}")
+async def player_shots(player_id: int):
+    """Return arena-adjusted shot coordinates for a player (last 2 seasons of MoneyPuck data)."""
+    shots_dir = _GRETZKY_DATA_DIR / "shots"
+    if not shots_dir.exists():
+        return {"shots": [], "count": 0, "status": "no_data"}
+    files = sorted(shots_dir.glob("*.parquet"))
+    if not files:
+        return {"shots": [], "count": 0, "status": "no_data"}
+    import polars as pl
+    want_cols = {"shooter_id", "arena_adj_x", "arena_adj_y", "x_goal", "is_goal", "shot_type"}
+    dfs = []
+    for f in files[-2:]:  # last 2 seasons
+        try:
+            schema = pl.read_parquet_schema(f)
+            cols = [c for c in want_cols if c in schema]
+            if "shooter_id" not in cols:
+                continue
+            dfs.append(pl.read_parquet(f, columns=cols))
+        except Exception:
+            pass
+    if not dfs:
+        return {"shots": [], "count": 0, "status": "no_data"}
+    combined = pl.concat(dfs, how="diagonal_relaxed")
+    player_df = combined.filter(pl.col("shooter_id") == player_id)
+    shots_out = []
+    for r in player_df.to_dicts():
+        x = r.get("arena_adj_x")
+        y = r.get("arena_adj_y")
+        if x is None or y is None:
+            continue
+        shots_out.append({
+            "x": round(float(x), 1),
+            "y": round(float(y), 1),
+            "xg": round(float(r.get("x_goal") or 0), 3),
+            "goal": bool(r.get("is_goal", False)),
+            "type": str(r.get("shot_type") or ""),
+        })
+    return {"shots": shots_out, "count": len(shots_out), "status": "ok"}
 

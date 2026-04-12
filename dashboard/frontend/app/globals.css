@@ -33,7 +33,8 @@
 }
 
 /* Base font scale — bumps rem-based sizes site-wide */
-html { font-size: 17px; }
+html { font-size: 17px; overflow-x: hidden; }
+@media (min-width: 1024px) { html { font-size: 19px; } }
 
 body {
   background:
@@ -53,6 +54,7 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), "Barlow", system-ui, -apple-system, sans-serif;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 /* ─── Glass utility classes ──────────────────────────────────────────────── */
@@ -99,17 +101,23 @@ body {
 .mobile-nav-arrows { display: flex; }
 @media (min-width: 640px) { .mobile-nav-arrows { display: none; } }
 
-/* Game grid — fixed column widths, content can never affect sizing */
+/* Game grid — fluid on mobile so cards never exceed viewport */
 .game-grid {
   display: grid;
   width: 100%;
-  grid-template-columns: repeat(2, 175px);
-  justify-content: center;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
+}
+@media (min-width: 520px) {
+  .game-grid {
+    grid-template-columns: repeat(2, 175px);
+    justify-content: center;
+  }
 }
 @media (min-width: 1024px) {
   .game-grid {
     grid-template-columns: repeat(3, 175px);
+    justify-content: center;
   }
 }
 

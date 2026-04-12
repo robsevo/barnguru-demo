@@ -1,15 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-
-// Derive the expected cookie value from AUTH_USERS using Web Crypto (Edge-compatible).
-// Same logic as the login route — no separate AUTH_COOKIE_VALUE needed.
-async function expectedCookie(): Promise<string> {
-  const raw  = process.env.AUTH_USERS ?? "";
-  const data = new TextEncoder().encode("gretzky:" + raw);
-  const hash = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(hash))
-    .map(b => b.toString(16).padStart(2, "0"))
-    .join("");
-}
+import { verifyToken } from "@/lib/auth";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -26,10 +16,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next({ request: { headers } });
   }
 
-  const session  = request.cookies.get("grtzky_session")?.value;
-  const expected = await expectedCookie();
+  const token   = request.cookies.get("grtzky_session")?.value;
+  const payload = token ? await verifyToken(token) : null;
 
-  if (session !== expected) {
+  if (!payload) {
     // API calls → 401, page requests → redirect to login
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -39,8 +29,7 @@ export async function middleware(request: NextRequest) {
 
   // Rob-only routes: /whiz and /api/brain
   if (pathname.startsWith("/whiz") || pathname.startsWith("/api/brain")) {
-    const user = request.cookies.get("gretzky_user")?.value;
-    if (user !== "rob") {
+    if (payload.username !== "rob") {
       if (pathname.startsWith("/api/")) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
