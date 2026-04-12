@@ -1334,6 +1334,102 @@ export default function PlayersPage() {
           )}
         </Section>
 
+        {/* Scoring Leaders */}
+        <Section title="Scoring Leaders" count={scoringCategories?.[scoringSort]?.length}>
+          {scoringCategories === null ? <SectionLoading /> :
+           (scoringCategories[scoringSort]?.length ?? 0) === 0 ? <SectionEmpty msg="NHL stats unavailable." /> : (
+           <>
+             {/* Sort tabs */}
+             <div className="flex gap-1.5 mb-2">
+               {(["points", "goals", "assists"] as const).map(cat => (
+                 <button
+                   key={cat}
+                   onClick={() => setScoringSort(cat)}
+                   className="px-2.5 py-1 rounded-lg text-[10px] font-semibold uppercase tracking-wide border transition-all duration-150"
+                   style={scoringSort === cat ? {
+                     color: "#a78bfa",
+                     borderColor: "rgba(167,139,250,0.40)",
+                     backgroundColor: "rgba(167,139,250,0.12)",
+                   } : {
+                     color: "rgba(255,255,255,0.30)",
+                     borderColor: "rgba(255,255,255,0.08)",
+                     backgroundColor: "transparent",
+                   }}
+                 >
+                   {cat}
+                 </button>
+               ))}
+             </div>
+             <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
+               {scoringCategories[scoringSort].map((p, i) => {
+                 const unit = scoringSort === "points" ? "pts" : scoringSort === "goals" ? "G" : "A";
+                 return (
+                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.name)}>
+                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
+                     {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                     <div className="flex-1 min-w-0">
+                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.name}</p>
+                       <p className="text-[9px] text-white/35 mt-0.5">{fmtPos(p.position)} · {p.team}</p>
+                     </div>
+                     <span className="text-[10px] font-bold tabular-nums shrink-0" style={{ color: "#a78bfa" }}>{p.value} {unit}</span>
+                   </div>
+                 );
+               })}
+             </div>
+           </>
+          )}
+        </Section>
+
+        {/* Clutch Index Leaderboard */}
+        <Section title="Clutch Index" count={clutchList?.length}>
+          <InfoTip tip="Win Probability Added (WPA) above expectation. Clutch Index = actual WPA/60 minus expected WPA/60 given the opportunities faced. Positive = outperforms in high-leverage moments. Bayesian-shrunk (small samples near zero). Source: GRTZKY model 2.29." />
+          {clutchList === null ? <SectionLoading /> : clutchList.length === 0 ? <SectionEmpty msg="Run train-clutch to populate." /> : (
+            <div className="space-y-1 max-h-72 overflow-y-auto pr-1 mt-2">
+              {clutchList.map((p, i) => {
+                const color = (p.value ?? 0) >= 0.05 ? "#4ade80" : (p.value ?? 0) >= 0 ? "#fbbf24" : "#f87171";
+                return (
+                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
+                    <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
+                    {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
+                      {p.wpa_per60 != null && <p className="text-[9px] text-white/35 mt-0.5">WPA/60: {p.wpa_per60.toFixed(4)}</p>}
+                    </div>
+                    <span className="text-[10px] font-bold tabular-nums shrink-0" style={{ color }}>{(p.value ?? 0) > 0 ? "+" : ""}{p.value?.toFixed(4) ?? "—"}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Section>
+
+        {/* Hot Hand Leaderboard */}
+        <Section title="Hot Hand Score" count={hotHandList?.length}>
+          <InfoTip tip="5-game burst signal. Hot Hand Score = z-score of (goals − expected goals) over last 5 games vs. player's own season variance. +2.0 = 2 standard deviations above their own mean — runaway hot streak. Bayesian-shrunk by career GP. Source: GRTZKY model 2.28." />
+          {hotHandList === null ? <SectionLoading /> : hotHandList.length === 0 ? <SectionEmpty msg="Run train-hot-hand to populate." /> : (
+            <div className="space-y-1 max-h-72 overflow-y-auto pr-1 mt-2">
+              {hotHandList.map((p, i) => {
+                const color = (p.value ?? 0) >= 1 ? "#4ade80" : (p.value ?? 0) >= 0 ? "#fbbf24" : "#f87171";
+                return (
+                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
+                    <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
+                    {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
+                      <p className="text-[9px] text-white/35 mt-0.5">
+                        {p.goals_5g != null ? `${p.goals_5g}G` : ""}
+                        {p.xg_5g != null ? ` · ${p.xg_5g.toFixed(1)} xG` : ""}
+                        {" · last 5 games"}
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-bold tabular-nums shrink-0" style={{ color }}>{(p.value ?? 0) > 0 ? "+" : ""}{p.value?.toFixed(2) ?? "—"}<span className="text-[8px] text-white/30 ml-0.5">σ</span></span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Section>
+
         {/* Cold Streaks */}
         <Section title="Cold Streak" count={falling?.length}>
           {falling === null ? <SectionLoading /> :
@@ -1394,52 +1490,6 @@ export default function PlayersPage() {
                );
              })}
            </div>
-          )}
-        </Section>
-
-        {/* Scoring Leaders */}
-        <Section title="Scoring Leaders" count={scoringCategories?.[scoringSort]?.length}>
-          {scoringCategories === null ? <SectionLoading /> :
-           (scoringCategories[scoringSort]?.length ?? 0) === 0 ? <SectionEmpty msg="NHL stats unavailable." /> : (
-           <>
-             {/* Sort tabs */}
-             <div className="flex gap-1.5 mb-2">
-               {(["points", "goals", "assists"] as const).map(cat => (
-                 <button
-                   key={cat}
-                   onClick={() => setScoringSort(cat)}
-                   className="px-2.5 py-1 rounded-lg text-[10px] font-semibold uppercase tracking-wide border transition-all duration-150"
-                   style={scoringSort === cat ? {
-                     color: "#a78bfa",
-                     borderColor: "rgba(167,139,250,0.40)",
-                     backgroundColor: "rgba(167,139,250,0.12)",
-                   } : {
-                     color: "rgba(255,255,255,0.30)",
-                     borderColor: "rgba(255,255,255,0.08)",
-                     backgroundColor: "transparent",
-                   }}
-                 >
-                   {cat}
-                 </button>
-               ))}
-             </div>
-             <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
-               {scoringCategories[scoringSort].map((p, i) => {
-                 const unit = scoringSort === "points" ? "pts" : scoringSort === "goals" ? "G" : "A";
-                 return (
-                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.name)}>
-                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                     {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
-                     <div className="flex-1 min-w-0">
-                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.name}</p>
-                       <p className="text-[9px] text-white/35 mt-0.5">{fmtPos(p.position)} · {p.team}</p>
-                     </div>
-                     <span className="text-[10px] font-bold tabular-nums shrink-0" style={{ color: "#a78bfa" }}>{p.value} {unit}</span>
-                   </div>
-                 );
-               })}
-             </div>
-           </>
           )}
         </Section>
 
@@ -1657,29 +1707,6 @@ export default function PlayersPage() {
           )}
         </Section>
 
-        {/* Clutch Index Leaderboard */}
-        <Section title="Clutch Index" count={clutchList?.length}>
-          <InfoTip tip="Win Probability Added (WPA) above expectation. Clutch Index = actual WPA/60 minus expected WPA/60 given the opportunities faced. Positive = outperforms in high-leverage moments. Bayesian-shrunk (small samples near zero). Source: GRTZKY model 2.29." />
-          {clutchList === null ? <SectionLoading /> : clutchList.length === 0 ? <SectionEmpty msg="Run train-clutch to populate." /> : (
-            <div className="space-y-1 max-h-72 overflow-y-auto pr-1 mt-2">
-              {clutchList.map((p, i) => {
-                const color = (p.value ?? 0) >= 0.05 ? "#4ade80" : (p.value ?? 0) >= 0 ? "#fbbf24" : "#f87171";
-                return (
-                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
-                    <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                    {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
-                      {p.wpa_per60 != null && <p className="text-[9px] text-white/35 mt-0.5">WPA/60: {p.wpa_per60.toFixed(4)}</p>}
-                    </div>
-                    <span className="text-[10px] font-bold tabular-nums shrink-0" style={{ color }}>{(p.value ?? 0) > 0 ? "+" : ""}{p.value?.toFixed(4) ?? "—"}</span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Section>
-
         {/* PP & PK xGF/60 */}
         <Section title="Special Teams xGF/60">
           <div className="flex gap-1.5 mb-2">
@@ -1725,33 +1752,6 @@ export default function PlayersPage() {
                   ))}
                 </div>
               )}
-            </div>
-          )}
-        </Section>
-
-        {/* Hot Hand Leaderboard */}
-        <Section title="Hot Hand Score" count={hotHandList?.length}>
-          <InfoTip tip="5-game burst signal. Hot Hand Score = z-score of (goals − expected goals) over last 5 games vs. player's own season variance. +2.0 = 2 standard deviations above their own mean — runaway hot streak. Bayesian-shrunk by career GP. Source: GRTZKY model 2.28." />
-          {hotHandList === null ? <SectionLoading /> : hotHandList.length === 0 ? <SectionEmpty msg="Run train-hot-hand to populate." /> : (
-            <div className="space-y-1 max-h-72 overflow-y-auto pr-1 mt-2">
-              {hotHandList.map((p, i) => {
-                const color = (p.value ?? 0) >= 1 ? "#4ade80" : (p.value ?? 0) >= 0 ? "#fbbf24" : "#f87171";
-                return (
-                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
-                    <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
-                    {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
-                      <p className="text-[9px] text-white/35 mt-0.5">
-                        {p.goals_5g != null ? `${p.goals_5g}G` : ""}
-                        {p.xg_5g != null ? ` · ${p.xg_5g.toFixed(1)} xG` : ""}
-                        {" · last 5 games"}
-                      </p>
-                    </div>
-                    <span className="text-[10px] font-bold tabular-nums shrink-0" style={{ color }}>{(p.value ?? 0) > 0 ? "+" : ""}{p.value?.toFixed(2) ?? "—"}<span className="text-[8px] text-white/30 ml-0.5">σ</span></span>
-                  </div>
-                );
-              })}
             </div>
           )}
         </Section>

@@ -2622,6 +2622,29 @@ async def phase2_clutch_leaderboard(limit: int = 20) -> dict:
         df = pl.read_parquet(files[-1])
         col = "clutch_index_shrunk" if "clutch_index_shrunk" in df.columns else "clutch_index"
         name_lut = _build_name_lookup()
+
+        # Build player_id → team fallback from xg_finishing / RAPM parquets
+        team_lut: dict[int, str] = {}
+        for src_dir, glob_pat in [
+            (_GRETZKY_DATA_DIR / "xg_finishing", "xg_finishing_*.parquet"),
+            (_GRETZKY_DATA_DIR / "rapm",         "rapm_*.parquet"),
+        ]:
+            if src_dir.exists():
+                for pf in sorted(src_dir.glob(glob_pat)):
+                    try:
+                        tdf = pl.read_parquet(pf)
+                        team_col = next((c for c in ("team", "shooting_team") if c in tdf.columns), None)
+                        id_col   = next((c for c in ("player_id", "shooter_id") if c in tdf.columns), None)
+                        if team_col and id_col:
+                            for row in tdf.select([id_col, team_col]).unique(subset=[id_col]).to_dicts():
+                                pid2 = row.get(id_col)
+                                tm   = row.get(team_col)
+                                if pid2 and tm and int(pid2) not in team_lut:
+                                    team_lut[int(pid2)] = str(tm)
+                    except Exception:
+                        pass
+                break  # use first successful source
+
         MIN_TOI_HRS = 5.0  # toi_60 column is in hours (e.g. 35h max for top players)
         df = df.filter(pl.col(col).is_not_null())
         if "toi_60" in df.columns:
@@ -2631,11 +2654,12 @@ async def phase2_clutch_leaderboard(limit: int = 20) -> dict:
         for i, r in enumerate(ranked.to_dicts()):
             pid = r.get("player_id")
             name = r.get("player_name") or (name_lut.get(int(pid)) if pid else None) or f"id_{pid}"
+            raw_team = r.get("team") or (team_lut.get(int(pid)) if pid else None)
             rows.append({
                 "rank":        i + 1,
                 "player_id":   pid,
                 "player_name": name,
-                "team":        _abbr(r.get("team")),
+                "team":        _abbr(raw_team),
                 "value":       round(float(r[col]), 4),
                 "wpa_per60":   round(float(r["actual_wpa_per60"]), 4) if r.get("actual_wpa_per60") is not None else None,
             })

@@ -2179,20 +2179,20 @@ export default function PlayerProfilePage() {
             <div className="space-y-0">
               {data.special_teams_pp != null && (
                 <StatRow
-                  label="Power Play Rating"
-                  value={`${data.special_teams_pp > 0 ? "+" : ""}${data.special_teams_pp.toFixed(2)}`}
+                  label="PP xGF/60"
+                  value={data.special_teams_pp.toFixed(2)}
                   tier={stTier(data.special_teams_pp)}
-                  sub="Impact on the man advantage"
-                  tip="Measures how much a player contributes on the power play — shot generation, zone time, and xGF added at 5-on-4. Positive = above average PP contributor."
+                  sub="Expected goals generated per 60 min on the power play"
+                  tip="Power play expected goals generated per 60 minutes, isolated from team context. League average PP xGF/60 is ~6–8. Elite PP players exceed 12."
                 />
               )}
               {data.special_teams_pk != null && (
                 <StatRow
-                  label="Penalty Kill Rating"
-                  value={`${data.special_teams_pk > 0 ? "+" : ""}${data.special_teams_pk.toFixed(2)}`}
+                  label="PK xGF/60"
+                  value={data.special_teams_pk.toFixed(2)}
                   tier={stTier(data.special_teams_pk)}
-                  sub="Impact killing penalties at 4v5"
-                  tip="Measures how much a player contributes on the penalty kill — shot suppression and xGA prevention at 4-on-5. Positive = above average PK contributor."
+                  sub="Expected goals generated per 60 min short-handed"
+                  tip="Penalty kill expected goals generated per 60 minutes, isolated from team context. Higher = more dangerous shorthanded player."
                 />
               )}
             </div>
