@@ -1130,7 +1130,8 @@ interface ShotPoint { x: number; y: number; xg: number; goal: boolean; type: str
 function ShotMapViz({ shots, teamColor }: { shots: ShotPoint[]; teamColor: string }) {
   // NHL coords: x 0→100 (center ice → end boards), y -42.5→42.5
   // SVG viewBox "0 0 100 85" — 1 SVG unit = 1 NHL foot
-  const sy = (y: number) => y + 42.5;
+  // y is flipped: positive y = left side of ice → top of SVG (broadcast convention)
+  const sy = (y: number) => 42.5 - y;
 
   const xgColor = (xg: number) => {
     if (xg >= 0.2)  return "#ef4444";
