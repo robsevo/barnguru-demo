@@ -2166,8 +2166,8 @@ export default function PlayerProfilePage() {
 
         {/* ── 2025-26 Season stats strip ── */}
         {nhlStats && (
-          <div className="border-t px-5 py-3 flex items-center justify-center gap-4 flex-wrap" style={{ borderColor: `${teamColor}20` }}>
-            <span className="text-[9px] text-white/25 uppercase tracking-widest font-semibold">2025-26</span>
+          <div className="border-t px-3 sm:px-5 py-3 flex items-center justify-center gap-2.5 sm:gap-4" style={{ borderColor: `${teamColor}20` }}>
+            <span className="text-[8px] sm:text-[9px] text-white/25 uppercase tracking-widest font-semibold">2025-26</span>
             {isGoalie ? (
               <>
                 {[
@@ -2176,26 +2176,26 @@ export default function PlayerProfilePage() {
                   { label: "L",   value: nhlStats.losses ?? 0 },
                   { label: "OTL", value: nhlStats.ot_losses ?? 0 },
                 ].map(s => (
-                  <div key={s.label} className="flex flex-col items-center min-w-[36px]">
-                    <span className="text-sm font-bold tabular-nums text-white/85">{s.value}</span>
-                    <span className="text-[8px] text-white/30 uppercase tracking-wider">{s.label}</span>
+                  <div key={s.label} className="flex flex-col items-center min-w-0">
+                    <span className="text-xs sm:text-sm font-bold tabular-nums text-white/85">{s.value}</span>
+                    <span className="text-[7px] sm:text-[8px] text-white/30 uppercase tracking-wider">{s.label}</span>
                   </div>
                 ))}
-                <div className="flex flex-col items-center min-w-[36px]">
-                  <span className="text-base font-black tabular-nums" style={{ color: teamColor }}>
+                <div className="flex flex-col items-center min-w-0">
+                  <span className="text-xs sm:text-base font-black tabular-nums" style={{ color: teamColor }}>
                     {nhlStats.sv_pct ? `.${Math.round(nhlStats.sv_pct * 1000)}` : "—"}
                   </span>
-                  <span className="text-[8px] text-white/30 uppercase tracking-wider">SV%</span>
+                  <span className="text-[7px] sm:text-[8px] text-white/30 uppercase tracking-wider">SV%</span>
                 </div>
-                <div className="flex flex-col items-center min-w-[36px]">
-                  <span className="text-sm font-bold tabular-nums text-white/85">
+                <div className="flex flex-col items-center min-w-0">
+                  <span className="text-xs sm:text-sm font-bold tabular-nums text-white/85">
                     {nhlStats.gaa?.toFixed(2) ?? "—"}
                   </span>
-                  <span className="text-[8px] text-white/30 uppercase tracking-wider">GAA</span>
+                  <span className="text-[7px] sm:text-[8px] text-white/30 uppercase tracking-wider">GAA</span>
                 </div>
-                <div className="flex flex-col items-center min-w-[36px]">
-                  <span className="text-sm font-bold tabular-nums text-white/85">{nhlStats.shutouts ?? 0}</span>
-                  <span className="text-[8px] text-white/30 uppercase tracking-wider">SO</span>
+                <div className="flex flex-col items-center min-w-0">
+                  <span className="text-xs sm:text-sm font-bold tabular-nums text-white/85">{nhlStats.shutouts ?? 0}</span>
+                  <span className="text-[7px] sm:text-[8px] text-white/30 uppercase tracking-wider">SO</span>
                 </div>
               </>
             ) : (
