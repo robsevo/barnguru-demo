@@ -6202,3 +6202,44 @@ async def player_shots(player_id: int):
         })
     return {"shots": shots_out, "count": len(shots_out), "status": "ok"}
 
+
+@app.get("/goalie-shots/{player_id}")
+async def goalie_shots(player_id: int):
+    """Return arena-adjusted shot coordinates for shots AGAINST a goalie (last 2 seasons)."""
+    shots_dir = _GRETZKY_DATA_DIR / "shots"
+    if not shots_dir.exists():
+        return {"shots": [], "count": 0, "status": "no_data"}
+    files = sorted(shots_dir.glob("*.parquet"))
+    if not files:
+        return {"shots": [], "count": 0, "status": "no_data"}
+    import polars as pl
+    want_cols = {"goalie_id", "arena_adj_x", "arena_adj_y", "x_goal", "is_goal", "shot_type"}
+    dfs = []
+    for f in files[-2:]:
+        try:
+            schema = pl.read_parquet_schema(f)
+            cols = [c for c in want_cols if c in schema]
+            if "goalie_id" not in cols:
+                continue
+            dfs.append(pl.read_parquet(f, columns=cols))
+        except Exception:
+            pass
+    if not dfs:
+        return {"shots": [], "count": 0, "status": "no_data"}
+    combined = pl.concat(dfs, how="diagonal_relaxed")
+    player_df = combined.filter(pl.col("goalie_id") == player_id)
+    shots_out = []
+    for r in player_df.to_dicts():
+        x = r.get("arena_adj_x")
+        y = r.get("arena_adj_y")
+        if x is None or y is None:
+            continue
+        shots_out.append({
+            "x": round(float(x), 1),
+            "y": round(float(y), 1),
+            "xg": round(float(r.get("x_goal") or 0), 3),
+            "goal": bool(r.get("is_goal", False)),
+            "type": str(r.get("shot_type") or ""),
+        })
+    return {"shots": shots_out, "count": len(shots_out), "status": "ok"}
+

@@ -1127,52 +1127,26 @@ function EwmaTrendChart({ xgf60, leagueAvg = 4.09, teamColor }: {
 interface ShotPoint { x: number; y: number; xg: number; goal: boolean; type: string; }
 
 /** Half-rink SVG shot map — proper ice surface, dots coloured by xG, goals as rings */
-function ShotMapViz({ shots, teamColor }: { shots: ShotPoint[]; teamColor: string }) {
-  // NHL coords: x 0→100 (center ice → end boards), y -42.5→42.5
-  // SVG viewBox "0 0 100 85" — 1 SVG unit = 1 NHL foot
-  // y is flipped: positive y = left side of ice → top of SVG (broadcast convention)
-  const sy = (y: number) => 42.5 - y;
-
-  const xgColor = (xg: number) => {
-    if (xg >= 0.2)  return "#ef4444";
-    if (xg >= 0.08) return "#f97316";
-    return "#38bdf8";
-  };
-
-  // Render shots back-to-front so high-xG dots sit on top
-  const pts = [...shots].sort((a, b) => a.xg - b.xg).slice(-400);
-  const goals = pts.filter(s => s.goal);
-  const saves = pts.filter(s => !s.goal);
-
+/** Shared half-rink SVG markings — ice surface, lines, net. Used by both shot map variants. */
+function HalfRinkMarkings() {
   return (
-    <svg
-      viewBox="0 0 100 85"
-      width="100%"
-      className="block mx-auto max-w-[420px]"
-      style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}
-    >
+    <>
       {/* Ice surface */}
       <path d="M 0,0 L 86,0 Q 100,0 100,14 L 100,71 Q 100,85 86,85 L 0,85 Z"
         fill="#f8fbff" stroke="#c8d8e8" strokeWidth="0.8" />
-
       {/* Blue line */}
       <line x1="25" y1="2" x2="25" y2="83" stroke="#1155bb" strokeWidth="1.4" opacity="0.7" />
-
-      {/* Goal line */}
-      <line x1="89" y1="11" x2="89" y2="74" stroke="#cc2222" strokeWidth="0.9" opacity="0.8" />
-
+      {/* Goal line — extended to boards */}
+      <line x1="89" y1="0.5" x2="89" y2="84.5" stroke="#cc2222" strokeWidth="0.9" opacity="0.8" />
       {/* Trapezoid */}
       <polygon points="100,28.5 89,33.5 89,51.5 100,56.5"
         fill="none" stroke="#cc2222" strokeWidth="0.5" opacity="0.4" />
-
       {/* Crease */}
       <path d="M 89 36 A 8 8 0 0 0 89 49"
         fill="rgba(30,100,200,0.09)" stroke="#1155bb" strokeWidth="0.8" opacity="0.75" />
-
       {/* Net */}
       <rect x="89" y="38.5" width="6" height="8" rx="1"
         fill="rgba(180,180,180,0.5)" stroke="#777" strokeWidth="0.6" />
-
       {/* Faceoff circles */}
       <circle cx="69" cy="20.5" r="9" fill="none" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
       <circle cx="69" cy="64.5" r="9" fill="none" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
@@ -1180,52 +1154,187 @@ function ShotMapViz({ shots, teamColor }: { shots: ShotPoint[]; teamColor: strin
       <circle cx="69" cy="64.5" r="0.85" fill="#cc2222" opacity="0.55" />
       <circle cx="20" cy="20.5" r="0.85" fill="#cc2222" opacity="0.35" />
       <circle cx="20" cy="64.5" r="0.85" fill="#cc2222" opacity="0.35" />
-
       {/* Center ice boundary */}
       <line x1="0" y1="0" x2="0" y2="85" stroke="#cc2222" strokeWidth="1.2" opacity="0.85" />
+    </>
+  );
+}
 
-      {/* Shot dots — rendered low-xG first so high-danger sits on top */}
-      {saves.map((s, i) => (
-        <circle
-          key={i}
-          cx={s.x} cy={sy(s.y)}
-          r={1.8}
-          fill={xgColor(s.xg)}
-          fillOpacity={0.55}
-          stroke={xgColor(s.xg)}
-          strokeWidth="0.5"
-          strokeOpacity={0.25}
-        />
-      ))}
+/** Shared heat map legend rendered as HTML (ensures Barlow font loads correctly). */
+function HeatMapLegend({ goalLabel = "High xG / Goal" }: { goalLabel?: string }) {
+  return (
+    <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 mt-2 text-[10px] font-semibold tracking-wide uppercase text-zinc-500">
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block w-2.5 h-2.5 rounded-full bg-sky-400 opacity-70" />Low xG
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block w-2.5 h-2.5 rounded-full bg-orange-400 opacity-70" />Med xG
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-700 opacity-80" />{goalLabel}
+      </span>
+    </div>
+  );
+}
 
-      {/* Goals — filled circle + bright white ring so they pop clearly */}
-      {goals.map((s, i) => (
-        <g key={`g${i}`}>
-          <circle cx={s.x} cy={sy(s.y)} r={2.6}
-            fill="white" fillOpacity={0.9} />
-          <circle cx={s.x} cy={sy(s.y)} r={2.6}
-            fill="none" stroke={teamColor} strokeWidth="1.0" strokeOpacity={0.9} />
-          <circle cx={s.x} cy={sy(s.y)} r={1.3}
-            fill={teamColor} fillOpacity={0.95} />
+function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
+  // NHL coords: x 0→100 (center ice → end boards), y -42.5→42.5
+  // y flipped: positive y = left side of ice → top of SVG (broadcast convention)
+  const sy = (y: number) => 42.5 - y;
+
+  const loShots = shots.filter(s => s.xg < 0.08);
+  const medShots = shots.filter(s => s.xg >= 0.08 && s.xg < 0.2);
+  const hiShots = shots.filter(s => s.xg >= 0.2 && !s.goal);
+  const goals = shots.filter(s => s.goal);
+
+  return (
+    <>
+      <svg
+        viewBox="0 0 100 85"
+        width="100%"
+        className="block mx-auto max-w-[420px]"
+        style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}
+      >
+        <defs>
+          <filter id="heatLo"  x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="5"/></filter>
+          <filter id="heatMed" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="4.5"/></filter>
+          <filter id="heatHi"  x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="4"/></filter>
+        </defs>
+
+        <HalfRinkMarkings />
+
+        {/* Heat layer — low xG: cool blue */}
+        <g filter="url(#heatLo)">
+          {loShots.map((s, i) => (
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="4" fill="#38bdf8" opacity="0.14" />
+          ))}
         </g>
-      ))}
+        {/* Heat layer — mid xG: orange */}
+        <g filter="url(#heatMed)">
+          {medShots.map((s, i) => (
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="4.5" fill="#f97316" opacity="0.18" />
+          ))}
+        </g>
+        {/* Heat layer — high xG saves + goals: dark red */}
+        <g filter="url(#heatHi)">
+          {hiShots.map((s, i) => (
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="5" fill="#b91c1c" opacity="0.22" />
+          ))}
+          {goals.map((s, i) => (
+            <circle key={`g${i}`} cx={s.x} cy={sy(s.y)} r="7" fill="#7f1d1d" opacity="0.30" />
+          ))}
+        </g>
+      </svg>
+      <HeatMapLegend />
+    </>
+  );
+}
 
-      {/* Legend */}
-      <circle cx="3" cy="68" r="1.8" fill="#38bdf8" fillOpacity="0.65" stroke="#38bdf8" strokeWidth="0.5" strokeOpacity="0.3" />
-      <text x="6.5" y="71.5" fontSize="3.5" fill="rgba(10,20,40,0.4)" fontFamily="Barlow, sans-serif" fontWeight="600" letterSpacing="0.04em">LOW xG</text>
-      <circle cx="3" cy="74.5" r="1.8" fill="#f97316" fillOpacity="0.65" stroke="#f97316" strokeWidth="0.5" strokeOpacity="0.3" />
-      <text x="6.5" y="78" fontSize="3.5" fill="rgba(10,20,40,0.4)" fontFamily="Barlow, sans-serif" fontWeight="600" letterSpacing="0.04em">MED xG</text>
-      <circle cx="3" cy="81" r="1.8" fill="#ef4444" fillOpacity="0.65" stroke="#ef4444" strokeWidth="0.5" strokeOpacity="0.3" />
-      <text x="6.5" y="84.5" fontSize="3.5" fill="rgba(10,20,40,0.4)" fontFamily="Barlow, sans-serif" fontWeight="600" letterSpacing="0.04em">HIGH xG</text>
+/** Heat map of shots AGAINST a goalie. Same coordinate system — shots shown from shooter's POV. */
+function GoalieShotMapViz({ shots }: { shots: ShotPoint[] }) {
+  const sy = (y: number) => 42.5 - y;
 
-      {/* Goal legend */}
-      <circle cx="63" cy="74.5" r="2.6" fill="white" fillOpacity="0.9" />
-      <circle cx="63" cy="74.5" r="2.6" fill="none" stroke={teamColor} strokeWidth="1.0" strokeOpacity="0.9" />
-      <circle cx="63" cy="74.5" r="1.3" fill={teamColor} fillOpacity="0.95" />
-      <text x="67.5" y="78" fontSize="3.5" fill="rgba(10,20,40,0.4)" fontFamily="Barlow, sans-serif" fontWeight="600" letterSpacing="0.04em">GOAL</text>
+  const loShots = shots.filter(s => s.xg < 0.08);
+  const medShots = shots.filter(s => s.xg >= 0.08 && s.xg < 0.2);
+  const hiShots = shots.filter(s => s.xg >= 0.2 && !s.goal);
+  const goals = shots.filter(s => s.goal);
+
+  return (
+    <>
+      <svg
+        viewBox="0 0 100 85"
+        width="100%"
+        className="block mx-auto max-w-[420px]"
+        style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}
+      >
+        <defs>
+          <filter id="gheatLo"  x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="5"/></filter>
+          <filter id="gheatMed" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="4.5"/></filter>
+          <filter id="gheatHi"  x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="4"/></filter>
+        </defs>
+
+        <HalfRinkMarkings />
+
+        <g filter="url(#gheatLo)">
+          {loShots.map((s, i) => (
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="4" fill="#38bdf8" opacity="0.14" />
+          ))}
+        </g>
+        <g filter="url(#gheatMed)">
+          {medShots.map((s, i) => (
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="4.5" fill="#f97316" opacity="0.18" />
+          ))}
+        </g>
+        <g filter="url(#gheatHi)">
+          {hiShots.map((s, i) => (
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="5" fill="#b91c1c" opacity="0.22" />
+          ))}
+          {goals.map((s, i) => (
+            <circle key={`g${i}`} cx={s.x} cy={sy(s.y)} r="7" fill="#7f1d1d" opacity="0.30" />
+          ))}
+        </g>
+      </svg>
+      <HeatMapLegend goalLabel="High xG / Goal Allowed" />
+    </>
+  );
+}
+/** Goalie save% by zone — color-coded half-rink with HD/MD/LD bands. */
+function GoalieZoneViz({ data }: { data: ProfileData }) {
+  const hd = data.hdsv_pct ?? null;
+  const md = data.mdsv_pct ?? null;
+  const ld = data.ldsv_pct ?? null;
+
+  const zoneColor = (pct: number | null, poor: number, avg: number) => {
+    if (pct === null) return "rgba(120,120,120,0.15)";
+    if (pct < poor)  return "rgba(185,28,28,0.30)";
+    if (pct < avg)   return "rgba(202,138,4,0.30)";
+    return "rgba(21,128,61,0.30)";
+  };
+
+  const fmt = (pct: number | null) => pct === null ? "—" : `${(pct * 100).toFixed(1)}%`;
+
+  return (
+    <svg viewBox="0 0 100 85" width="100%" className="block mx-auto max-w-[300px]"
+      style={{ filter: "drop-shadow(0 2px 10px rgba(0,0,0,0.4))" }}>
+      {/* Ice surface */}
+      <path d="M 0,0 L 86,0 Q 100,0 100,14 L 100,71 Q 100,85 86,85 L 0,85 Z"
+        fill="#f8fbff" stroke="#c8d8e8" strokeWidth="0.8" />
+
+      {/* Low danger zone: x 0–25 */}
+      <rect x="0" y="0" width="25" height="85" fill={zoneColor(ld, 0.920, 0.945)} />
+
+      {/* Mid danger zone: x 25–60 */}
+      <rect x="25" y="0" width="35" height="85" fill={zoneColor(md, 0.840, 0.870)} />
+
+      {/* High danger zone: x 60–89 */}
+      <rect x="60" y="0" width="29" height="85" fill={zoneColor(hd, 0.800, 0.845)} />
+
+      {/* Ice markings on top */}
+      <line x1="25" y1="2" x2="25" y2="83" stroke="#1155bb" strokeWidth="1.4" opacity="0.5" />
+      <line x1="89" y1="0.5" x2="89" y2="84.5" stroke="#cc2222" strokeWidth="0.9" opacity="0.6" />
+      <path d="M 89 36 A 8 8 0 0 0 89 49" fill="rgba(30,100,200,0.09)" stroke="#1155bb" strokeWidth="0.8" opacity="0.6" />
+      <rect x="89" y="38.5" width="6" height="8" rx="1" fill="rgba(180,180,180,0.5)" stroke="#777" strokeWidth="0.6" />
+      <line x1="0" y1="0" x2="0" y2="85" stroke="#cc2222" strokeWidth="1.2" opacity="0.6" />
+
+      {/* Zone labels */}
+      <text x="12.5" y="38" textAnchor="middle" fontSize="4" fontWeight="700"
+        fill="rgba(15,25,50,0.7)" fontFamily="Barlow, sans-serif">LD</text>
+      <text x="12.5" y="44" textAnchor="middle" fontSize="5.5" fontWeight="700"
+        fill="rgba(15,25,50,0.85)" fontFamily="Barlow, sans-serif">{fmt(ld)}</text>
+
+      <text x="42.5" y="38" textAnchor="middle" fontSize="4" fontWeight="700"
+        fill="rgba(15,25,50,0.7)" fontFamily="Barlow, sans-serif">MD</text>
+      <text x="42.5" y="44" textAnchor="middle" fontSize="5.5" fontWeight="700"
+        fill="rgba(15,25,50,0.85)" fontFamily="Barlow, sans-serif">{fmt(md)}</text>
+
+      <text x="74.5" y="38" textAnchor="middle" fontSize="4" fontWeight="700"
+        fill="rgba(15,25,50,0.7)" fontFamily="Barlow, sans-serif">HD</text>
+      <text x="74.5" y="44" textAnchor="middle" fontSize="5.5" fontWeight="700"
+        fill="rgba(15,25,50,0.85)" fontFamily="Barlow, sans-serif">{fmt(hd)}</text>
     </svg>
   );
 }
+
 /** Offensive zone tendency map — 5-zone coloured cells */
 function ZoneTendencyMap({ data, teamColor }: { data: ProfileData; teamColor: string }) {
   const slot    = data.nn_shoot_slot_pct    ?? 0;
@@ -1330,6 +1439,7 @@ export default function PlayerProfilePage() {
   const [loading, setLoading] = useState(true);
   const [imgErr, setImgErr] = useState(false);
   const [shots, setShots] = useState<ShotPoint[]>([]);
+  const [goalieShots, setGoalieShots] = useState<ShotPoint[]>([]);
   // Current-season stats fetched from nhl-team route
   const [nhlStats, setNhlStats] = useState<{
     gp: number; goals: number; assists: number; points: number; plus_minus: number;
@@ -1513,6 +1623,14 @@ export default function PlayerProfilePage() {
       .then(d => { if (d.shots?.length) setShots(d.shots); })
       .catch(() => {});
   }, [data?.player_id]);
+
+  useEffect(() => {
+    if (!data?.player_id || !data?.is_goalie) return;
+    fetch(`/api/goalie-shots/${data.player_id}`)
+      .then(r => r.json())
+      .then(d => { if (d.shots?.length) setGoalieShots(d.shots); })
+      .catch(() => {});
+  }, [data?.player_id, data?.is_goalie]);
 
   if (loading) {
     return (
@@ -2038,7 +2156,7 @@ export default function PlayerProfilePage() {
                   <p className="text-[9px] text-white/25 uppercase tracking-wider text-center mb-3">
                     Arena-adjusted shot locations · last 2 seasons · {shots.length} shots · {shots.filter(s => s.goal).length} goals
                   </p>
-                  <ShotMapViz shots={shots} teamColor={teamColor} />
+                  <ShotMapViz shots={shots} />
                 </>
               ) : (
                 <div className="flex flex-col items-center justify-center py-10 gap-2">
@@ -2471,6 +2589,30 @@ export default function PlayerProfilePage() {
                   />
                 )}
               </div>
+            </Card>
+          </div>
+        )}
+
+        {/* Goalie — shots against heat map */}
+        {isGoalie && goalieShots.length > 0 && (
+          <div className="sm:col-span-2">
+            <Card title="Shots Against" style={cardStyle}>
+              <p className="text-[9px] text-white/25 uppercase tracking-wider text-center mb-3">
+                Arena-adjusted · last 2 seasons · {goalieShots.length} shots · {goalieShots.filter(s => s.goal).length} goals allowed
+              </p>
+              <GoalieShotMapViz shots={goalieShots} />
+            </Card>
+          </div>
+        )}
+
+        {/* Goalie — save% by zone */}
+        {isGoalie && (data.hdsv_pct != null || data.mdsv_pct != null || data.ldsv_pct != null) && (
+          <div className="sm:col-span-2">
+            <Card title="Save % by Zone" style={cardStyle}>
+              <p className="text-[9px] text-white/25 uppercase tracking-wider text-center mb-3">
+                Color coded vs league averages · green = above avg · red = below avg
+              </p>
+              <GoalieZoneViz data={data} />
             </Card>
           </div>
         )}
