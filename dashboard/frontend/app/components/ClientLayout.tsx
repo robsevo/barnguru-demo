@@ -461,9 +461,9 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
             <span className="hidden lg:block h-4 w-px mx-1" style={{ background: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.20)` }} />
             <span
               className="text-[9px] font-medium tracking-[0.16em] uppercase hidden lg:block"
-              style={{ color: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.30)` }}
+              style={{ color: theme ? "rgba(255,255,255,0.38)" : `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.30)` }}
             >
-              {theme ? "Team Theme Active" : isCortexMode ? "Player Intelligence · Neural Models" : "Bayesian Analytics and Rating Network"}
+              {theme ? "" : isCortexMode ? "Player Intelligence · Neural Models" : "Bayesian Analytics and Rating Network"}
             </span>
 
             {/* Quick-nav buttons */}

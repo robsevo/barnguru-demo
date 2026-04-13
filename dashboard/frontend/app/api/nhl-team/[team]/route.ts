@@ -40,7 +40,21 @@ export async function GET(
     return NextResponse.json({ team, skaters: [], goalies: [], error: "NHL API unavailable" });
   }
 
-  const statsData = await statsRes.value.json();
+  let statsData = await statsRes.value.json();
+
+  // Non-playoff teams return empty skaters from /now after regular season ends.
+  // Fall back to the 2025-26 regular season endpoint.
+  if (!statsData.skaters?.length && !statsData.goalies?.length) {
+    try {
+      const fallbackRes = await fetch(`https://api-web.nhle.com/v1/club-stats/${team}/20252026/2`, opts);
+      if (fallbackRes.ok) {
+        const fallbackData = await fallbackRes.json();
+        if (fallbackData.skaters?.length || fallbackData.goalies?.length) {
+          statsData = fallbackData;
+        }
+      }
+    } catch { /* ignore */ }
+  }
 
   // Build jersey number + status map from roster
   const jerseyMap = new Map<number, number>(); // playerId → sweaterNumber
