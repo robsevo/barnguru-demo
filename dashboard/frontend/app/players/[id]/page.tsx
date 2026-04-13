@@ -1609,10 +1609,10 @@ function ZoneTendencyMap({ data, teamColor }: { data: ProfileData; teamColor: st
       <line x1="0.5" y1="75" x2="84.5" y2="75" stroke="#1155bb" strokeWidth="1.4" opacity="0.55" />
       {/* Goal line — orig x=89 → y=11 */}
       <line x1="0.5" y1="11" x2="84.5" y2="11" stroke="#cc2222" strokeWidth="0.9" opacity="0.7" />
-      {/* Trapezoid — only the two diagonal sides (goal line = base, end boards = narrow top) */}
-      {/* NHL dims: wide base 28ft each side from center → x=28.5&56.5 at y=11; narrow 11ft each side → x=31.5&53.5 at y=0 */}
-      <line x1="28.5" y1="11" x2="31.5" y2="0" stroke="#94a3b8" strokeWidth="0.75" strokeOpacity="0.7" strokeDasharray="2.5 1.5" />
-      <line x1="56.5" y1="11" x2="53.5" y2="0" stroke="#94a3b8" strokeWidth="0.75" strokeOpacity="0.7" strokeDasharray="2.5 1.5" />
+      {/* Trapezoid — rotated CCW from HalfRinkMarkings polygon (100,28.5 89,33.5 89,51.5 100,56.5) */}
+      {/* (x,y)→(y,100-x): end boards y=0 wide (28.5→56.5), goal line y=11 narrow (33.5→51.5) */}
+      <polygon points="28.5,0 56.5,0 51.5,11 33.5,11"
+        fill="none" stroke="#cc2222" strokeWidth="0.5" opacity="0.4" clipPath="url(#ztClip)" />
       {/* Net — sits above goal line (y=5→11), centered (x=36→49) */}
       <rect x="36" y="5" width="13" height="6" rx="1" fill="rgba(180,180,180,0.45)" stroke="#666" strokeWidth="0.7" />
       {/* Crease — arc curving into ice (sweep-flag 0 = CCW = downward) */}
