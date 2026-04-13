@@ -16,13 +16,18 @@ wins using the Pythagorean goals-per-win constant:
 
 GAR Components
 --------------
-For skaters:
+For skaters (Evolving Hockey v1.1 methodology):
 
-    GAR = (rapm_ev_off + rapm_ev_def) × ev_toi_multiplier
-          + rapm_pp × pp_toi_multiplier
-          + rapm_pk × pk_toi_multiplier
+    GAR = (rapm_ev_off × 1.6 + rapm_ev_def × 1.4 − repl_ev) × (toi_ev / 60)
+          + (rapm_pp × 1.3 − repl_pp) × (toi_pp / 60)
+          + (rapm_pk × 1.3 − repl_pk) × (toi_pk / 60)
           + finishing_contribution
-          + penalty_contribution
+
+    Multipliers (1.6 EV-off, 1.4 EV-def, 1.3 PP, 1.3 PK) correct for ridge
+    shrinkage so that individual RAPMs sum to actual team goal differentials.
+
+    Known gap: penalty differential component (~0.11 goals/PIM drawn-minus-taken)
+    is not yet included. Requires PIM drawn/taken data in the pipeline.
 
 For goalies:
 
@@ -92,10 +97,20 @@ from models.rapm_model import DataMissingWarning
 # Constants
 # ---------------------------------------------------------------------------
 
-MODEL_VERSION = "war_v1"
+MODEL_VERSION = "war_v2"
 
-GOALS_PER_WIN     = 5.0     # Pythagorean goals/win for typical NHL season
-WAR_DOLLAR_RATE   = 1.2     # $M per WAR — open-market free-agent rate (2024)
+# Pythagorean goals/win.
+# Evolving Hockey uses exponent 2.091 with a season-varying value; the 3-year
+# average (2017–2020) is ≈ 5.33. We use 5.5 as a conservative fixed constant
+# (higher-scoring recent seasons push this up slightly). This replaces the
+# previous value of 5.0, which overstated WAR by ~8–10%.
+GOALS_PER_WIN     = 5.5
+
+# Open-market WAR dollar rate. At 2023–24 cap levels (~$88M ceiling), community
+# analyses and contract modelling place this at $2.0–2.5M/WAR. The previous
+# value of $1.2M was calibrated to a 2019 cap environment and understated
+# contract values by roughly half.
+WAR_DOLLAR_RATE   = 2.2     # $M per WAR — open-market free-agent rate (2023-24)
 
 # Replacement level: computed from data each season (see _compute_replacement_level).
 # These fallbacks are used when there are too few players to compute from data.
@@ -104,9 +119,26 @@ REPLACEMENT_RAPM_PP_FALLBACK = -0.5
 REPLACEMENT_RAPM_PK_FALLBACK = -0.5
 
 # Roster depth: number of skater slots before replacement tier.
-# 30 teams × ~20 active skaters = 600; we use 630 (a 7-man D + 13-forward roster).
+# 32 teams (since 2021-22 with SEA + UTH) × 20 active skaters = 640.
 # Players ranked below this EV-TOI cutoff ARE the replacement tier.
-ROSTER_SLOTS_SKATERS = 630
+# NOTE: The standard method (Evolving Hockey) uses per-situation thresholds
+# (13F+7D at EV, 9-11F+4D on PP, 8-9F+6D on PK). We use a single EV-TOI
+# cutoff as a reasonable approximation.
+ROSTER_SLOTS_SKATERS = 640
+
+# Team-adjustment multipliers (Evolving Hockey v1.1).
+# Ridge regularization shrinks individual RAPM coefficients toward 0, so the
+# sum of all players' RAPM does not add up to actual team goal differentials.
+# These multipliers correct for that shrinkage so that GAR components are on
+# the same scale as real goals. Values from Evolving Hockey's published methodology.
+# NOTE: These multipliers were calibrated against actual-goal RAPM. Our RAPM
+# uses xG differentials; the xG-to-goal conversion factor is approximately 1.0
+# over large samples, but these multipliers should be recalibrated if xG-based
+# RAPM systematically under/over-estimates vs. actual goals.
+MULTIPLIER_EV_OFF = 1.6
+MULTIPLIER_EV_DEF = 1.4
+MULTIPLIER_PP     = 1.3
+MULTIPLIER_PK     = 1.3
 
 # Minimum EV TOI to compute WAR — below this the RAPM estimate is too noisy.
 # ~200 min EV ≈ 25 games at 8 min/game for a 4th liner, or 15 games for a top-6.
@@ -267,10 +299,18 @@ def gar_from_rapm(
     pp     = _clamp(rapm_pp, RAPM_PP_CLAMP)
     pk     = _clamp(rapm_pk, RAPM_PK_CLAMP)
 
+    # Apply team-adjustment multipliers before computing above-replacement goals.
+    # These correct for ridge shrinkage so that the sum of individual RAPMs
+    # matches actual team goal differentials (Evolving Hockey methodology).
+    ev_off_adj = ev_off * MULTIPLIER_EV_OFF
+    ev_def_adj = ev_def * MULTIPLIER_EV_DEF
+    pp_adj     = pp     * MULTIPLIER_PP
+    pk_adj     = pk     * MULTIPLIER_PK
+
     # Above-replacement contribution in goals
-    gaa_ev = (ev_off + ev_def - replacement_ev) * (toi_ev_min / 60.0)
-    gaa_pp = (pp - replacement_pp) * (toi_pp_min / 60.0)
-    gaa_pk = (pk - replacement_pk) * (toi_pk_min / 60.0)
+    gaa_ev = (ev_off_adj + ev_def_adj - replacement_ev) * (toi_ev_min / 60.0)
+    gaa_pp = (pp_adj - replacement_pp) * (toi_pp_min / 60.0)
+    gaa_pk = (pk_adj - replacement_pk) * (toi_pk_min / 60.0)
 
     return float(gaa_ev), float(gaa_pp), float(gaa_pk)
 
@@ -447,7 +487,9 @@ class WARModel:
 
             war_val       = war_from_gar(gar_total, self._goals_per_win)
 
-            # Replacement level war (what you'd get from a replacement-level player)
+            # Replacement level war (what you'd get from a replacement-level player).
+            # The replacement RAPM is already in adjusted scale (it's derived from
+            # the same adjusted player pool), so no additional multiplier needed here.
             repl_gar = (repl_ev * (toi_ev / 60.0)
                         + repl_pp * (toi_pp / 60.0)
                         + repl_pk * (toi_pk / 60.0))
