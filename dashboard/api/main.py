@@ -1815,6 +1815,32 @@ async def phase2_player(
     except Exception:
         pass
 
+    # Try to join behavioral NN predictions (zone tendencies)
+    nn_carry_in_pct_val:        float | None = None
+    nn_dump_pct_val:            float | None = None
+    nn_shoot_slot_pct_val:      float | None = None
+    nn_shoot_perimeter_pct_val: float | None = None
+    nn_drive_net_pct_val:       float | None = None
+    nn_battle_corner_pct_val:   float | None = None
+    nn_hold_corner_pct_val:     float | None = None
+    try:
+        beh_dir = _GRETZKY_DATA_DIR / "behavior_net"
+        beh_parquets = sorted(beh_dir.glob("behavior_predictions_*.parquet")) if beh_dir.exists() else []
+        if beh_parquets and player_id_val is not None:
+            beh_df = pl.read_parquet(beh_parquets[-1])
+            beh_row = beh_df.filter(pl.col("player_id") == player_id_val) if "player_id" in beh_df.columns else pl.DataFrame()
+            if not beh_row.is_empty():
+                beh = beh_row.to_dicts()[0]
+                nn_carry_in_pct_val        = round(float(beh["carry_in"]) * 100, 1)          if beh.get("carry_in")         is not None else None
+                nn_dump_pct_val            = round(float(beh["dump"]) * 100, 1)              if beh.get("dump")             is not None else None
+                nn_shoot_slot_pct_val      = round(float(beh["shoot_slot"]) * 100, 1)        if beh.get("shoot_slot")       is not None else None
+                nn_shoot_perimeter_pct_val = round(float(beh["shoot_perimeter"]) * 100, 1)   if beh.get("shoot_perimeter")  is not None else None
+                nn_drive_net_pct_val       = round(float(beh["drive_net"]) * 100, 1)         if beh.get("drive_net")        is not None else None
+                nn_battle_corner_pct_val   = round(float(beh["battle_corner"]) * 100, 1)     if beh.get("battle_corner")    is not None else None
+                nn_hold_corner_pct_val     = round(float(beh["hold_corner"]) * 100, 1)       if beh.get("hold_corner")      is not None else None
+    except Exception:
+        pass
+
     return {
         "player_name":          r["shooter_name"],
         "player_id":            player_id_val,
@@ -1852,10 +1878,17 @@ async def phase2_player(
         "playoff_delta":        playoff_delta,
         "former_team_boost":    former_team_boost,
         "former_team":          former_team,
-        "battle_score":         battle_score_val,
-        "battle_percentile":    battle_percentile_val,
-        "hits_per60":           hits_per60_val,
-        "blocks_per60":         blocks_per60_val,
+        "battle_score":              battle_score_val,
+        "battle_percentile":         battle_percentile_val,
+        "hits_per60":                hits_per60_val,
+        "blocks_per60":              blocks_per60_val,
+        "nn_carry_in_pct":           nn_carry_in_pct_val,
+        "nn_dump_pct":               nn_dump_pct_val,
+        "nn_shoot_slot_pct":         nn_shoot_slot_pct_val,
+        "nn_shoot_perimeter_pct":    nn_shoot_perimeter_pct_val,
+        "nn_drive_net_pct":          nn_drive_net_pct_val,
+        "nn_battle_corner_pct":      nn_battle_corner_pct_val,
+        "nn_hold_corner_pct":        nn_hold_corner_pct_val,
     }
 
 
