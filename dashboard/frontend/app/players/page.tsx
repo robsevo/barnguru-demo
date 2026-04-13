@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { TEAM_COLORS, TEAM_SECONDARY, logoUrl, normalizePlayerName } from "@/utils/nhl";
+import { TEAM_COLORS, TEAM_SECONDARY, normalizePlayerName } from "@/utils/nhl";
+import TeamLogoLink from "@/components/TeamLogoLink";
 import { useTheme } from "@/utils/themeContext";
 
 function darkBlend(hex: string, darkness = 0.88): string {
@@ -348,31 +349,11 @@ function fmtPos(pos: string | null | undefined): string {
   return POS_MAP[pos.toUpperCase()] ?? pos;
 }
 
-function TeamLogo({ team, size = 24, className = "", onTeamClick }: { team: string; size?: number; className?: string; onTeamClick?: (e: React.MouseEvent) => void }) {
-  const [err, setErr] = useState(false);
-  if (err) return <span className={`text-[10px] font-mono text-white/40 ${className}`}>{team}</span>;
-  const img = (
-    <img
-      src={logoUrl(team)}
-      alt={team}
-      width={size}
-      height={size}
-      onError={() => setErr(true)}
-      className={`object-contain shrink-0 ${className}`}
-    />
-  );
+function TeamLogo({ team, size = 24, className = "", onTeamClick }: { team: string; size?: number; className?: string; onTeamClick?: () => void }) {
   if (onTeamClick) {
-    return (
-      <button
-        onClick={e => { e.stopPropagation(); onTeamClick(e); }}
-        className="shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
-        title={`View ${team} team page`}
-      >
-        {img}
-      </button>
-    );
+    return <button onClick={onTeamClick} className="cursor-pointer"><TeamLogoLink abbrev={team} size={size} className={className} /></button>;
   }
-  return img;
+  return <TeamLogoLink abbrev={team} size={size} className={className} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -540,7 +521,7 @@ function PlayerDetailCard({
         <div className="flex-1 min-w-0 pt-1">
           <h2 className="text-[16px] sm:text-xl font-bold text-white leading-tight">{data.player_name}</h2>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
-            {data.team && <TeamLogo team={data.team} size={28} />}
+            {data.team && <TeamLogo team={data.team} size={40} />}
             {data.team && <span className="text-sm font-semibold text-white/50">{data.team}</span>}
             {data.position && (
               <span className="text-[10px] font-semibold text-white/35 border border-white/[0.12] rounded px-1.5 py-0.5">{fmtPos(data.position)}</span>
