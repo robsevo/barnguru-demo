@@ -159,15 +159,32 @@ def _load_shots(data_dir: Path, seasons: list[int]) -> pl.DataFrame:
 
 
 def _load_icetime(data_dir: Path, season: int) -> pl.DataFrame | None:
-    """Load EDGE skating parquet for icetime normalisation."""
-    edge_dir = data_dir / "edge"
-    path = edge_dir / f"edge_skating_{season}.parquet"
-    if not path.exists():
-        return None
-    df = pl.read_parquet(path)
-    # EDGE skating has player_id + icetime columns
-    if "player_id" in df.columns and "icetime" in df.columns:
-        return df.select(["player_id", "icetime"])
+    """Load per-player total icetime (seconds) for finishing_per60 normalisation.
+
+    Priority:
+      1. EDGE skating parquet if it has an 'icetime' column (future-proof).
+      2. Shifts parquet — sum duration_secs per player_id (reliable fallback).
+    """
+    # 1. EDGE parquet with explicit icetime column
+    edge_path = data_dir / "edge" / f"edge_skating_{season}.parquet"
+    if edge_path.exists():
+        df = pl.read_parquet(edge_path)
+        if "player_id" in df.columns and "icetime" in df.columns:
+            return df.select(["player_id", "icetime"])
+
+    # 2. Shifts parquet — aggregate duration_secs per player
+    shifts_path = data_dir / "raw" / f"shifts_{season}.parquet"
+    if shifts_path.exists():
+        shifts = pl.read_parquet(shifts_path, columns=["player_id", "duration_secs"])
+        icetime = (
+            shifts
+            .group_by("player_id")
+            .agg(pl.col("duration_secs").sum().alias("icetime"))
+            .filter(pl.col("icetime") > 0)
+        )
+        if len(icetime) > 0:
+            return icetime
+
     return None
 
 
