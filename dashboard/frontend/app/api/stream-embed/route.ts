@@ -127,22 +127,25 @@ export async function GET(request: NextRequest) {
   const priorityParam = request.nextUrl.searchParams.get("priority");
   const priority = priorityParam != null ? parseInt(priorityParam, 10) : 3;
 
-  // Sandbox policy:
-  //   mobile (all streams): always sandbox — popups disruptive on mobile
-  //   desktop priority 0-1 (direct m3u8, known-clean embeds): sandbox — these providers
+  // Sandbox policy (same on mobile and desktop):
+  //   priority 0-1 (direct m3u8, known-clean embeds): sandbox — these providers
   //     don't check for sandbox, and they're the ones most worth protecting
-  //   desktop priority 2-3 (aggregators, iframe-only): no sandbox — these providers
+  //   priority 2-3 (aggregators, iframe-only): no sandbox — these providers
   //     actively detect and refuse to load under sandbox
+  //
+  // Note: window.open is overridden to a no-op in WRAPPER_INJECT, so popups are
+  // blocked even without the sandbox attribute. Applying sandbox to priority 2-3
+  // streams on mobile was causing them to silently fail with no fallback.
   const mobile = isMobile(ua);
-  const useSandbox = mobile || priority <= 1;
+  const useSandbox = priority <= 1;
   const sandboxAttr = useSandbox
     ? `sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-orientation-lock allow-modals" `
     : "";
 
   // Inject sandbox flag + stream URL so WRAPPER_INJECT can detect sandbox failures
-  // and auto-switch after 3s. Disabled on mobile — auto-switching is disruptive
-  // on small screens where users may still be interacting with the player.
-  const bgVars = useSandbox && !mobile
+  // and remove the stream. Enabled on all platforms — on mobile the parent's
+  // onSandboxFail removes the stream from the list rather than auto-switching.
+  const bgVars = useSandbox
     ? `<script>var _BG_SANDBOX=1,_BG_URL=${JSON.stringify(safeUrl)};</script>`
     : "";
 
