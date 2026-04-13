@@ -245,8 +245,9 @@ def _build_base_profile(
     All raw signals are combined into a raw non-negative weight vector then
     normalised to sum to 1 via softmax.
     """
-    # Carry entry / dump
-    carry_pct = float(player_row.get("carry_entry_pct") or 0.50)
+    # Carry entry / dump — guard against NaN (no EDGE data) and None
+    _cep = player_row.get("carry_entry_pct")
+    carry_pct = 0.50 if (_cep is None or (isinstance(_cep, float) and np.isnan(_cep))) else float(_cep)
     carry_pct = np.clip(carry_pct, 0.05, 0.95)
 
     # Positional
@@ -260,8 +261,9 @@ def _build_base_profile(
     else:
         nf = sl = ci_p = hw = pt = co = 1.0 / 6.0
 
-    # Battle score (may be z-scored, so map via sigmoid)
-    battle_raw = float(player_row.get("battle_score") or 0.0)
+    # Battle score (may be z-scored, so map via sigmoid) — guard NaN
+    _bs = player_row.get("battle_score")
+    battle_raw = 0.0 if (_bs is None or (isinstance(_bs, float) and np.isnan(_bs))) else float(_bs)
     battle_sig = 1.0 / (1.0 + np.exp(-battle_raw))  # sigmoid → (0,1)
 
     raw = np.array([
@@ -436,7 +438,12 @@ class PlayerBehaviorNet:
         cr_vals     = rng.uniform(0.5, 1.2, N_SYNTHETIC)
 
         # Use the average base profile across all players as the "average player"
-        avg_base = np.mean(list(self._base_profiles.values()), axis=0)
+        # Filter out any profiles that contain NaN (shouldn't happen but guard)
+        clean_profiles = [p for p in self._base_profiles.values() if not np.any(np.isnan(p))]
+        if not clean_profiles:
+            self._fitted = True
+            return self
+        avg_base = np.mean(clean_profiles, axis=0)
 
         for i in range(N_SYNTHETIC):
             ctx = self.encode_context(
