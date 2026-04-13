@@ -1841,6 +1841,30 @@ async def phase2_player(
     except Exception:
         pass
 
+    # Try to join skating baseline (zone time splits, speed, distance)
+    skating_zone_oz_val:       float | None = None
+    skating_zone_dz_val:       float | None = None
+    skating_avg_speed_val:     float | None = None
+    skating_max_speed_val:     float | None = None
+    skating_distance_val:      float | None = None
+    skating_games_val:         int   | None = None
+    try:
+        skate_dir = _GRETZKY_DATA_DIR / "skating_baseline"
+        skate_parquets = sorted(skate_dir.glob("skating_baseline_*.parquet")) if skate_dir.exists() else []
+        if skate_parquets and player_id_val is not None:
+            sk_df = pl.read_parquet(skate_parquets[-1])
+            sk_row = sk_df.filter(pl.col("player_id") == player_id_val) if "player_id" in sk_df.columns else pl.DataFrame()
+            if not sk_row.is_empty():
+                sk = sk_row.to_dicts()[0]
+                skating_zone_oz_val   = round(float(sk["baseline_zone_time_pct_oz"]) * 100, 1) if sk.get("baseline_zone_time_pct_oz") is not None else None
+                skating_zone_dz_val   = round(float(sk["baseline_zone_time_pct_dz"]) * 100, 1) if sk.get("baseline_zone_time_pct_dz") is not None else None
+                skating_avg_speed_val = round(float(sk["baseline_avg_speed_kmh"]), 1)           if sk.get("baseline_avg_speed_kmh")    is not None else None
+                skating_max_speed_val = round(float(sk["baseline_max_speed_kmh"]), 1)           if sk.get("baseline_max_speed_kmh")    is not None else None
+                skating_distance_val  = round(float(sk["baseline_distance_per_game_km"]), 2)    if sk.get("baseline_distance_per_game_km") is not None else None
+                skating_games_val     = int(sk["n_games_total"]) if sk.get("n_games_total") is not None else None
+    except Exception:
+        pass
+
     return {
         "player_name":          r["shooter_name"],
         "player_id":            player_id_val,
@@ -1888,7 +1912,13 @@ async def phase2_player(
         "nn_shoot_perimeter_pct":    nn_shoot_perimeter_pct_val,
         "nn_drive_net_pct":          nn_drive_net_pct_val,
         "nn_battle_corner_pct":      nn_battle_corner_pct_val,
-        "nn_hold_corner_pct":        nn_hold_corner_pct_val,
+        "nn_hold_corner_pct":           nn_hold_corner_pct_val,
+        "skating_zone_time_oz_pct":     skating_zone_oz_val,
+        "skating_zone_time_dz_pct":     skating_zone_dz_val,
+        "skating_avg_speed_kmh":        skating_avg_speed_val,
+        "skating_max_speed_kmh":        skating_max_speed_val,
+        "skating_distance_per_game_km": skating_distance_val,
+        "skating_games_sample":         skating_games_val,
     }
 
 
