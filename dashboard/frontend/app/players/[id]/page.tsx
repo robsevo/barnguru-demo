@@ -1324,48 +1324,73 @@ function GoalieZoneViz({ data }: { data: ProfileData }) {
   );
 }
 
-/** Offensive zone tendency map — 5-zone coloured cells */
+/** Offensive zone tendency map — half-rink with coloured zone overlays */
 function ZoneTendencyMap({ data, teamColor }: { data: ProfileData; teamColor: string }) {
-  const slot    = data.nn_shoot_slot_pct    ?? 0;
-  const perim   = data.nn_shoot_perimeter_pct ?? 0;
-  const net     = data.nn_drive_net_pct     ?? 0;
-  const corner  = data.nn_battle_corner_pct ?? 0;
-  const hold    = data.nn_hold_corner_pct   ?? 0;
+  const slot   = data.nn_shoot_slot_pct       ?? 0;
+  const perim  = data.nn_shoot_perimeter_pct  ?? 0;
+  const net    = data.nn_drive_net_pct        ?? 0;
+  const corner = data.nn_battle_corner_pct    ?? 0;
+  const hold   = data.nn_hold_corner_pct      ?? 0;
 
-  const zones = [
-    { label: "Net Front",  pct: net,    x: 155, y: 100, w: 60,  h: 60,  color: "#fbbf24" },
-    { label: "Slot",       pct: slot,   x: 115, y: 60,  w: 140, h: 85,  color: teamColor  },
-    { label: "Perimeter",  pct: perim,  x: 10,  y: 10,  w: 340, h: 200, color: "#94a3b8"  },
-    { label: "L Corner",   pct: corner, x: 10,  y: 150, w: 90,  h: 70,  color: "#38bdf8"  },
-    { label: "R Corner",   pct: hold,   x: 260, y: 150, w: 90,  h: 70,  color: "#38bdf8"  },
-  ];
+  // Opacity scaled by % — max at 35% action share
+  const op = (pct: number) => Math.min(pct / 35, 1) * 0.55;
 
   return (
-    <svg viewBox="0 0 360 230" className="w-full max-w-[340px] mx-auto">
-      {/* Background */}
-      <rect x={0} y={0} width={360} height={230} rx={8} fill="#0a0d12" stroke="rgba(255,255,255,0.07)" strokeWidth={1} />
-      {/* Rink outline */}
-      <rect x={10} y={10} width={340} height={200} rx={12} fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth={1.5} />
-      {/* Goal crease */}
-      <rect x={160} y={160} width={40} height={40} rx={4} fill="rgba(239,68,68,0.12)" stroke="rgba(239,68,68,0.3)" strokeWidth={1} />
-      {/* Zone overlays — rendered back-to-front so smaller zones appear on top */}
-      {[zones[2], zones[0], zones[3], zones[4], zones[1]].map((z, i) => (
-        <g key={i}>
-          <rect x={z.x} y={z.y} width={z.w} height={z.h} rx={4}
-            fill={z.color} fillOpacity={Math.min(z.pct / 45, 1) * 0.35}
-            stroke={z.color} strokeOpacity={Math.min(z.pct / 45, 1) * 0.6} strokeWidth={1} />
-          <text x={z.x + z.w / 2} y={z.y + z.h / 2 - 4} textAnchor="middle" fontSize={7}
-            fill="rgba(255,255,255,0.45)" fontWeight="bold" letterSpacing="1">
-            {z.label.toUpperCase()}
-          </text>
-          <text x={z.x + z.w / 2} y={z.y + z.h / 2 + 9} textAnchor="middle" fontSize={10}
-            fill="rgba(255,255,255,0.75)" fontWeight="bold">
-            {z.pct.toFixed(0)}%
-          </text>
-        </g>
-      ))}
-      {/* Goal line */}
-      <line x1={10} y1={170} x2={350} y2={170} stroke="rgba(239,68,68,0.2)" strokeWidth={1} strokeDasharray="3 2" />
+    <svg viewBox="0 0 100 85" width="100%" className="block mx-auto max-w-[420px]">
+      {/* Ice surface — same shape as shot map */}
+      <path d="M 0,0 L 86,0 Q 100,0 100,14 L 100,71 Q 100,85 86,85 L 0,85 Z"
+        fill="#f0f6ff" stroke="#94b4cc" strokeWidth="1.8" />
+
+      {/* Zone fills — clipped to ice shape */}
+      <defs>
+        <clipPath id="iceClip">
+          <path d="M 0,0 L 86,0 Q 100,0 100,14 L 100,71 Q 100,85 86,85 L 0,85 Z" />
+        </clipPath>
+      </defs>
+
+      {/* Perimeter — full offensive zone (x=25→89, full height) */}
+      <rect x="25" y="0" width="64" height="85" fill="#94a3b8" fillOpacity={op(perim)} clipPath="url(#iceClip)" />
+      {/* Top corner — x=55→89, y=0→30 */}
+      <rect x="55" y="0" width="34" height="30" fill="#38bdf8" fillOpacity={op(corner)} clipPath="url(#iceClip)" />
+      {/* Bottom corner — x=55→89, y=55→85 */}
+      <rect x="55" y="55" width="34" height="30" fill="#38bdf8" fillOpacity={op(hold)} clipPath="url(#iceClip)" />
+      {/* Slot — x=55→89, y=30→55 */}
+      <rect x="55" y="30" width="34" height="25" fill={teamColor} fillOpacity={op(slot)} clipPath="url(#iceClip)" />
+      {/* Net front — x=78→89, y=35→50 */}
+      <rect x="78" y="35" width="11" height="15" fill="#fbbf24" fillOpacity={op(net)} clipPath="url(#iceClip)" />
+
+      {/* Ice markings on top of fills */}
+      <line x1="25" y1="0.5" x2="25" y2="84.5" stroke="#1155bb" strokeWidth="1.4" opacity="0.55" />
+      <line x1="89" y1="0.5" x2="89" y2="84.5" stroke="#cc2222" strokeWidth="0.9" opacity="0.7" />
+      <polygon points="100,28.5 89,33.5 89,51.5 100,56.5" fill="none" stroke="#cc2222" strokeWidth="0.5" opacity="0.4" />
+      <path d="M 89 36 A 8 8 0 0 0 89 49" fill="rgba(30,100,200,0.09)" stroke="#1155bb" strokeWidth="0.8" opacity="0.6" />
+      <rect x="89" y="38.5" width="6" height="8" rx="1" fill="rgba(180,180,180,0.5)" stroke="#777" strokeWidth="0.6" />
+      <circle cx="69" cy="20.5" r="9" fill="none" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <circle cx="69" cy="64.5" r="9" fill="none" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <circle cx="69" cy="20.5" r="0.85" fill="#cc2222" opacity="0.5" />
+      <circle cx="69" cy="64.5" r="0.85" fill="#cc2222" opacity="0.5" />
+      <line x1="0" y1="0" x2="0" y2="85" stroke="#cc2222" strokeWidth="1.2" opacity="0.7" />
+
+      {/* Zone labels — positioned in open space away from each other */}
+      {/* Perimeter label — left side of OZ, above dots */}
+      <text x="38" y="10" textAnchor="middle" fontSize="3.2" fontWeight="700" fill="rgba(30,40,80,0.6)" fontFamily="Barlow, sans-serif" letterSpacing="0.3">PERIM</text>
+      <text x="38" y="15" textAnchor="middle" fontSize="5" fontWeight="800" fill="rgba(30,40,80,0.85)" fontFamily="Barlow, sans-serif">{perim.toFixed(0)}%</text>
+
+      {/* Top corner */}
+      <text x="72" y="10" textAnchor="middle" fontSize="3.2" fontWeight="700" fill="rgba(30,40,80,0.6)" fontFamily="Barlow, sans-serif" letterSpacing="0.3">CORNER</text>
+      <text x="72" y="16" textAnchor="middle" fontSize="5" fontWeight="800" fill="rgba(30,40,80,0.85)" fontFamily="Barlow, sans-serif">{corner.toFixed(0)}%</text>
+
+      {/* Bottom corner */}
+      <text x="72" y="75" textAnchor="middle" fontSize="3.2" fontWeight="700" fill="rgba(30,40,80,0.6)" fontFamily="Barlow, sans-serif" letterSpacing="0.3">CORNER</text>
+      <text x="72" y="81" textAnchor="middle" fontSize="5" fontWeight="800" fill="rgba(30,40,80,0.85)" fontFamily="Barlow, sans-serif">{hold.toFixed(0)}%</text>
+
+      {/* Slot — center of slot zone */}
+      <text x="72" y="40" textAnchor="middle" fontSize="3.2" fontWeight="700" fill="rgba(30,40,80,0.6)" fontFamily="Barlow, sans-serif" letterSpacing="0.3">SLOT</text>
+      <text x="72" y="46" textAnchor="middle" fontSize="5" fontWeight="800" fill="rgba(30,40,80,0.85)" fontFamily="Barlow, sans-serif">{slot.toFixed(0)}%</text>
+
+      {/* Net front — label outside to avoid crease overlap */}
+      <text x="38" y="76" textAnchor="middle" fontSize="3.2" fontWeight="700" fill="rgba(30,40,80,0.6)" fontFamily="Barlow, sans-serif" letterSpacing="0.3">NET FRONT</text>
+      <text x="38" y="82" textAnchor="middle" fontSize="5" fontWeight="800" fill="rgba(30,40,80,0.85)" fontFamily="Barlow, sans-serif">{net.toFixed(0)}%</text>
     </svg>
   );
 }
