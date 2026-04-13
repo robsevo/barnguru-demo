@@ -80,56 +80,120 @@ def _load_edge(data_dir: Path, season: int) -> pl.DataFrame | None:
     return pl.read_parquet(path)
 
 
+def _fetch_nhl_realtime_stats(season: int) -> pl.DataFrame:
+    """Fetch per-player hits, blocked shots, and TOI from the NHL Stats realtime endpoint.
+
+    Paginates through all skaters for the given season. Returns a DataFrame with:
+    player_id, team, hits, blocked_shots, toi_ev, season.
+    """
+    import httpx
+
+    season_id = f"{season}{season + 1}"
+    url = "https://api.nhle.com/stats/rest/en/skater/realtime"
+    PAGE = 100  # NHL Stats API hard cap per page
+    params: dict = {
+        "cayenneExp": f"seasonId={season_id} and gameTypeId=2",
+        "limit": PAGE,
+        "start": 0,
+    }
+    rows: list[dict] = []
+    while True:
+        try:
+            resp = httpx.get(url, params=params, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:
+            print(f"    [warn] NHL realtime stats fetch failed: {exc}")
+            break
+        batch = data.get("data") or []
+        rows.extend(batch)
+        if len(batch) < PAGE:
+            break
+        params["start"] += PAGE
+
+    if not rows:
+        return pl.DataFrame()
+
+    records = []
+    for r in rows:
+        pid = r.get("playerId")
+        if pid is None:
+            continue
+        gp = r.get("gamesPlayed") or 0
+        # timeOnIcePerGame is seconds (NHL API)
+        toi_pg = r.get("timeOnIcePerGame") or 0
+        toi_ev = toi_pg * gp  # total seconds on ice (approx EV — we use total as proxy)
+        if toi_ev == 0:
+            toi_ev = 1800.0  # safe default
+        records.append({
+            "player_id": int(pid),
+            "team": str(r.get("teamAbbrevs") or "UNK").split(",")[0].strip(),
+            "hits": float(r.get("hits") or 0),
+            "blocked_shots": float(r.get("blockedShots") or 0),
+            "toi_ev": float(toi_ev),
+            "season": season,
+        })
+
+    return pl.DataFrame(records).with_columns([
+        pl.col("player_id").cast(pl.Int64),
+        pl.col("season").cast(pl.Int64),
+    ])
+
+
 def _build_player_stats_from_pbp(pbp_df: pl.DataFrame, season: int) -> pl.DataFrame:
     """Aggregate per-player hits and blocked shots from NHL PBP data.
 
     Uses dedicated hitter_id / blocker_id columns written by the updated PBP
-    parser (pbp_parser.py >= 2026-04). Falls back gracefully when those columns
-    are absent (old parquets).
+    parser (pbp_parser.py >= 2026-04). Falls back to the NHL Stats realtime
+    API (hits + blockedShots per player) when those columns are absent.
 
     Returns DataFrame with: player_id, team, hits, blocked_shots, toi_ev, season.
     """
-    if len(pbp_df) == 0:
-        return pl.DataFrame()
-
     event_col = next((c for c in ["event_type", "event"] if c in pbp_df.columns), None)
     frames: list[pl.DataFrame] = []
 
-    # ── Hits via dedicated hitter_id column (new parser) ──────────────────
-    if "hitter_id" in pbp_df.columns and event_col:
-        hit_events = pbp_df.filter(
-            pl.col(event_col).str.to_lowercase() == "hit"
-        ).filter(pl.col("hitter_id").is_not_null())
-        if len(hit_events) > 0:
-            hits_agg = (
-                hit_events
-                .group_by("hitter_id")
-                .agg(pl.len().alias("hits"))
-                .rename({"hitter_id": "player_id"})
-                .with_columns(pl.col("player_id").cast(pl.Int64))
-            )
-            frames.append(hits_agg)
+    if len(pbp_df) > 0:
+        # ── Hits via dedicated hitter_id column (new parser) ──────────────────
+        if "hitter_id" in pbp_df.columns and event_col:
+            hit_events = pbp_df.filter(
+                pl.col(event_col).str.to_lowercase() == "hit"
+            ).filter(pl.col("hitter_id").is_not_null())
+            if len(hit_events) > 0:
+                hits_agg = (
+                    hit_events
+                    .group_by("hitter_id")
+                    .agg(pl.len().alias("hits"))
+                    .rename({"hitter_id": "player_id"})
+                    .with_columns(pl.col("player_id").cast(pl.Int64))
+                )
+                frames.append(hits_agg)
 
-    # ── Blocked shots via dedicated blocker_id column (new parser) ─────────
-    if "blocker_id" in pbp_df.columns and event_col:
-        block_events = pbp_df.filter(
-            pl.col(event_col).str.to_lowercase() == "shot"
-        ).filter(pl.col("blocker_id").is_not_null())
-        if len(block_events) > 0:
-            blocks_agg = (
-                block_events
-                .group_by("blocker_id")
-                .agg(pl.len().alias("blocked_shots"))
-                .rename({"blocker_id": "player_id"})
-                .with_columns(pl.col("player_id").cast(pl.Int64))
-            )
-            frames.append(blocks_agg)
+        # ── Blocked shots via dedicated blocker_id column (new parser) ─────────
+        if "blocker_id" in pbp_df.columns and event_col:
+            block_events = pbp_df.filter(
+                pl.col(event_col).str.to_lowercase() == "shot"
+            ).filter(pl.col("blocker_id").is_not_null())
+            if len(block_events) > 0:
+                blocks_agg = (
+                    block_events
+                    .group_by("blocker_id")
+                    .agg(pl.len().alias("blocked_shots"))
+                    .rename({"blocker_id": "player_id"})
+                    .with_columns(pl.col("player_id").cast(pl.Int64))
+                )
+                frames.append(blocks_agg)
 
     if not frames:
-        print("    [warn] No hitter_id/blocker_id columns found — PBP may need re-ingest.")
-        return pl.DataFrame()
+        # ── Fallback: fetch hits + blocked shots from NHL Stats realtime API ──
+        print(f"    [info] hitter_id/blocker_id not in PBP — fetching from NHL Stats API (season {season})")
+        api_df = _fetch_nhl_realtime_stats(season)
+        if len(api_df) == 0:
+            print("    [warn] NHL Stats API returned no data; skipping season.")
+            return pl.DataFrame()
+        print(f"    [info] NHL Stats API: {len(api_df)} skaters loaded")
+        return api_df
 
-    # Join hits and blocks
+    # ── PBP path: join hits + blocks, add team + TOI ──────────────────────
     result = frames[0]
     for f in frames[1:]:
         result = result.join(f, on="player_id", how="outer_coalesce")
@@ -140,10 +204,8 @@ def _build_player_stats_from_pbp(pbp_df: pl.DataFrame, season: int) -> pl.DataFr
         else:
             result = result.with_columns(pl.col(col).cast(pl.Float64).fill_null(0.0))
 
-    # Default TOI (30 min); no reliable per-player TOI in PBP without shifts join
     result = result.with_columns(pl.lit(1800.0).alias("toi_ev"))
 
-    # Add team — use event_owner_team_id from hit events
     if "hitter_id" in pbp_df.columns and "event_owner_team_id" in pbp_df.columns and event_col:
         hit_team = (
             pbp_df
@@ -162,7 +224,6 @@ def _build_player_stats_from_pbp(pbp_df: pl.DataFrame, season: int) -> pl.DataFr
         result = result.with_columns(pl.lit("UNK").alias("team"))
 
     result = result.with_columns(pl.lit(season).cast(pl.Int64).alias("season"))
-    # Drop rows where player_id is null (shouldn't happen but guard)
     result = result.filter(pl.col("player_id").is_not_null())
     return result
 

@@ -1165,16 +1165,19 @@ function HeatMapLegend() {
   return (
     <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-2 text-[10px] font-semibold tracking-wide uppercase text-zinc-500">
       <span className="flex items-center gap-1.5">
-        <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500 opacity-75" />Low
+        <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500" />Low
       </span>
       <span className="flex items-center gap-1.5">
-        <span className="inline-block w-2.5 h-2.5 rounded-full bg-yellow-400 opacity-80" />Med
+        <span className="inline-block w-2.5 h-2.5 rounded-full bg-yellow-400" />Med
       </span>
       <span className="flex items-center gap-1.5">
-        <span className="inline-block w-2.5 h-2.5 rounded-full bg-orange-500 opacity-80" />High
+        <span className="inline-block w-2.5 h-2.5 rounded-full bg-orange-500" />High
       </span>
       <span className="flex items-center gap-1.5">
-        <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-600 opacity-85" />Hot
+        <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-600" />Hot
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "#b91c1c" }} />Goal
       </span>
     </div>
   );
@@ -1183,27 +1186,26 @@ function HeatMapLegend() {
 /** Density-based KDE heat map kernel — renders 4 layers of ALL shots at decreasing blur radii.
  *  Wide blur → green outer halo. Progressively tighter blurs → yellow, orange, red center.
  *  Dense areas (slot) saturate all 4 layers; sparse areas (point) only show outer green. */
-function HeatKernel({ shots, prefix }: { shots: ShotPoint[]; prefix: string }) {
+function ShotDots({ shots }: { shots: ShotPoint[] }) {
   const sy = (y: number) => 42.5 - y;
   const pts = shots.slice(-800);
+  const green  = pts.filter(s => !s.goal && s.xg < 0.05);
+  const yellow = pts.filter(s => !s.goal && s.xg >= 0.05 && s.xg < 0.12);
+  const orange = pts.filter(s => !s.goal && s.xg >= 0.12 && s.xg < 0.22);
+  const red    = pts.filter(s => !s.goal && s.xg >= 0.22);
+  const goals  = pts.filter(s => s.goal);
   return (
     <>
-      {/* Green — widest spread, outer halo */}
-      <g filter={`url(#${prefix}G)`}>
-        {pts.map((s, i) => <circle key={i} cx={s.x} cy={sy(s.y)} r="5" fill="#22c55e" opacity="0.09" />)}
-      </g>
-      {/* Yellow — medium spread */}
-      <g filter={`url(#${prefix}Y)`}>
-        {pts.map((s, i) => <circle key={i} cx={s.x} cy={sy(s.y)} r="4" fill="#fbbf24" opacity="0.12" />)}
-      </g>
-      {/* Orange — inner ring */}
-      <g filter={`url(#${prefix}O)`}>
-        {pts.map((s, i) => <circle key={i} cx={s.x} cy={sy(s.y)} r="3.5" fill="#f97316" opacity="0.15" />)}
-      </g>
-      {/* Red — hot center, tightest blur */}
-      <g filter={`url(#${prefix}R)`}>
-        {pts.map((s, i) => <circle key={i} cx={s.x} cy={sy(s.y)} r="3" fill="#ef4444" opacity="0.18" />)}
-      </g>
+      {/* Green — low xG, drawn first (bottom layer) */}
+      {green.map((s, i) => <circle key={`g${i}`} cx={s.x} cy={sy(s.y)} r="3" fill="#22c55e" opacity="1" />)}
+      {/* Yellow — medium-low xG */}
+      {yellow.map((s, i) => <circle key={`y${i}`} cx={s.x} cy={sy(s.y)} r="3" fill="#fbbf24" opacity="1" />)}
+      {/* Orange — medium-high xG */}
+      {orange.map((s, i) => <circle key={`o${i}`} cx={s.x} cy={sy(s.y)} r="3" fill="#f97316" opacity="1" />)}
+      {/* Red — high xG saves */}
+      {red.map((s, i) => <circle key={`r${i}`} cx={s.x} cy={sy(s.y)} r="3" fill="#dc2626" opacity="1" />)}
+      {/* Dark red — goals, always on top */}
+      {goals.map((s, i) => <circle key={`dr${i}`} cx={s.x} cy={sy(s.y)} r="3.2" fill="#b91c1c" opacity="1" />)}
     </>
   );
 }
@@ -1213,34 +1215,22 @@ function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
     <>
       <svg viewBox="0 0 100 85" width="100%" className="block mx-auto max-w-[420px]"
         style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}>
-        <defs>
-          <filter id="hG" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="10"/></filter>
-          <filter id="hY" x="-70%" y="-70%" width="240%" height="240%"><feGaussianBlur stdDeviation="6.5"/></filter>
-          <filter id="hO" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="4"/></filter>
-          <filter id="hR" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2"/></filter>
-        </defs>
         <HalfRinkMarkings />
-        <HeatKernel shots={shots} prefix="h" />
+        <ShotDots shots={shots} />
       </svg>
       <HeatMapLegend />
     </>
   );
 }
 
-/** Heat map of shots AGAINST a goalie — same density kernel. */
+/** Shot map of shots AGAINST a goalie — same xG-tiered dots. */
 function GoalieShotMapViz({ shots }: { shots: ShotPoint[] }) {
   return (
     <>
       <svg viewBox="0 0 100 85" width="100%" className="block mx-auto max-w-[420px]"
         style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}>
-        <defs>
-          <filter id="gG" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="10"/></filter>
-          <filter id="gY" x="-70%" y="-70%" width="240%" height="240%"><feGaussianBlur stdDeviation="6.5"/></filter>
-          <filter id="gO" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="4"/></filter>
-          <filter id="gR" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2"/></filter>
-        </defs>
         <HalfRinkMarkings />
-        <HeatKernel shots={shots} prefix="g" />
+        <ShotDots shots={shots} />
       </svg>
       <HeatMapLegend />
     </>
