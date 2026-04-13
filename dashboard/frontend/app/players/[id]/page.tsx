@@ -1133,7 +1133,7 @@ function HalfRinkMarkings() {
     <>
       {/* Ice surface */}
       <path d="M 0,0 L 86,0 Q 100,0 100,14 L 100,71 Q 100,85 86,85 L 0,85 Z"
-        fill="#f8fbff" stroke="#c8d8e8" strokeWidth="0.8" />
+        fill="#f8fbff" stroke="#94b4cc" strokeWidth="1.8" />
       {/* Blue line */}
       <line x1="25" y1="2" x2="25" y2="83" stroke="#1155bb" strokeWidth="1.4" opacity="0.7" />
       {/* Goal line — extended to boards */}
@@ -1168,7 +1168,7 @@ function HeatMapLegend({ goalLabel = "High xG / Goal" }: { goalLabel?: string })
         <span className="inline-block w-2.5 h-2.5 rounded-full bg-sky-400 opacity-70" />Low xG
       </span>
       <span className="flex items-center gap-1.5">
-        <span className="inline-block w-2.5 h-2.5 rounded-full bg-orange-400 opacity-70" />Med xG
+        <span className="inline-block w-2.5 h-2.5 rounded-full bg-yellow-400 opacity-70" />Med xG
       </span>
       <span className="flex items-center gap-1.5">
         <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-700 opacity-80" />{goalLabel}
@@ -1206,22 +1206,22 @@ function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
         {/* Heat layer — low xG: cool blue */}
         <g filter="url(#heatLo)">
           {loShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="6.5" fill="#38bdf8" opacity="0.38" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="7" fill="#38bdf8" opacity="0.44" />
           ))}
         </g>
-        {/* Heat layer — mid xG: orange */}
+        {/* Heat layer — mid xG: orange/yellow */}
         <g filter="url(#heatMed)">
           {medShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="7" fill="#f97316" opacity="0.40" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="7.5" fill="#fbbf24" opacity="0.44" />
           ))}
         </g>
         {/* Heat layer — high xG saves + goals: dark red */}
         <g filter="url(#heatHi)">
           {hiShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="6" fill="#b91c1c" opacity="0.26" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="6" fill="#b91c1c" opacity="0.22" />
           ))}
           {goals.map((s, i) => (
-            <circle key={`g${i}`} cx={s.x} cy={sy(s.y)} r="8" fill="#7f1d1d" opacity="0.34" />
+            <circle key={`g${i}`} cx={s.x} cy={sy(s.y)} r="8" fill="#7f1d1d" opacity="0.30" />
           ))}
         </g>
       </svg>
@@ -1257,20 +1257,20 @@ function GoalieShotMapViz({ shots }: { shots: ShotPoint[] }) {
 
         <g filter="url(#gheatLo)">
           {loShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="6.5" fill="#38bdf8" opacity="0.38" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="7" fill="#38bdf8" opacity="0.44" />
           ))}
         </g>
         <g filter="url(#gheatMed)">
           {medShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="7" fill="#f97316" opacity="0.40" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="7.5" fill="#fbbf24" opacity="0.44" />
           ))}
         </g>
         <g filter="url(#gheatHi)">
           {hiShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="6" fill="#b91c1c" opacity="0.26" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="6" fill="#b91c1c" opacity="0.22" />
           ))}
           {goals.map((s, i) => (
-            <circle key={`g${i}`} cx={s.x} cy={sy(s.y)} r="8" fill="#7f1d1d" opacity="0.34" />
+            <circle key={`g${i}`} cx={s.x} cy={sy(s.y)} r="8" fill="#7f1d1d" opacity="0.30" />
           ))}
         </g>
       </svg>
@@ -1298,7 +1298,7 @@ function GoalieZoneViz({ data }: { data: ProfileData }) {
       style={{ filter: "drop-shadow(0 2px 10px rgba(0,0,0,0.4))" }}>
       {/* Ice surface */}
       <path d="M 0,0 L 86,0 Q 100,0 100,14 L 100,71 Q 100,85 86,85 L 0,85 Z"
-        fill="#f8fbff" stroke="#c8d8e8" strokeWidth="0.8" />
+        fill="#f8fbff" stroke="#94b4cc" strokeWidth="1.8" />
 
       {/* Low danger zone: x 0–25 */}
       <rect x="0" y="0" width="25" height="85" fill={zoneColor(ld, 0.920, 0.945)} />
