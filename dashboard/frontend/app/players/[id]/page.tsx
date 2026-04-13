@@ -881,7 +881,7 @@ function PlayerRadarChart({ data, teamColor }: { data: ProfileData; teamColor: s
             <span className="text-[12px] font-semibold text-white/70">{active.raw}</span>
           </>
         ) : (
-          <span className="text-[10px] text-white/20">hover an axis or dot</span>
+          <span className="text-[10px]" style={{ color: "rgba(255,255,255,0.4)" }}>hover an axis or dot</span>
         )}
       </div>
     </>
@@ -1019,7 +1019,7 @@ function GoalieRadarChart({ data, teamColor, nhlSvPct, nhlGaa }: { data: Profile
             <span className="text-[12px] font-semibold text-white/70">{active.raw}</span>
           </>
         ) : (
-          <span className="text-[10px] text-white/20">hover an axis or dot</span>
+          <span className="text-[10px]" style={{ color: "rgba(255,255,255,0.4)" }}>hover an axis or dot</span>
         )}
       </div>
     </>
@@ -1263,7 +1263,7 @@ function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
   // boards (x=0) → bottom, net (x=89) → top
   return (
     <>
-      <svg viewBox="0 0 85 100" width="100%" className="block mx-auto max-w-[320px]"
+      <svg viewBox="0 0 85 100" width="100%" className="block mx-auto max-w-[420px]"
         style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}>
         <g transform="translate(0,100) rotate(-90)">
           <HalfRinkMarkings />
@@ -1288,6 +1288,7 @@ function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
           );
         })}
       </div>
+      <p className="text-[9px] text-center mt-1.5" style={{ color: "rgba(255,255,255,0.45)" }}>tap a dot to show or hide that layer</p>
     </>
   );
 }
@@ -1317,7 +1318,7 @@ function GoalieShotMapViz({ shots }: { shots: ShotPoint[] }) {
   ];
   return (
     <>
-      <svg viewBox="0 0 85 100" width="100%" className="block mx-auto max-w-[320px]"
+      <svg viewBox="0 0 85 100" width="100%" className="block mx-auto max-w-[420px]"
         style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}>
         <g transform="translate(0,100) rotate(-90)">
           <HalfRinkMarkings />
@@ -1342,6 +1343,7 @@ function GoalieShotMapViz({ shots }: { shots: ShotPoint[] }) {
           );
         })}
       </div>
+      <p className="text-[9px] text-center mt-1.5" style={{ color: "rgba(255,255,255,0.45)" }}>tap a dot to show or hide that layer</p>
     </>
   );
 }
@@ -1571,7 +1573,7 @@ function ZoneTendencyMap({ data, teamColor }: { data: ProfileData; teamColor: st
   const icePath = "M 0,85 L 0,14 Q 0,0 14,0 L 71,0 Q 85,0 85,14 L 85,85 Z";
 
   return (
-    <svg viewBox="0 0 85 100" width="100%" className="block mx-auto max-w-[340px]">
+    <svg viewBox="0 0 85 86" width="100%" className="block mx-auto max-w-[420px]">
       <defs>
         <clipPath id="ztClip">
           <path d={icePath} />
@@ -1607,8 +1609,10 @@ function ZoneTendencyMap({ data, teamColor }: { data: ProfileData; teamColor: st
       <line x1="0.5" y1="75" x2="84.5" y2="75" stroke="#1155bb" strokeWidth="1.4" opacity="0.55" />
       {/* Goal line — orig x=89 → y=11 */}
       <line x1="0.5" y1="11" x2="84.5" y2="11" stroke="#cc2222" strokeWidth="0.9" opacity="0.7" />
-      {/* Trapezoid — goalie restricted area behind goal line */}
-      <polygon points="28,11 57,11 49,0 36,0" fill="none" stroke="#94a3b8" strokeWidth="0.6" strokeOpacity="0.55" strokeDasharray="2.5 1.5" clipPath="url(#ztClip)" />
+      {/* Trapezoid — only the two diagonal sides (goal line = base, end boards = narrow top) */}
+      {/* NHL dims: wide base 28ft each side from center → x=28.5&56.5 at y=11; narrow 11ft each side → x=31.5&53.5 at y=0 */}
+      <line x1="28.5" y1="11" x2="31.5" y2="0" stroke="#94a3b8" strokeWidth="0.75" strokeOpacity="0.7" strokeDasharray="2.5 1.5" />
+      <line x1="56.5" y1="11" x2="53.5" y2="0" stroke="#94a3b8" strokeWidth="0.75" strokeOpacity="0.7" strokeDasharray="2.5 1.5" />
       {/* Net — sits above goal line (y=5→11), centered (x=36→49) */}
       <rect x="36" y="5" width="13" height="6" rx="1" fill="rgba(180,180,180,0.45)" stroke="#666" strokeWidth="0.7" />
       {/* Crease — arc curving into ice (sweep-flag 0 = CCW = downward) */}
@@ -1651,7 +1655,8 @@ function IceTimeByZoneBars({ data }: { data: ProfileData }) {
   ];
 
   return (
-    <div className="w-full flex flex-col justify-center flex-1 space-y-4 py-3 px-1">
+    <div className="w-full flex flex-col space-y-4 px-1">
+      <p className="text-[9px] font-semibold uppercase tracking-wider text-white/30 mb-2 text-center">Ice Time By Zone</p>
       {bars.map(b => (
         <div key={b.label} className="flex items-center gap-3">
           <span className="text-[11px] font-black uppercase tracking-wider w-7 shrink-0" style={{ color: b.color }}>{b.label}</span>
@@ -1668,7 +1673,6 @@ function IceTimeByZoneBars({ data }: { data: ProfileData }) {
           <span className="text-[15px] font-black tabular-nums w-10 text-right shrink-0" style={{ color: b.color }}>{b.pct.toFixed(0)}%</span>
         </div>
       ))}
-      <p className="text-[8px] text-white/20 text-center mt-1">% of skating time per zone</p>
     </div>
   );
 }
@@ -2412,7 +2416,7 @@ export default function PlayerProfilePage() {
             <Card title="Shot Map" icon="🎯" style={cardStyle}>
               {shots.length > 0 ? (
                 <>
-                  <p className="text-[9px] text-white/25 uppercase tracking-wider text-center mb-3">
+                  <p className="text-[9px] uppercase tracking-wider text-center mb-3" style={{ color: "rgba(255,255,255,0.35)" }}>
                     Arena-adjusted shot locations · last 2 seasons · {shots.length} shots · {shots.filter(s => s.goal).length} goals
                   </p>
                   <ShotMapViz shots={shots} />
@@ -2429,40 +2433,33 @@ export default function PlayerProfilePage() {
           </div>
         )}
 
-        {/* ── Zone tendency + skating zone side by side ── */}
+        {/* ── Zone Tendencies — stacked, centered ── */}
         {!isGoalie && (
           <div className="sm:col-span-2">
             <Card title="Zone Tendencies" style={cardStyle}>
-              <div className="flex flex-col sm:flex-row gap-6 sm:gap-10 items-stretch justify-center">
-                {/* Ice Time By Zone — left, bar charts */}
-                <div className="flex flex-col w-full sm:flex-1 min-w-0 justify-center">
-                  <p className="text-[9px] font-semibold uppercase tracking-wider text-white/30 mb-3 text-center">
-                    Ice Time By Zone
-                  </p>
-                  {data.skating_zone_time_oz_pct != null ? (
-                    <IceTimeByZoneBars data={data} />
-                  ) : (
-                    <div className="flex flex-col items-center justify-center py-8 gap-1.5">
-                      <p className="text-[9px] text-white/20 uppercase tracking-wider">Model not yet trained</p>
-                    </div>
-                  )}
-                </div>
-                {/* Offensive Zone Tendency — right, rotated rink */}
-                <div className="flex flex-col items-center w-full sm:w-auto sm:flex-1 min-w-0">
-                  <p className="text-[9px] font-semibold uppercase tracking-wider text-white/30 mb-3 text-center">
-                    Offensive Zone Tendency
-                  </p>
-                  {data.nn_shoot_slot_pct != null ? (
-                    <>
-                      <ZoneTendencyMap data={data} teamColor={teamColor} />
-                      <p className="text-[8px] text-white/20 text-center mt-1">% of offensive actions by zone</p>
-                    </>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center py-8 gap-1.5">
-                      <p className="text-[9px] text-white/20 uppercase tracking-wider">Model not yet trained</p>
-                    </div>
-                  )}
-                </div>
+              <div className="flex flex-col items-center gap-3 max-w-md mx-auto w-full">
+                {/* Offensive Zone Tendency rink */}
+                {data.nn_shoot_slot_pct != null ? (
+                  <>
+                    <p className="text-[9px] font-semibold uppercase tracking-wider text-white/30 text-center">
+                      Offensive Zone Tendency
+                    </p>
+                    <ZoneTendencyMap data={data} teamColor={teamColor} />
+                  </>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-6 gap-1.5">
+                    <p className="text-[9px] text-white/20 uppercase tracking-wider">Model not yet trained</p>
+                  </div>
+                )}
+                {/* Ice Time By Zone bars */}
+                {data.skating_zone_time_oz_pct != null ? (
+                  <IceTimeByZoneBars data={data} />
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-4 gap-1.5">
+                    <p className="text-[9px] text-white/20 uppercase tracking-wider">Model not yet trained</p>
+                  </div>
+                )}
+                <p className="text-[8px] text-center mt-1" style={{ color: "rgba(255,255,255,0.4)" }}>% of offensive actions by zone · % of skating time per zone</p>
               </div>
             </Card>
           </div>
@@ -2857,7 +2854,7 @@ export default function PlayerProfilePage() {
         {isGoalie && goalieShots.length > 0 && (
           <div className="sm:col-span-2">
             <Card title="Shots Against" style={cardStyle}>
-              <p className="text-[9px] text-white/25 uppercase tracking-wider text-center mb-3">
+              <p className="text-[9px] uppercase tracking-wider text-center mb-3" style={{ color: "rgba(255,255,255,0.35)" }}>
                 Arena-adjusted · last 2 seasons · {goalieShots.length} shots · {goalieShots.filter(s => s.goal).length} goals allowed
               </p>
               <GoalieShotMapViz shots={goalieShots} />
