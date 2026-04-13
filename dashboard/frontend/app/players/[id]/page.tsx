@@ -1206,13 +1206,13 @@ function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
         {/* Heat layer — low xG: cool blue */}
         <g filter="url(#heatLo)">
           {loShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="5" fill="#38bdf8" opacity="0.24" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="6.5" fill="#38bdf8" opacity="0.38" />
           ))}
         </g>
         {/* Heat layer — mid xG: orange */}
         <g filter="url(#heatMed)">
           {medShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="6" fill="#f97316" opacity="0.28" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="7" fill="#f97316" opacity="0.40" />
           ))}
         </g>
         {/* Heat layer — high xG saves + goals: dark red */}
@@ -1257,12 +1257,12 @@ function GoalieShotMapViz({ shots }: { shots: ShotPoint[] }) {
 
         <g filter="url(#gheatLo)">
           {loShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="5" fill="#38bdf8" opacity="0.24" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="6.5" fill="#38bdf8" opacity="0.38" />
           ))}
         </g>
         <g filter="url(#gheatMed)">
           {medShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="6" fill="#f97316" opacity="0.28" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="7" fill="#f97316" opacity="0.40" />
           ))}
         </g>
         <g filter="url(#gheatHi)">
