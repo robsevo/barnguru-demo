@@ -1795,6 +1795,26 @@ async def phase2_player(
     except Exception:
         pass
 
+    # Try to join puck battles (battle_percentile, hits_per60, blocks_per60)
+    battle_score_val:      float | None = None
+    battle_percentile_val: float | None = None
+    hits_per60_val:        float | None = None
+    blocks_per60_val:      float | None = None
+    try:
+        battles_dir = _GRETZKY_DATA_DIR / "battles"
+        battle_parquets = sorted(battles_dir.glob("puck_battle_*.parquet")) if battles_dir.exists() else []
+        if battle_parquets and player_id_val is not None:
+            b_df = pl.read_parquet(battle_parquets[-1])
+            b_row = b_df.filter(pl.col("player_id") == player_id_val) if "player_id" in b_df.columns else pl.DataFrame()
+            if not b_row.is_empty():
+                b = b_row.to_dicts()[0]
+                battle_score_val      = round(float(b["battle_score"]), 3)      if b.get("battle_score")      is not None else None
+                battle_percentile_val = round(float(b["battle_percentile"]), 1) if b.get("battle_percentile") is not None else None
+                hits_per60_val        = round(float(b["hits_per60"]), 2)        if b.get("hits_per60")        is not None else None
+                blocks_per60_val      = round(float(b["blocks_per60"]), 2)      if b.get("blocks_per60")      is not None else None
+    except Exception:
+        pass
+
     return {
         "player_name":          r["shooter_name"],
         "player_id":            player_id_val,
@@ -1832,6 +1852,10 @@ async def phase2_player(
         "playoff_delta":        playoff_delta,
         "former_team_boost":    former_team_boost,
         "former_team":          former_team,
+        "battle_score":         battle_score_val,
+        "battle_percentile":    battle_percentile_val,
+        "hits_per60":           hits_per60_val,
+        "blocks_per60":         blocks_per60_val,
     }
 
 
