@@ -409,6 +409,12 @@ def write_regime_alerts(df: pl.DataFrame, output_dir: Path, season: int) -> Path
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / f"regime_alerts_{season}.parquet"
+    # Remove existing file before writing — polars write_parquet can fail with
+    # PermissionError if the file is owned by a different user (e.g. prior CI run).
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
     for col, dtype in REGIME_ALERT_SCHEMA.items():
         if col not in df.columns:
             df = df.with_columns(pl.lit(None).cast(dtype).alias(col))

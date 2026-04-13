@@ -404,6 +404,10 @@ def write_inseason_ratings(
     output_dir.mkdir(parents=True, exist_ok=True)
     suffix = f"_game{game_number}" if game_number is not None else ""
     path = output_dir / f"inseason_ratings_{season}{suffix}.parquet"
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
     for col, dtype in INSEASON_RATING_SCHEMA.items():
         if col not in df.columns:
             df = df.with_columns(pl.lit(None).cast(dtype).alias(col))

@@ -364,6 +364,10 @@ def write_sos_weights(df: pl.DataFrame, output_dir: Path, season: int) -> Path:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / f"sos_weights_{season}.parquet"
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
     for col, dtype in SOS_WEIGHT_SCHEMA.items():
         if col not in df.columns:
             df = df.with_columns(pl.lit(None).cast(dtype).alias(col))
