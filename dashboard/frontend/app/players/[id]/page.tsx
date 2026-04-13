@@ -1196,9 +1196,9 @@ function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
         style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}
       >
         <defs>
-          <filter id="heatLo"  x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="5"/></filter>
-          <filter id="heatMed" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="4.5"/></filter>
-          <filter id="heatHi"  x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="4"/></filter>
+          <filter id="heatLo"  x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4.5"/></filter>
+          <filter id="heatMed" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4"/></filter>
+          <filter id="heatHi"  x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3.5"/></filter>
         </defs>
 
         <HalfRinkMarkings />
@@ -1206,22 +1206,22 @@ function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
         {/* Heat layer — low xG: cool blue */}
         <g filter="url(#heatLo)">
           {loShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="4" fill="#38bdf8" opacity="0.14" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="5" fill="#38bdf8" opacity="0.22" />
           ))}
         </g>
         {/* Heat layer — mid xG: orange */}
         <g filter="url(#heatMed)">
           {medShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="4.5" fill="#f97316" opacity="0.18" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="6" fill="#f97316" opacity="0.28" />
           ))}
         </g>
         {/* Heat layer — high xG saves + goals: dark red */}
         <g filter="url(#heatHi)">
           {hiShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="5" fill="#b91c1c" opacity="0.22" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="7" fill="#b91c1c" opacity="0.34" />
           ))}
           {goals.map((s, i) => (
-            <circle key={`g${i}`} cx={s.x} cy={sy(s.y)} r="7" fill="#7f1d1d" opacity="0.30" />
+            <circle key={`g${i}`} cx={s.x} cy={sy(s.y)} r="9" fill="#7f1d1d" opacity="0.42" />
           ))}
         </g>
       </svg>
@@ -1248,29 +1248,29 @@ function GoalieShotMapViz({ shots }: { shots: ShotPoint[] }) {
         style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}
       >
         <defs>
-          <filter id="gheatLo"  x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="5"/></filter>
-          <filter id="gheatMed" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="4.5"/></filter>
-          <filter id="gheatHi"  x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="4"/></filter>
+          <filter id="gheatLo"  x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4.5"/></filter>
+          <filter id="gheatMed" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4"/></filter>
+          <filter id="gheatHi"  x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3.5"/></filter>
         </defs>
 
         <HalfRinkMarkings />
 
         <g filter="url(#gheatLo)">
           {loShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="4" fill="#38bdf8" opacity="0.14" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="5" fill="#38bdf8" opacity="0.22" />
           ))}
         </g>
         <g filter="url(#gheatMed)">
           {medShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="4.5" fill="#f97316" opacity="0.18" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="6" fill="#f97316" opacity="0.28" />
           ))}
         </g>
         <g filter="url(#gheatHi)">
           {hiShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="5" fill="#b91c1c" opacity="0.22" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="7" fill="#b91c1c" opacity="0.34" />
           ))}
           {goals.map((s, i) => (
-            <circle key={`g${i}`} cx={s.x} cy={sy(s.y)} r="7" fill="#7f1d1d" opacity="0.30" />
+            <circle key={`g${i}`} cx={s.x} cy={sy(s.y)} r="9" fill="#7f1d1d" opacity="0.42" />
           ))}
         </g>
       </svg>
