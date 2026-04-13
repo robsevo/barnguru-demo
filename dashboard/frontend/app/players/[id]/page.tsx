@@ -1395,44 +1395,61 @@ function ZoneTendencyMap({ data, teamColor }: { data: ProfileData; teamColor: st
   );
 }
 
-/** Full-rink skating zone time split */
+/** Full-rink skating zone time split — horizontal top-down ice view */
 function SkatingZoneMap({ data }: { data: ProfileData }) {
   const oz = data.skating_zone_time_oz_pct ?? 0;
   const dz = data.skating_zone_time_dz_pct ?? 0;
   const nz = Math.max(0, 100 - oz - dz);
 
-  const zones = [
-    { label: "Offensive Zone", pct: oz, color: "#4ade80", y: 10, h: 90 },
-    { label: "Neutral Zone",   pct: nz, color: "#fbbf24", y: 105, h: 50 },
-    { label: "Defensive Zone", pct: dz, color: "#f87171", y: 160, h: 90 },
-  ];
+  // Intensity: scale fill opacity 0.10–0.40 based on % (0–60% range)
+  const op = (pct: number) => Math.max(0.08, Math.min(0.38, pct / 60 * 0.38));
+
+  const rinkPath = "M 14,0 L 186,0 Q 200,0 200,14 L 200,71 Q 200,85 186,85 L 14,85 Q 0,85 0,71 L 0,14 Q 0,0 14,0 Z";
 
   return (
-    <svg viewBox="0 0 200 260" className="w-full max-w-[180px] mx-auto">
-      <rect x={0} y={0} width={200} height={260} rx={8} fill="#0a0d12" stroke="rgba(255,255,255,0.07)" strokeWidth={1} />
-      {/* Rink outline */}
-      <rect x={20} y={10} width={160} height={240} rx={14}
-        fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth={1.5} />
+    <svg viewBox="0 0 200 85" width="100%" className="block mx-auto max-w-[420px]">
+      {/* Ice surface */}
+      <path d={rinkPath} fill="#eef4fb" stroke="#94b4cc" strokeWidth="1.8" />
+      <defs>
+        <clipPath id="iceZoneClip">
+          <path d={rinkPath} />
+        </clipPath>
+      </defs>
+
+      {/* Zone fills — clipped to rink */}
+      {/* Defensive zone — left */}
+      <rect x="0" y="0" width="55" height="85" fill="#f87171" fillOpacity={op(dz)} clipPath="url(#iceZoneClip)" />
+      {/* Neutral zone — center */}
+      <rect x="55" y="0" width="90" height="85" fill="#fbbf24" fillOpacity={op(nz)} clipPath="url(#iceZoneClip)" />
+      {/* Offensive zone — right */}
+      <rect x="145" y="0" width="55" height="85" fill="#4ade80" fillOpacity={op(oz)} clipPath="url(#iceZoneClip)" />
+
       {/* Blue lines */}
-      <line x1={20} y1={100} x2={180} y2={100} stroke="rgba(99,179,237,0.35)" strokeWidth={1.5} />
-      <line x1={20} y1={160} x2={180} y2={160} stroke="rgba(99,179,237,0.35)" strokeWidth={1.5} />
-      {/* Red line */}
-      <line x1={20} y1={130} x2={180} y2={130} stroke="rgba(239,68,68,0.25)" strokeWidth={1.5} />
-      {/* Zone fills */}
-      {zones.map((z, i) => (
-        <g key={i}>
-          <rect x={20} y={z.y} width={160} height={z.h} rx={i === 0 ? 14 : i === 2 ? 14 : 0}
-            fill={z.color} fillOpacity={Math.min(z.pct / 45, 1) * 0.22} />
-          <text x={100} y={z.y + z.h / 2 - 5} textAnchor="middle" fontSize={7}
-            fill="rgba(255,255,255,0.40)" fontWeight="bold" letterSpacing="1">
-            {z.label.toUpperCase()}
-          </text>
-          <text x={100} y={z.y + z.h / 2 + 10} textAnchor="middle" fontSize={13}
-            fill={z.color} fillOpacity={0.85} fontWeight="bold">
-            {z.pct.toFixed(0)}%
-          </text>
-        </g>
-      ))}
+      <line x1="55" y1="0.5" x2="55" y2="84.5" stroke="#4a90d9" strokeWidth="2" strokeOpacity="0.55" />
+      <line x1="145" y1="0.5" x2="145" y2="84.5" stroke="#4a90d9" strokeWidth="2" strokeOpacity="0.55" />
+      {/* Red center line */}
+      <line x1="100" y1="0.5" x2="100" y2="84.5" stroke="#e11d48" strokeWidth="1.5" strokeOpacity="0.40" />
+
+      {/* Center faceoff dot */}
+      <circle cx="100" cy="42.5" r="5" fill="none" stroke="#e11d48" strokeWidth="1" strokeOpacity="0.30" />
+
+      {/* Goal lines */}
+      <line x1="11" y1="0.5" x2="11" y2="84.5" stroke="#e11d48" strokeWidth="1" strokeOpacity="0.25" />
+      <line x1="189" y1="0.5" x2="189" y2="84.5" stroke="#e11d48" strokeWidth="1" strokeOpacity="0.25" />
+
+      {/* Zone labels — percentage below abbreviation */}
+      {/* DZ */}
+      <text x="27" y="34" textAnchor="middle" fontSize="6.5" fill="#64748b" fontWeight="700" letterSpacing="0.5">DZ</text>
+      <text x="27" y="48" textAnchor="middle" fontSize="12" fill="#f87171" fontWeight="800">{dz.toFixed(0)}%</text>
+      {/* NZ */}
+      <text x="100" y="34" textAnchor="middle" fontSize="6.5" fill="#64748b" fontWeight="700" letterSpacing="0.5">NZ</text>
+      <text x="100" y="48" textAnchor="middle" fontSize="12" fill="#ca8a04" fontWeight="800">{nz.toFixed(0)}%</text>
+      {/* OZ */}
+      <text x="172" y="34" textAnchor="middle" fontSize="6.5" fill="#64748b" fontWeight="700" letterSpacing="0.5">OZ</text>
+      <text x="172" y="48" textAnchor="middle" fontSize="12" fill="#16a34a" fontWeight="800">{oz.toFixed(0)}%</text>
+
+      {/* Rink outline on top */}
+      <path d={rinkPath} fill="none" stroke="#94b4cc" strokeWidth="1.8" />
     </svg>
   );
 }
