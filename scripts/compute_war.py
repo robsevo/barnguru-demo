@@ -36,6 +36,7 @@ RAPM_SUBDIR       = "rapm"
 FINISHING_SUBDIR  = "xg_finishing"
 CAP_SUBDIR        = "cap"
 WAR_SUBDIR        = "war"
+PBP_SUBDIR        = "raw"  # pbp_{season}.parquet lives here
 
 
 def _latest_parquet(directory: Path, glob_pattern: str) -> Path | None:
@@ -69,6 +70,104 @@ def _load_finishing(finishing_dir: Path, seasons: list[int]) -> pl.DataFrame | N
     if not frames:
         return None
     return pl.concat(frames, how="diagonal")
+
+
+def _load_penalties_from_pbp(pbp_dir: Path, seasons: list[int]) -> pl.DataFrame | None:
+    """Aggregate per-player penalty minutes taken and drawn from our PBP parquets.
+
+    Returns a DataFrame with: player_id, season, pim_taken, pim_drawn.
+    Returns None if no PBP data is found.
+    """
+    frames: list[pl.DataFrame] = []
+    for season in seasons:
+        path = pbp_dir / f"pbp_{season}.parquet"
+        if not path.exists():
+            continue
+        try:
+            schema = pl.read_parquet_schema(path)
+        except Exception:
+            continue
+
+        # Need at minimum committed_by_id or drawn_by_id + duration_minutes
+        has_committed = "committed_by_id" in schema
+        has_drawn     = "drawn_by_id"     in schema
+        has_duration  = "duration_minutes" in schema
+        has_event     = any(c in schema for c in ("event_type", "event"))
+
+        if not has_event or not (has_committed or has_drawn):
+            continue
+
+        want = [c for c in (
+            "event_type", "event",
+            "committed_by_id", "drawn_by_id",
+            "duration_minutes",
+        ) if c in schema]
+
+        try:
+            df = pl.read_parquet(path, columns=want)
+        except Exception:
+            continue
+
+        event_col = next((c for c in ("event_type", "event") if c in df.columns), None)
+        if not event_col:
+            continue
+
+        pen_df = df.filter(pl.col(event_col).str.to_lowercase() == "penalty")
+        if pen_df.is_empty():
+            continue
+
+        # Duration defaults to 2 if missing
+        if "duration_minutes" not in pen_df.columns:
+            pen_df = pen_df.with_columns(pl.lit(2.0).alias("duration_minutes"))
+        else:
+            pen_df = pen_df.with_columns(
+                pl.col("duration_minutes").cast(pl.Float64).fill_null(2.0)
+            )
+
+        season_frames: list[pl.DataFrame] = []
+
+        if has_committed and "committed_by_id" in pen_df.columns:
+            taken = (
+                pen_df
+                .filter(pl.col("committed_by_id").is_not_null())
+                .group_by("committed_by_id")
+                .agg(pl.col("duration_minutes").sum().alias("pim_taken"))
+                .rename({"committed_by_id": "player_id"})
+                .with_columns(pl.col("player_id").cast(pl.Int64))
+            )
+            season_frames.append(taken)
+
+        if has_drawn and "drawn_by_id" in pen_df.columns:
+            drawn = (
+                pen_df
+                .filter(pl.col("drawn_by_id").is_not_null())
+                .group_by("drawn_by_id")
+                .agg(pl.col("duration_minutes").sum().alias("pim_drawn"))
+                .rename({"drawn_by_id": "player_id"})
+                .with_columns(pl.col("player_id").cast(pl.Int64))
+            )
+            season_frames.append(drawn)
+
+        if not season_frames:
+            continue
+
+        combined = season_frames[0]
+        for f in season_frames[1:]:
+            combined = combined.join(f, on="player_id", how="outer_coalesce")
+
+        for col in ("pim_taken", "pim_drawn"):
+            if col not in combined.columns:
+                combined = combined.with_columns(pl.lit(0.0).alias(col))
+            else:
+                combined = combined.with_columns(pl.col(col).fill_null(0.0))
+
+        combined = combined.with_columns(pl.lit(season).cast(pl.Int64).alias("season"))
+        frames.append(combined)
+        print(f"  Loaded penalties from PBP: {path.name} — {len(combined)} players")
+
+    if not frames:
+        return None
+    return pl.concat(frames, how="diagonal_relaxed")
 
 
 def _load_cap(cap_dir: Path, seasons: list[int]) -> pl.DataFrame | None:
@@ -167,6 +266,17 @@ def main() -> None:
     else:
         print("[war] No finishing directory — finishing GAR will be 0.")
 
+    # ── Load penalty data from our own PBP parquets (optional) ───────────
+    pbp_dir = data_dir / PBP_SUBDIR
+    penalty_df = None
+    if pbp_dir.exists():
+        print(f"[war] Loading penalty data from PBP parquets…")
+        penalty_df = _load_penalties_from_pbp(pbp_dir, seasons)
+        if penalty_df is None:
+            print("  No PBP penalty data found — penalty GAR will be 0.")
+    else:
+        print("[war] No PBP directory — penalty GAR will be 0.")
+
     # ── Load cap data (optional) ──────────────────────────────────────────
     cap_dir = data_dir / CAP_SUBDIR
     cap_df  = None
@@ -179,8 +289,6 @@ def main() -> None:
         print("[war] No cap directory — contract efficiency will be null.")
 
     # ── Compute WAR — target season only ─────────────────────────────────
-    # Use multi-season RAPM for replacement-level calibration, but only output
-    # WAR for the target (most recent) season.
     print(f"\n[war] Computing WAR for season {target_season}…")
     model = WARModel()
     target_rapm_df = (
@@ -188,9 +296,12 @@ def main() -> None:
         if "season" in rapm_df.columns
         else rapm_df
     )
-    # Pass full multi-season rapm_df to fit() for replacement-level computation,
-    # but restrict output rows via the season filter in the model itself.
-    war_df = model.fit(target_rapm_df, finishing_df=finishing_df, cap_df=cap_df)
+    war_df = model.fit(
+        target_rapm_df,
+        finishing_df=finishing_df,
+        penalty_df=penalty_df,
+        cap_df=cap_df,
+    )
 
     n_players = len(war_df)
     print(f"  WAR computed for {n_players:,} player(s).")

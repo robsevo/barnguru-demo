@@ -26,8 +26,8 @@ For skaters (Evolving Hockey v1.1 methodology):
     Multipliers (1.6 EV-off, 1.4 EV-def, 1.3 PP, 1.3 PK) correct for ridge
     shrinkage so that individual RAPMs sum to actual team goal differentials.
 
-    Known gap: penalty differential component (~0.11 goals/PIM drawn-minus-taken)
-    is not yet included. Requires PIM drawn/taken data in the pipeline.
+    Penalty differential uses our own PBP parquets (committed_by_id / drawn_by_id)
+    to compute net PIM per player. No external API needed.
 
 For goalies:
 
@@ -155,6 +155,12 @@ RAPM_PK_CLAMP = 4.0
 # For finishing: delta is already in goals (seasonal total)
 FINISHING_SCALE   = 1.0
 
+# Penalty differential: each net penalty minute is worth ~0.11 goals.
+# Derived from average PP conversion rate (~20%) × average PP opportunity length (2 min).
+# A player who draws 10 more PIM than they take = +1.1 GAR from penalties.
+# Source: Evolving Hockey WAR 1.1 methodology.
+GOALS_PER_PIM_DIFF = 0.11
+
 # Output schema
 WAR_SCHEMA: dict[str, pl.DataType] = {
     "player_id":           pl.Int64,
@@ -169,6 +175,7 @@ WAR_SCHEMA: dict[str, pl.DataType] = {
     "gar_pp":              pl.Float64,
     "gar_pk":              pl.Float64,
     "gar_finishing":       pl.Float64,
+    "gar_penalties":       pl.Float64,
     "gar_total":           pl.Float64,
     "war":                 pl.Float64,
     "replacement_level_war": pl.Float64,
@@ -377,6 +384,7 @@ class WARModel:
         self,
         rapm_df: pl.DataFrame,
         finishing_df: pl.DataFrame | None = None,
+        penalty_df:   pl.DataFrame | None = None,
         cap_df:       pl.DataFrame | None = None,
     ) -> pl.DataFrame:
         """Compute WAR and contract efficiency for all players in rapm_df.
@@ -388,6 +396,8 @@ class WARModel:
                           Also accepts toi_ev_min / toi_pp_min / toi_pk_min aliases.
             finishing_df: Optional xG finishing model output — must have player_id,
                           season, finishing_delta columns.
+            penalty_df:   Optional penalty aggregation — must have player_id, season,
+                          pim_taken, pim_drawn. Built from our own PBP parquets.
             cap_df:       Optional cap data — must have player_id, season, cap_hit
                           (USD millions).
 
@@ -421,6 +431,17 @@ class WARModel:
                 val = row.get("finishing_delta")
                 if pid and val is not None:
                     finishing_map[(pid, sea)] = float(val)
+
+        # Penalty differential map: (player_id, season) → net PIM (drawn - taken)
+        penalty_map: dict[tuple[int, int], float] = {}
+        if penalty_df is not None and len(penalty_df) > 0:
+            for row in penalty_df.to_dicts():
+                pid  = int(row.get("player_id", 0))
+                sea  = int(row.get("season", 0))
+                drawn = float(row.get("pim_drawn") or 0.0)
+                taken = float(row.get("pim_taken") or 0.0)
+                if pid:
+                    penalty_map[(pid, sea)] = drawn - taken
 
         cap_map: dict[tuple[int, int], float] = {}
         if cap_df is not None and len(cap_df) > 0:
@@ -483,7 +504,10 @@ class WARModel:
             )
 
             gar_finishing = finishing_map.get((pid, season), 0.0) * FINISHING_SCALE
-            gar_total     = gar_ev + gar_pp + gar_pk + gar_finishing
+            # Penalty differential: net PIM drawn (positive = good) × 0.11 goals/PIM
+            net_pim       = penalty_map.get((pid, season), 0.0)
+            gar_penalties = net_pim * GOALS_PER_PIM_DIFF
+            gar_total     = gar_ev + gar_pp + gar_pk + gar_finishing + gar_penalties
 
             war_val       = war_from_gar(gar_total, self._goals_per_win)
 
@@ -512,6 +536,7 @@ class WARModel:
                 "gar_pp":              gar_pp,
                 "gar_pk":              gar_pk,
                 "gar_finishing":       gar_finishing,
+                "gar_penalties":       gar_penalties,
                 "gar_total":           gar_total,
                 "war":                 war_val,
                 "replacement_level_war": repl_war,
