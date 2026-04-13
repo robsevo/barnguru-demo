@@ -1596,6 +1596,10 @@ async def phase2_player(
     rapm_ev_off: float | None = None
     rapm_ev_def: float | None = None
     rapm_xga_60: float | None = None
+    rapm_xgf_60: float | None = None
+    rapm_toi_ev: float | None = None
+    rapm_goals_p60: float | None = None
+    rapm_shots_p60: float | None = None
     try:
         rapm_dir = _GRETZKY_DATA_DIR / "rapm"
         season_val = r.get("season")
@@ -1610,6 +1614,21 @@ async def phase2_player(
                     rapm_ev_def = round(float(rapm_row["rapm_ev_def"][0]), 3)
                     if "xga_60" in rapm_df.columns:
                         rapm_xga_60 = round(float(rapm_row["xga_60"][0]), 2)
+                    if "xgf_60" in rapm_df.columns:
+                        rapm_xgf_60 = round(float(rapm_row["xgf_60"][0]), 2)
+                    if "toi_ev" in rapm_df.columns:
+                        rapm_toi_ev = round(float(rapm_row["toi_ev"][0]), 1)
+                    # Derive goals/shots per 60 from raw counts + toi
+                    toi_h = (rapm_toi_ev or 0) / 3600
+                    if toi_h > 0:
+                        if "goals_per60" in rapm_df.columns:
+                            rapm_goals_p60 = round(float(rapm_row["goals_per60"][0]), 2)
+                        elif r.get("goals") is not None:
+                            rapm_goals_p60 = round(float(r["goals"]) / toi_h, 2)
+                        if "shots_per60" in rapm_df.columns:
+                            rapm_shots_p60 = round(float(rapm_row["shots_per60"][0]), 2)
+                        elif r.get("shots") is not None:
+                            rapm_shots_p60 = round(float(r["shots"]) / toi_h, 2)
     except Exception:
         pass
 
@@ -1880,6 +1899,10 @@ async def phase2_player(
         "rapm_ev_off":          rapm_ev_off,
         "rapm_ev_def":          rapm_ev_def,
         "rapm_xga_60":          rapm_xga_60,
+        "xgf_per60":            rapm_xgf_60,
+        "toi_ev":               rapm_toi_ev,
+        "goals_per60":          rapm_goals_p60,
+        "shots_per60":          rapm_shots_p60,
         "position":             position,
         "shoots":               shoots,
         "war":                  war_val,
