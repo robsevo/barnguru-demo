@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useRouter } from "next/navigation";
 import { logoUrl, TEAM_COLORS, TEAM_SECONDARY, normalizePlayerName } from "@/utils/nhl";
+import TeamLogoLink from "@/components/TeamLogoLink";
 import { useTheme } from "@/utils/themeContext";
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis,
@@ -274,6 +275,23 @@ function battlePctTier(v: number): Tier {
   if (v >= 25) return "Below Average";
   return "Low";
 }
+// EV ice time in minutes — more TOI = higher coaching trust / usage
+function toiTier(v: number): Tier {
+  if (v >= 800) return "Elite";          // ~18+ min/game over full season
+  if (v >= 600) return "Above Average";  // top-6 F / top-4 D
+  if (v >= 350) return "Average";        // middle role
+  if (v >= 150) return "Below Average";  // bottom-6 / spot duty
+  return "Low";
+}
+// xGA (Expected Goals Against) for goalies — lower = easier workload
+// Tier reflects difficulty faced, not quality (use GSAx for quality)
+function xgaTier(v: number): Tier {
+  if (v >= 70)  return "Elite";        // heavy starter workload
+  if (v >= 55)  return "Above Average";
+  if (v >= 35)  return "Average";
+  if (v >= 20)  return "Below Average";
+  return "Low";
+}
 function hotHandTier(v: number): Tier {
   if (v >= 1.5)  return "Elite";
   if (v >= 0.7)  return "Above Average";
@@ -422,27 +440,8 @@ function darkerOfPP(a: string, b: string): string {
 
 const NHL_REMAP: Record<string, string> = { LA: "LAK", NJ: "NJD", SJ: "SJS", TB: "TBL" };
 
-function TeamLogo({ team, size = 24, onClick }: { team: string; size?: number; onClick?: () => void }) {
-  const [err, setErr] = useState(false);
-  if (err) return <span className="text-[10px] font-mono text-white/40">{team}</span>;
-  const img = (
-    <img
-      src={logoUrl(team)}
-      alt={team}
-      width={size}
-      height={size}
-      onError={() => setErr(true)}
-      className="object-contain shrink-0"
-    />
-  );
-  if (onClick) {
-    return (
-      <button onClick={onClick} className="shrink-0 cursor-pointer hover:opacity-80 transition-opacity" title={`View ${team} team page`}>
-        {img}
-      </button>
-    );
-  }
-  return img;
+function TeamLogo({ team, size = 24 }: { team: string; size?: number }) {
+  return <TeamLogoLink abbrev={team} size={size} />;
 }
 
 function BarStat({ label, value, max, color = "#4ade80", suffix = "%" }: {
@@ -2518,6 +2517,7 @@ export default function PlayerProfilePage() {
               )}
               {data.toi_ev != null && (
                 <StatRow label="EV Ice Time" value={`${data.toi_ev.toFixed(0)} min`}
+                  tier={toiTier(data.toi_ev)}
                   sub="5v5 even-strength minutes this season"
                   tip="Total even-strength (5v5) minutes played this season. More TOI = more trust from the coaching staff. All other metrics are measured per 60 to account for ice time differences." />
               )}
@@ -2815,8 +2815,9 @@ export default function PlayerProfilePage() {
                   <StatRow
                     label="Expected Goals Against"
                     value={data.xga.toFixed(2)}
-                    sub="How many goals an average goalie would allow given the same shots"
-                    tip="The number of goals an average NHL goalie would be expected to allow given the exact same shots this goalie faced. The difference between xGA and actual goals against = GSAx."
+                    tier={xgaTier(data.xga)}
+                    sub="Workload indicator — how many goals an average goalie would allow given the same shots"
+                    tip="The number of goals an average NHL goalie would be expected to allow given the exact same shots this goalie faced. Higher = heavier starter workload. The difference between xGA and actual goals against = GSAx."
                   />
                 )}
                 {data.mdsv_pct != null && (
