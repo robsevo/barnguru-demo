@@ -1135,7 +1135,7 @@ function HalfRinkMarkings() {
       <path d="M 0,0 L 86,0 Q 100,0 100,14 L 100,71 Q 100,85 86,85 L 0,85 Z"
         fill="#f8fbff" stroke="#94b4cc" strokeWidth="1.8" />
       {/* Blue line */}
-      <line x1="25" y1="2" x2="25" y2="83" stroke="#1155bb" strokeWidth="1.4" opacity="0.7" />
+      <line x1="25" y1="0.5" x2="25" y2="84.5" stroke="#1155bb" strokeWidth="1.4" opacity="0.7" />
       {/* Goal line — extended to boards */}
       <line x1="89" y1="0.5" x2="89" y2="84.5" stroke="#cc2222" strokeWidth="0.9" opacity="0.8" />
       {/* Trapezoid */}
@@ -1178,13 +1178,13 @@ function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
     { key: "goal", pts: pts.filter(s => s.goal),                                 r: "3.2", fill: "#b91c1c", opacity: "0.95" },
   ];
 
-  const legendItems: { key: ShotLayer; label: string; color: string; tw?: string }[] = [
+  const legendItems: { key: ShotLayer; label: string; color?: string; tw?: string }[] = [
     { key: "low",  label: "Low",  tw: "bg-green-500" },
     { key: "med",  label: "Med",  tw: "bg-yellow-400" },
     { key: "high", label: "High", tw: "bg-orange-500" },
     { key: "hot",  label: "Hot",  tw: "bg-red-600" },
     { key: "goal", label: "Goal", color: "#b91c1c" },
-  ] as { key: ShotLayer; label: string; color?: string; tw?: string }[];
+  ];
 
   return (
     <>
