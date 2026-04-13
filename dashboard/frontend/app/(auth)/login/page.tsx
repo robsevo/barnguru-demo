@@ -61,7 +61,7 @@ export default function LoginPage() {
           {/* Branding — always visible */}
           <button
             onClick={() => setOpen(v => !v)}
-            className="w-full px-7 py-6 flex items-center justify-between group transition-all duration-200 hover:bg-white/[0.02]"
+            className="w-full px-7 pt-6 pb-5 flex flex-col gap-4 group transition-all duration-200 hover:bg-white/[0.02]"
           >
             <div className="flex items-center gap-3">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -76,15 +76,15 @@ export default function LoginPage() {
                 </div>
               </div>
             </div>
-            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all duration-200 shrink-0 whitespace-nowrap ${
+            <div className={`w-full flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl border transition-all duration-200 ${
               open
                 ? "border-[#C9A84C]/[0.20] bg-[#C9A84C]/[0.06] text-[#C9A84C]/50"
                 : "border-[#C9A84C]/[0.35] bg-gradient-to-b from-[#C9A84C]/[0.12] to-[#C9A84C]/[0.05] text-[#C9A84C] shadow-[0_2px_12px_rgba(201,168,76,0.12),inset_0_1px_0_rgba(201,168,76,0.18)] group-hover:border-[#C9A84C]/[0.55] group-hover:from-[#C9A84C]/[0.18]"
             }`}>
-              <span className="text-[9px] font-black uppercase tracking-[0.18em]">
+              <span className="text-[13px] font-black uppercase tracking-[0.22em]">
                 {open ? "Close" : "Sign In"}
               </span>
-              <span className={`text-[8px] transition-all duration-300 ${open ? "rotate-180" : ""}`}>▼</span>
+              <span className={`text-[10px] transition-all duration-300 ${open ? "rotate-180" : ""}`}>▼</span>
             </div>
           </button>
 

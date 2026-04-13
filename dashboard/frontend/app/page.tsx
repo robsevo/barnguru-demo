@@ -25,7 +25,7 @@ export default function LandingPage() {
         <img
           src="/hero.png"
           alt="GRTZKY"
-          className="mx-auto w-full max-w-[420px] sm:max-w-[520px] h-auto drop-shadow-2xl -mt-3"
+          className="mx-auto w-full max-w-[420px] sm:max-w-[620px] lg:max-w-[760px] h-auto drop-shadow-2xl -mt-3"
         />
         {/* Acronym under logo */}
         <p className="text-[10px] sm:text-[13px] font-light uppercase tracking-[0.22em] -mt-1 mb-6 bg-gradient-to-r from-[#C9A84C] via-[#E8D090] to-[#C9A84C] bg-clip-text text-transparent">
