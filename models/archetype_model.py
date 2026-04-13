@@ -37,7 +37,7 @@ from models.rapm_model import DataMissingWarning
 # Constants
 # ---------------------------------------------------------------------------
 
-MODEL_VERSION = "archetype_v2"
+MODEL_VERSION = "archetype_v3"
 DEFAULT_K     = 10      # number of archetypes
 MIN_K         = 8
 MAX_K         = 12
@@ -129,13 +129,13 @@ def _assign_archetype_labels(
         xg_scaled = (xg_norm - 0.5) * 2.0
         composite = (
             0.45 * centroids_raw[:, off_idx]
-            + 0.30 * centroids_raw[:, def_idx]
+            - 0.30 * centroids_raw[:, def_idx]   # negate: rapm_ev_def < 0 = better defense
             + 0.25 * xg_scaled
         )
     else:
         composite = (
             0.6 * centroids_raw[:, off_idx]
-            + 0.4 * centroids_raw[:, def_idx]
+            - 0.4 * centroids_raw[:, def_idx]    # negate: rapm_ev_def < 0 = better defense
         )
     rank_order = sorted(range(k), key=lambda c: composite[c], reverse=True)
 
@@ -155,10 +155,11 @@ def _assign_archetype_labels(
         if best_pp_cluster != rank_order[0] and best_pp_cluster != rank_order[1]:
             names[best_pp_cluster] = "PP Specialist"
 
-    # Defensive Anchor: highest def_rapm AND below-median off_rapm
+    # Defensive Anchor: most negative def_rapm (rapm_ev_def < 0 = better defense)
+    # AND below-median off_rapm — pure defensive specialist cluster
     med_off = np.median(centroids_raw[:, off_idx])
     def_scores = centroids_raw[:, def_idx]
-    best_def_cluster = int(np.argmax(def_scores))
+    best_def_cluster = int(np.argmin(def_scores))   # argmin: most negative = best defense
     if centroids_raw[best_def_cluster, off_idx] < med_off:
         names[best_def_cluster] = "Defensive Anchor"
 

@@ -44,8 +44,8 @@ MODEL_VERSION          = "ewma_v1"
 EWMA_LAMBDA            = 0.96         # decay factor (weight on previous EWMA)
 EWMA_ALPHA             = 1.0 - EWMA_LAMBDA   # = 0.04 (Polars ewm_mean alpha)
 EWMA_HALF_LIFE_GAMES   = np.log(0.5) / np.log(EWMA_LAMBDA)   # ≈ 17 games
-HOT_SIGMA_THRESHOLD    = 0.75         # std devs above season mean → hot
-COLD_SIGMA_THRESHOLD   = 0.75         # std devs below season mean → cold
+HOT_SIGMA_THRESHOLD    = 1.0          # std devs above season mean → hot (~16% of players)
+COLD_SIGMA_THRESHOLD   = 1.0          # std devs below season mean → cold (~16% of players)
 MIN_GAMES_FOR_FLAG     = 5            # minimum GP before assigning hot/cold
 
 

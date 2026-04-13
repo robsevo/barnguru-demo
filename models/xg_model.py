@@ -202,9 +202,21 @@ def build_features(df: pl.DataFrame) -> tuple[np.ndarray, np.ndarray | None]:
         else np.zeros(n, dtype=np.float32)
     )
 
-    # Explicit power-play / penalty-kill dummies (more informative than raw diff)
-    is_pp = (skater_diff > 0).astype(np.float32)
-    is_pk = (skater_diff < 0).astype(np.float32)
+    # Explicit power-play / penalty-kill dummies from SHOOTING TEAM perspective.
+    # skater_diff = home - away, so its sign is from the HOME team's view.
+    # When home_team is available, compute correctly relative to the shooting team.
+    if "home_team" in df.columns:
+        home_team_arr = df["home_team"].fill_null("").to_numpy()
+        # Determine skater counts for shooting team and opposing team
+        shooting_is_home = (shooting == home_team_arr).astype(np.float32)
+        shooting_sk = np.where(shooting_is_home, home_sk, away_sk)
+        opposing_sk = np.where(shooting_is_home, away_sk, home_sk)
+        is_pp = (shooting_sk > opposing_sk).astype(np.float32)
+        is_pk = (shooting_sk < opposing_sk).astype(np.float32)
+    else:
+        # Fallback: home-team perspective (less accurate for away-team PP/PK shots)
+        is_pp = (skater_diff > 0).astype(np.float32)
+        is_pk = (skater_diff < 0).astype(np.float32)
 
     # Stack into feature matrix
     X = np.column_stack([

@@ -18,10 +18,15 @@ GAR Components
 --------------
 For skaters (Evolving Hockey v1.1 methodology):
 
-    GAR = (rapm_ev_off × 1.6 + rapm_ev_def × 1.4 − repl_ev) × (toi_ev / 60)
+    GAR = (rapm_ev_off × 1.6 − rapm_ev_def × 1.4 − repl_ev) × (toi_ev / 60)
           + (rapm_pp × 1.3 − repl_pp) × (toi_pp / 60)
-          + (rapm_pk × 1.3 − repl_pk) × (toi_pk / 60)
+          + (−rapm_pk × 1.3 − repl_pk) × (toi_pk / 60)
           + finishing_contribution
+
+    Sign convention note: Our RAPM defensive components (rapm_ev_def, rapm_pk)
+    are trained on home xGA as the target, so NEGATIVE = better defense.
+    We negate them before applying multipliers so that good defenders add to GAR
+    (consistent with EH convention where positive defensive RAPM = good defense).
 
     Multipliers (1.6 EV-off, 1.4 EV-def, 1.3 PP, 1.3 PK) correct for ridge
     shrinkage so that individual RAPMs sum to actual team goal differentials.
@@ -97,7 +102,7 @@ from models.rapm_model import DataMissingWarning
 # Constants
 # ---------------------------------------------------------------------------
 
-MODEL_VERSION = "war_v2"
+MODEL_VERSION = "war_v3"
 
 # Pythagorean goals/win.
 # Evolving Hockey uses exponent 2.091 with a season-varying value; the 3-year
@@ -254,7 +259,17 @@ def _compute_replacement_level(
         vals = repl_band[col].drop_nulls().cast(pl.Float64)
         return float(vals.mean()) if len(vals) > 0 else 0.0
 
-    repl_ev  = _mean("rapm_ev_off") + _mean("rapm_ev_def")
+    # Negate defensive component: our rapm_ev_def convention is negative = good defense,
+    # so we subtract it (equivalent to negating) to get the same sign as the GAR formula.
+    repl_ev  = _mean("rapm_ev_off") - _mean("rapm_ev_def")
+
+    # Sanity check: ridge regularization shrinks replacement-band RAPM values toward 0,
+    # so the data-driven estimate can be unreliably close to 0 (league average).
+    # If the computed replacement level is above -0.5 (i.e., the band looks too "average"),
+    # fall back to the EH-calibrated constant which accounts for shrinkage.
+    if repl_ev > -0.5:
+        repl_ev = REPLACEMENT_RAPM_EV_FALLBACK
+
     # PP/PK replacement levels from the band are unreliable because:
     #   - Many players in the band have ~0 PP/PK time → extreme small-sample RAPM
     #   - The EV-ranked band isn't a good proxy for PP/PK replacement
@@ -309,10 +324,16 @@ def gar_from_rapm(
     # Apply team-adjustment multipliers before computing above-replacement goals.
     # These correct for ridge shrinkage so that the sum of individual RAPMs
     # matches actual team goal differentials (Evolving Hockey methodology).
-    ev_off_adj = ev_off * MULTIPLIER_EV_OFF
-    ev_def_adj = ev_def * MULTIPLIER_EV_DEF
-    pp_adj     = pp     * MULTIPLIER_PP
-    pk_adj     = pk     * MULTIPLIER_PK
+    #
+    # Sign convention: our RAPM was trained with home xGA as the defensive target,
+    # so rapm_ev_def < 0 = good defense, rapm_pk < 0 = good PK.  We negate these
+    # so that "good player" always means a LARGER positive ev_def_adj / pk_adj,
+    # consistent with the Evolving Hockey GAR formula where all components are
+    # additive and positive = better.
+    ev_off_adj =   ev_off  * MULTIPLIER_EV_OFF
+    ev_def_adj = (-ev_def) * MULTIPLIER_EV_DEF   # negated: positive = better defense
+    pp_adj     =   pp      * MULTIPLIER_PP
+    pk_adj     = (-pk)     * MULTIPLIER_PK        # negated: positive = better PK
 
     # Above-replacement contribution in goals
     gaa_ev = (ev_off_adj + ev_def_adj - replacement_ev) * (toi_ev_min / 60.0)
