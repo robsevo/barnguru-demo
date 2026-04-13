@@ -1206,22 +1206,22 @@ function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
         {/* Heat layer — low xG: cool blue */}
         <g filter="url(#heatLo)">
           {loShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="5" fill="#38bdf8" opacity="0.22" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="4.5" fill="#38bdf8" opacity="0.16" />
           ))}
         </g>
         {/* Heat layer — mid xG: orange */}
         <g filter="url(#heatMed)">
           {medShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="6" fill="#f97316" opacity="0.28" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="5" fill="#f97316" opacity="0.21" />
           ))}
         </g>
         {/* Heat layer — high xG saves + goals: dark red */}
         <g filter="url(#heatHi)">
           {hiShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="7" fill="#b91c1c" opacity="0.34" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="6" fill="#b91c1c" opacity="0.26" />
           ))}
           {goals.map((s, i) => (
-            <circle key={`g${i}`} cx={s.x} cy={sy(s.y)} r="9" fill="#7f1d1d" opacity="0.42" />
+            <circle key={`g${i}`} cx={s.x} cy={sy(s.y)} r="8" fill="#7f1d1d" opacity="0.34" />
           ))}
         </g>
       </svg>
@@ -1257,20 +1257,20 @@ function GoalieShotMapViz({ shots }: { shots: ShotPoint[] }) {
 
         <g filter="url(#gheatLo)">
           {loShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="5" fill="#38bdf8" opacity="0.22" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="4.5" fill="#38bdf8" opacity="0.16" />
           ))}
         </g>
         <g filter="url(#gheatMed)">
           {medShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="6" fill="#f97316" opacity="0.28" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="5" fill="#f97316" opacity="0.21" />
           ))}
         </g>
         <g filter="url(#gheatHi)">
           {hiShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="7" fill="#b91c1c" opacity="0.34" />
+            <circle key={i} cx={s.x} cy={sy(s.y)} r="6" fill="#b91c1c" opacity="0.26" />
           ))}
           {goals.map((s, i) => (
-            <circle key={`g${i}`} cx={s.x} cy={sy(s.y)} r="9" fill="#7f1d1d" opacity="0.42" />
+            <circle key={`g${i}`} cx={s.x} cy={sy(s.y)} r="8" fill="#7f1d1d" opacity="0.34" />
           ))}
         </g>
       </svg>
