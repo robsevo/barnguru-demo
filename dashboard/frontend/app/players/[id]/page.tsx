@@ -1259,16 +1259,20 @@ function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
     { key: "hot",  label: "Hot",  tw: "bg-red-600" },
     { key: "goal", label: "Goal", color: "#b91c1c" },
   ];
+  // CCW-rotated: viewBox 85×100, transform wraps original 100×85 content
+  // boards (x=0) → bottom, net (x=89) → top
   return (
     <>
-      <svg viewBox="0 0 100 85" width="100%" className="block mx-auto max-w-[420px]"
+      <svg viewBox="0 0 85 100" width="100%" className="block mx-auto max-w-[320px]"
         style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}>
-        <HalfRinkMarkings />
-        {dotLayers.map(({ key, pts: lpts, r, fill, opacity }) =>
-          hidden.has(key) ? null : lpts.map((s, i) =>
-            <circle key={`${key}${i}`} cx={s.x} cy={sy(s.y)} r={r} fill={fill} opacity={opacity} />
-          )
-        )}
+        <g transform="translate(0,100) rotate(-90)">
+          <HalfRinkMarkings />
+          {dotLayers.map(({ key, pts: lpts, r, fill, opacity }) =>
+            hidden.has(key) ? null : lpts.map((s, i) =>
+              <circle key={`${key}${i}`} cx={s.x} cy={sy(s.y)} r={r} fill={fill} opacity={opacity} />
+            )
+          )}
+        </g>
       </svg>
       <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-2 text-[10px] font-semibold tracking-wide uppercase">
         {dotLegend.map(({ key, label, tw, color }) => {
@@ -1313,14 +1317,16 @@ function GoalieShotMapViz({ shots }: { shots: ShotPoint[] }) {
   ];
   return (
     <>
-      <svg viewBox="0 0 100 85" width="100%" className="block mx-auto max-w-[420px]"
+      <svg viewBox="0 0 85 100" width="100%" className="block mx-auto max-w-[320px]"
         style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}>
-        <HalfRinkMarkings />
-        {dotLayers.map(({ key, pts: lpts, r, fill, opacity }) =>
-          hidden.has(key) ? null : lpts.map((s, i) =>
-            <circle key={`${key}${i}`} cx={s.x} cy={sy(s.y)} r={r} fill={fill} opacity={opacity} />
-          )
-        )}
+        <g transform="translate(0,100) rotate(-90)">
+          <HalfRinkMarkings />
+          {dotLayers.map(({ key, pts: lpts, r, fill, opacity }) =>
+            hidden.has(key) ? null : lpts.map((s, i) =>
+              <circle key={`${key}${i}`} cx={s.x} cy={sy(s.y)} r={r} fill={fill} opacity={opacity} />
+            )
+          )}
+        </g>
       </svg>
       <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-2 text-[10px] font-semibold tracking-wide uppercase">
         {dotLegend.map(({ key, label, tw, color }) => {
@@ -1565,7 +1571,7 @@ function ZoneTendencyMap({ data, teamColor }: { data: ProfileData; teamColor: st
   const icePath = "M 0,85 L 0,14 Q 0,0 14,0 L 71,0 Q 85,0 85,14 L 85,85 Z";
 
   return (
-    <svg viewBox="0 0 85 100" width="100%" className="block mx-auto max-w-[280px]">
+    <svg viewBox="0 0 85 100" width="100%" className="block mx-auto max-w-[340px]">
       <defs>
         <clipPath id="ztClip">
           <path d={icePath} />
@@ -1575,64 +1581,59 @@ function ZoneTendencyMap({ data, teamColor }: { data: ProfileData; teamColor: st
       {/* Ice surface */}
       <path d={icePath} fill="#f0f6ff" stroke="#94b4cc" strokeWidth="1.6" />
 
-      {/* Zone fills — ordered back-to-front so hottest layers are on top */}
+      {/* Zone fills — ordered back-to-front */}
       {/* Perimeter — full OZ (y=11→75, x=0→85) */}
       <rect x="0" y="11" width="85" height="64" fill="#94a3b8" fillOpacity={op(perim)} clipPath="url(#ztClip)" />
-      {/* Left corner (orig top-corner) — x=0→30, y=11→45 */}
+      {/* Left corner — x=0→30, y=11→45 */}
       <rect x="0" y="11" width="30" height="34" fill="#38bdf8" fillOpacity={op(corner)} clipPath="url(#ztClip)" />
-      {/* Right corner (orig bottom-corner) — x=55→85, y=11→45 */}
+      {/* Right corner — x=55→85, y=11→45 */}
       <rect x="55" y="11" width="30" height="34" fill="#38bdf8" fillOpacity={op(hold)} clipPath="url(#ztClip)" />
       {/* Slot — x=30→55, y=11→45 */}
       <rect x="30" y="11" width="25" height="34" fill={teamColor} fillOpacity={op(slot)} clipPath="url(#ztClip)" />
       {/* Net front — x=35→50, y=11→22 */}
       <rect x="35" y="11" width="15" height="11" fill="#fbbf24" fillOpacity={op(net)} clipPath="url(#ztClip)" />
 
-      {/* Zone borders — thin outlines on active zones */}
-      {slot > 2 && <rect x="30" y="11" width="25" height="34" fill="none" stroke={teamColor} strokeWidth="0.8" strokeOpacity="0.7" clipPath="url(#ztClip)" />}
+      {/* Zone borders */}
+      {slot > 2 && <rect x="30" y="11" width="25" height="34" fill="none" stroke={teamColor} strokeWidth="0.7" strokeOpacity="0.75" clipPath="url(#ztClip)" />}
       {(corner > 2 || hold > 2) && <>
-        <rect x="0" y="11" width="30" height="34" fill="none" stroke="#38bdf8" strokeWidth="0.8" strokeOpacity="0.7" clipPath="url(#ztClip)" />
-        <rect x="55" y="11" width="30" height="34" fill="none" stroke="#38bdf8" strokeWidth="0.8" strokeOpacity="0.7" clipPath="url(#ztClip)" />
+        <rect x="0" y="11" width="30" height="34" fill="none" stroke="#38bdf8" strokeWidth="0.7" strokeOpacity="0.75" clipPath="url(#ztClip)" />
+        <rect x="55" y="11" width="30" height="34" fill="none" stroke="#38bdf8" strokeWidth="0.7" strokeOpacity="0.75" clipPath="url(#ztClip)" />
       </>}
-      {net > 2 && <rect x="35" y="11" width="15" height="11" fill="none" stroke="#f59e0b" strokeWidth="0.8" strokeOpacity="0.85" clipPath="url(#ztClip)" />}
-      {perim > 2 && <rect x="0" y="45" width="85" height="30" fill="none" stroke="#94a3b8" strokeWidth="0.7" strokeOpacity="0.5" clipPath="url(#ztClip)" />}
+      {net > 2 && <rect x="35" y="11" width="15" height="11" fill="none" stroke="#f59e0b" strokeWidth="0.8" strokeOpacity="0.9" clipPath="url(#ztClip)" />}
+      {perim > 2 && <rect x="0" y="45" width="85" height="30" fill="none" stroke="#94a3b8" strokeWidth="0.6" strokeOpacity="0.5" clipPath="url(#ztClip)" />}
 
-      {/* Ice markings (rotated) */}
-      {/* Blue line — orig x=25 → y=25 */}
+      {/* Ice markings */}
+      {/* Blue line — orig x=25 → y=75 */}
       <line x1="0.5" y1="75" x2="84.5" y2="75" stroke="#1155bb" strokeWidth="1.4" opacity="0.55" />
-      {/* Goal line — orig x=89 → y=89 (near bottom) */}
+      {/* Goal line — orig x=89 → y=11 */}
       <line x1="0.5" y1="11" x2="84.5" y2="11" stroke="#cc2222" strokeWidth="0.9" opacity="0.7" />
-      {/* Net — orig x=89-100, y=38.5-46.5 → x=38.5-46.5, y=0-11 */}
-      <rect x="38.5" y="0" width="8" height="11" rx="1" fill="rgba(180,180,180,0.4)" stroke="#777" strokeWidth="0.6" />
-      {/* Crease arc — rotated */}
-      <path d="M 35 11 A 8 8 0 0 1 50 11" fill="rgba(30,100,200,0.08)" stroke="#1155bb" strokeWidth="0.8" opacity="0.6" />
-      {/* Faceoff dots — orig (69,20.5) → (20.5, 31) and (69,64.5) → (64.5, 31) */}
+      {/* Trapezoid — goalie restricted area behind goal line */}
+      <polygon points="28,11 57,11 49,0 36,0" fill="none" stroke="#94a3b8" strokeWidth="0.6" strokeOpacity="0.55" strokeDasharray="2.5 1.5" clipPath="url(#ztClip)" />
+      {/* Net — sits above goal line (y=5→11), centered (x=36→49) */}
+      <rect x="36" y="5" width="13" height="6" rx="1" fill="rgba(180,180,180,0.45)" stroke="#666" strokeWidth="0.7" />
+      {/* Crease — arc curving into ice (sweep-flag 0 = CCW = downward) */}
+      <path d="M 33 11 A 9 9 0 0 0 52 11" fill="rgba(30,100,200,0.09)" stroke="#1155bb" strokeWidth="0.8" opacity="0.65" />
+      {/* Faceoff circles — orig (69,20.5)→(20.5,31) and (69,64.5)→(64.5,31) */}
       <circle cx="20.5" cy="31" r="9" fill="none" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
       <circle cx="64.5" cy="31" r="9" fill="none" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
       <circle cx="20.5" cy="31" r="0.85" fill="#cc2222" opacity="0.5" />
       <circle cx="64.5" cy="31" r="0.85" fill="#cc2222" opacity="0.5" />
-      {/* Left board line */}
-      <line x1="0" y1="0" x2="0" y2="100" stroke="#cc2222" strokeWidth="1.2" opacity="0.7" />
 
-      {/* Zone labels */}
-      {/* Perimeter — in the lower OZ band (y=45-75) */}
-      <text x="42.5" y="66" textAnchor="middle" fontSize="3" fontWeight="700" fill="rgba(30,40,80,0.55)" fontFamily="sans-serif" letterSpacing="0.3">PERIM</text>
-      <text x="42.5" y="72" textAnchor="middle" fontSize="5" fontWeight="800" fill="rgba(30,40,80,0.80)" fontFamily="sans-serif">{perim.toFixed(0)}%</text>
+      {/* Zone labels — Barlow font, clean */}
+      <text x="42.5" y="64" textAnchor="middle" fontSize="3.5" fontWeight="600" fill="rgba(30,40,80,0.5)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.5">PERIM</text>
+      <text x="42.5" y="71" textAnchor="middle" fontSize="6" fontWeight="800" fill="rgba(30,40,80,0.75)" fontFamily="Barlow, ui-sans-serif, sans-serif">{perim.toFixed(0)}%</text>
 
-      {/* Left corner */}
-      <text x="15" y="36" textAnchor="middle" fontSize="3" fontWeight="700" fill="rgba(30,40,80,0.55)" fontFamily="sans-serif" letterSpacing="0.3">CORNER</text>
-      <text x="15" y="41.5" textAnchor="middle" fontSize="5" fontWeight="800" fill="rgba(30,40,80,0.80)" fontFamily="sans-serif">{corner.toFixed(0)}%</text>
+      <text x="15" y="34" textAnchor="middle" fontSize="3" fontWeight="600" fill="rgba(30,40,80,0.5)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.4">CORNER</text>
+      <text x="15" y="41" textAnchor="middle" fontSize="5.5" fontWeight="800" fill="rgba(30,40,80,0.75)" fontFamily="Barlow, ui-sans-serif, sans-serif">{corner.toFixed(0)}%</text>
 
-      {/* Right corner */}
-      <text x="70" y="36" textAnchor="middle" fontSize="3" fontWeight="700" fill="rgba(30,40,80,0.55)" fontFamily="sans-serif" letterSpacing="0.3">CORNER</text>
-      <text x="70" y="41.5" textAnchor="middle" fontSize="5" fontWeight="800" fill="rgba(30,40,80,0.80)" fontFamily="sans-serif">{hold.toFixed(0)}%</text>
+      <text x="70" y="34" textAnchor="middle" fontSize="3" fontWeight="600" fill="rgba(30,40,80,0.5)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.4">CORNER</text>
+      <text x="70" y="41" textAnchor="middle" fontSize="5.5" fontWeight="800" fill="rgba(30,40,80,0.75)" fontFamily="Barlow, ui-sans-serif, sans-serif">{hold.toFixed(0)}%</text>
 
-      {/* Slot */}
-      <text x="42.5" y="33" textAnchor="middle" fontSize="3" fontWeight="700" fill="rgba(30,40,80,0.55)" fontFamily="sans-serif" letterSpacing="0.3">SLOT</text>
-      <text x="42.5" y="38.5" textAnchor="middle" fontSize="5" fontWeight="800" fill="rgba(30,40,80,0.80)" fontFamily="sans-serif">{slot.toFixed(0)}%</text>
+      <text x="42.5" y="31" textAnchor="middle" fontSize="3.5" fontWeight="600" fill="rgba(30,40,80,0.5)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.4">SLOT</text>
+      <text x="42.5" y="38.5" textAnchor="middle" fontSize="6" fontWeight="800" fill="rgba(30,40,80,0.75)" fontFamily="Barlow, ui-sans-serif, sans-serif">{slot.toFixed(0)}%</text>
 
-      {/* Net front — label below the crease */}
-      <text x="42.5" y="18" textAnchor="middle" fontSize="2.8" fontWeight="700" fill="rgba(120,80,0,0.7)" fontFamily="sans-serif" letterSpacing="0.2">NET FRONT</text>
-      <text x="42.5" y="23" textAnchor="middle" fontSize="4.5" fontWeight="800" fill="rgba(120,80,0,0.85)" fontFamily="sans-serif">{net.toFixed(0)}%</text>
+      <text x="42.5" y="16.5" textAnchor="middle" fontSize="2.8" fontWeight="600" fill="rgba(120,75,0,0.65)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.3">NET FRONT</text>
+      <text x="42.5" y="22" textAnchor="middle" fontSize="4.5" fontWeight="800" fill="rgba(120,75,0,0.80)" fontFamily="Barlow, ui-sans-serif, sans-serif">{net.toFixed(0)}%</text>
     </svg>
   );
 }
@@ -1650,11 +1651,11 @@ function IceTimeByZoneBars({ data }: { data: ProfileData }) {
   ];
 
   return (
-    <div className="w-full space-y-3 py-1">
+    <div className="w-full flex flex-col justify-center flex-1 space-y-4 py-3 px-1">
       {bars.map(b => (
         <div key={b.label} className="flex items-center gap-3">
-          <span className="text-[10px] font-black uppercase tracking-wider w-6 shrink-0" style={{ color: b.color }}>{b.label}</span>
-          <div className="flex-1 relative h-5 rounded-full overflow-hidden" style={{ background: b.track }}>
+          <span className="text-[11px] font-black uppercase tracking-wider w-7 shrink-0" style={{ color: b.color }}>{b.label}</span>
+          <div className="flex-1 relative h-7 rounded-full overflow-hidden" style={{ background: b.track }}>
             <div
               className="absolute inset-y-0 left-0 rounded-full transition-all duration-700"
               style={{ width: `${b.pct}%`, background: `linear-gradient(90deg, ${b.color}cc, ${b.color})` }}
@@ -1664,7 +1665,7 @@ function IceTimeByZoneBars({ data }: { data: ProfileData }) {
               <div key={g} className="absolute inset-y-0 w-px opacity-20" style={{ left: `${g}%`, background: "rgba(255,255,255,0.5)" }} />
             ))}
           </div>
-          <span className="text-[13px] font-black tabular-nums w-9 text-right shrink-0" style={{ color: b.color }}>{b.pct.toFixed(0)}%</span>
+          <span className="text-[15px] font-black tabular-nums w-10 text-right shrink-0" style={{ color: b.color }}>{b.pct.toFixed(0)}%</span>
         </div>
       ))}
       <p className="text-[8px] text-white/20 text-center mt-1">% of skating time per zone</p>
@@ -2432,9 +2433,9 @@ export default function PlayerProfilePage() {
         {!isGoalie && (
           <div className="sm:col-span-2">
             <Card title="Zone Tendencies" style={cardStyle}>
-              <div className="flex flex-col sm:flex-row gap-6 sm:gap-10 items-center sm:items-start justify-center">
+              <div className="flex flex-col sm:flex-row gap-6 sm:gap-10 items-stretch justify-center">
                 {/* Ice Time By Zone — left, bar charts */}
-                <div className="flex flex-col w-full sm:flex-1 min-w-0">
+                <div className="flex flex-col w-full sm:flex-1 min-w-0 justify-center">
                   <p className="text-[9px] font-semibold uppercase tracking-wider text-white/30 mb-3 text-center">
                     Ice Time By Zone
                   </p>
