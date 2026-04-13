@@ -2344,12 +2344,14 @@ export default function PlayerProfilePage() {
                 />
               )}
               {data.hits_per60 != null && (
-                <StatRow label="Hits / 60" value={data.hits_per60.toFixed(2)} sub="Physical hits per 60 minutes"
-                  tip="Physical hits delivered per 60 minutes. Context stat — high hitters can disrupt play but excessive hits can also mean getting caught out of position." />
+                <div className="px-4 py-2 border-b border-white/[0.05]">
+                  <BarStat label="Hits / 60" value={data.hits_per60} max={8} color="#f97316" suffix="" />
+                </div>
               )}
               {data.blocks_per60 != null && (
-                <StatRow label="Blocked Shots / 60" value={data.blocks_per60.toFixed(2)} sub="Blocked shots per 60 minutes"
-                  tip="Shots blocked per 60 minutes. Blocking shots is a commitment to defense — but blocking too many can also indicate spending time in defensive situations." />
+                <div className="px-4 py-2 border-b border-white/[0.05]">
+                  <BarStat label="Blocked Shots / 60" value={data.blocks_per60} max={5} color="#38bdf8" suffix="" />
+                </div>
               )}
             </div>
           </Card>
