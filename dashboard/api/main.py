@@ -3247,14 +3247,30 @@ async def player_profile(player_id: int) -> dict:
                 rapm_df = pl.read_parquet(rapm_path)
                 rapm_row = rapm_df.filter(pl.col("player_id") == player_id)
                 if not rapm_row.is_empty():
+                    toi_ev_val = round(float(rapm_row["toi_ev"][0]), 1) if "toi_ev" in rapm_df.columns else None
+                    shots_p60  = round(float(rapm_row["shots_per60"][0]), 2) if "shots_per60" in rapm_df.columns else None
+                    goals_p60  = round(float(rapm_row["goals_per60"][0]), 2) if "goals_per60" in rapm_df.columns else None
+                    xgf_p60    = round(float(rapm_row["xgf_per60"][0]), 2) if "xgf_per60" in rapm_df.columns else None
+
+                    # Derive per-60 from raw counts + toi_ev when RAPM parquet lacks them
+                    toi_h = (toi_ev_val or 0) / 3600
+                    if goals_p60 is None and toi_h > 0:
+                        raw_goals = result.get("goals")
+                        if raw_goals is not None:
+                            goals_p60 = round(float(raw_goals) / toi_h, 2)
+                    if shots_p60 is None and toi_h > 0:
+                        raw_shots = result.get("shots")
+                        if raw_shots is not None:
+                            shots_p60 = round(float(raw_shots) / toi_h, 2)
+
                     result.update({
                         "rapm_ev_off": round(float(rapm_row["rapm_ev_off"][0]), 3),
                         "rapm_ev_def": round(float(rapm_row["rapm_ev_def"][0]), 3),
                         "rapm_xga_60": round(float(rapm_row["xga_60"][0]), 2) if "xga_60" in rapm_df.columns else None,
-                        "shots_per60": round(float(rapm_row["shots_per60"][0]), 2) if "shots_per60" in rapm_df.columns else None,
-                        "goals_per60": round(float(rapm_row["goals_per60"][0]), 2) if "goals_per60" in rapm_df.columns else None,
-                        "xgf_per60":   round(float(rapm_row["xgf_per60"][0]), 2) if "xgf_per60" in rapm_df.columns else None,
-                        "toi_ev":      round(float(rapm_row["toi_ev"][0]), 1) if "toi_ev" in rapm_df.columns else None,
+                        "shots_per60": shots_p60,
+                        "goals_per60": goals_p60,
+                        "xgf_per60":   xgf_p60,
+                        "toi_ev":      toi_ev_val,
                     })
         except Exception:
             pass
