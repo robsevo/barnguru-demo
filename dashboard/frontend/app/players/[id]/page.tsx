@@ -1237,14 +1237,108 @@ function ShotHeatMapViz({ shots, maxShots = 900 }: { shots: ShotPoint[]; maxShot
   );
 }
 
-/** Skater shot map — blurred xG heat map */
+/** Skater shot map — xG-colored dots with toggleable layers */
 function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
-  return <ShotHeatMapViz shots={shots} maxShots={800} />;
+  type DotLayer = "low" | "med" | "high" | "hot" | "goal";
+  const [hidden, setHidden] = useState<Set<DotLayer>>(new Set());
+  const toggle = (layer: DotLayer) =>
+    setHidden(prev => { const next = new Set(prev); next.has(layer) ? next.delete(layer) : next.add(layer); return next; });
+
+  const sy = (y: number) => 42.5 - y;
+  const pts = shots.slice(-800);
+  const dotLayers: { key: DotLayer; pts: ShotPoint[]; r: string; fill: string; opacity: string }[] = [
+    { key: "low",  pts: pts.filter(s => !s.goal && s.xg < 0.05),                r: "3",   fill: "#22c55e", opacity: "0.65" },
+    { key: "med",  pts: pts.filter(s => !s.goal && s.xg >= 0.05 && s.xg < 0.12), r: "3",   fill: "#fbbf24", opacity: "0.70" },
+    { key: "high", pts: pts.filter(s => !s.goal && s.xg >= 0.12 && s.xg < 0.22), r: "3",   fill: "#f97316", opacity: "0.75" },
+    { key: "hot",  pts: pts.filter(s => !s.goal && s.xg >= 0.22),                r: "3",   fill: "#dc2626", opacity: "0.80" },
+    { key: "goal", pts: pts.filter(s => s.goal),                                  r: "3.2", fill: "#b91c1c", opacity: "0.95" },
+  ];
+  const dotLegend: { key: DotLayer; label: string; color?: string; tw?: string }[] = [
+    { key: "low",  label: "Low",  tw: "bg-green-500" },
+    { key: "med",  label: "Med",  tw: "bg-yellow-400" },
+    { key: "high", label: "High", tw: "bg-orange-500" },
+    { key: "hot",  label: "Hot",  tw: "bg-red-600" },
+    { key: "goal", label: "Goal", color: "#b91c1c" },
+  ];
+  return (
+    <>
+      <svg viewBox="0 0 100 85" width="100%" className="block mx-auto max-w-[420px]"
+        style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}>
+        <HalfRinkMarkings />
+        {dotLayers.map(({ key, pts: lpts, r, fill, opacity }) =>
+          hidden.has(key) ? null : lpts.map((s, i) =>
+            <circle key={`${key}${i}`} cx={s.x} cy={sy(s.y)} r={r} fill={fill} opacity={opacity} />
+          )
+        )}
+      </svg>
+      <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-2 text-[10px] font-semibold tracking-wide uppercase">
+        {dotLegend.map(({ key, label, tw, color }) => {
+          const off = hidden.has(key);
+          return (
+            <span key={key} onClick={() => toggle(key)}
+              className={`flex items-center gap-1.5 cursor-pointer select-none transition-opacity ${off ? "opacity-25" : "opacity-100"}`}
+              style={{ color: off ? "#52525b" : "#71717a" }}>
+              <span className={`inline-block w-2.5 h-2.5 rounded-full ${tw ?? ""}`}
+                style={color ? { backgroundColor: color } : {}} />
+              {label}
+            </span>
+          );
+        })}
+      </div>
+    </>
+  );
 }
 
-/** Goalie shots-against map — same heat map, more shots */
+/** Goalie shots-against map — same xG-colored dots as skater map */
 function GoalieShotMapViz({ shots }: { shots: ShotPoint[] }) {
-  return <ShotHeatMapViz shots={shots} maxShots={900} />;
+  type DotLayer = "low" | "med" | "high" | "hot" | "goal";
+  const [hidden, setHidden] = useState<Set<DotLayer>>(new Set());
+  const toggle = (layer: DotLayer) =>
+    setHidden(prev => { const next = new Set(prev); next.has(layer) ? next.delete(layer) : next.add(layer); return next; });
+
+  const sy = (y: number) => 42.5 - y;
+  const pts = shots.slice(-900);
+  const dotLayers: { key: DotLayer; pts: ShotPoint[]; r: string; fill: string; opacity: string }[] = [
+    { key: "low",  pts: pts.filter(s => !s.goal && s.xg < 0.05),                r: "3",   fill: "#22c55e", opacity: "0.65" },
+    { key: "med",  pts: pts.filter(s => !s.goal && s.xg >= 0.05 && s.xg < 0.12), r: "3",   fill: "#fbbf24", opacity: "0.70" },
+    { key: "high", pts: pts.filter(s => !s.goal && s.xg >= 0.12 && s.xg < 0.22), r: "3",   fill: "#f97316", opacity: "0.75" },
+    { key: "hot",  pts: pts.filter(s => !s.goal && s.xg >= 0.22),                r: "3",   fill: "#dc2626", opacity: "0.80" },
+    { key: "goal", pts: pts.filter(s => s.goal),                                  r: "3.2", fill: "#b91c1c", opacity: "0.95" },
+  ];
+  const dotLegend: { key: DotLayer; label: string; color?: string; tw?: string }[] = [
+    { key: "low",  label: "Low",  tw: "bg-green-500" },
+    { key: "med",  label: "Med",  tw: "bg-yellow-400" },
+    { key: "high", label: "High", tw: "bg-orange-500" },
+    { key: "hot",  label: "Hot",  tw: "bg-red-600" },
+    { key: "goal", label: "Goal", color: "#b91c1c" },
+  ];
+  return (
+    <>
+      <svg viewBox="0 0 100 85" width="100%" className="block mx-auto max-w-[420px]"
+        style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}>
+        <HalfRinkMarkings />
+        {dotLayers.map(({ key, pts: lpts, r, fill, opacity }) =>
+          hidden.has(key) ? null : lpts.map((s, i) =>
+            <circle key={`${key}${i}`} cx={s.x} cy={sy(s.y)} r={r} fill={fill} opacity={opacity} />
+          )
+        )}
+      </svg>
+      <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-2 text-[10px] font-semibold tracking-wide uppercase">
+        {dotLegend.map(({ key, label, tw, color }) => {
+          const off = hidden.has(key);
+          return (
+            <span key={key} onClick={() => toggle(key)}
+              className={`flex items-center gap-1.5 cursor-pointer select-none transition-opacity ${off ? "opacity-25" : "opacity-100"}`}
+              style={{ color: off ? "#52525b" : "#71717a" }}>
+              <span className={`inline-block w-2.5 h-2.5 rounded-full ${tw ?? ""}`}
+                style={color ? { backgroundColor: color } : {}} />
+              {label}
+            </span>
+          );
+        })}
+      </div>
+    </>
+  );
 }
 
 /** Goalie shot-type + zone breakdown — "neural net" tendency analysis */
