@@ -1160,52 +1160,74 @@ function HalfRinkMarkings() {
   );
 }
 
-/** Shared heat map legend rendered as HTML (ensures Barlow font loads correctly). */
-type ShotLayer = "low" | "med" | "high" | "hot" | "goal";
+/** Shared blurred heat map — used for both skater shots and goalie shots-against. */
+type ShotLayer = "lo" | "med" | "hi" | "goal";
 
-function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
+function ShotHeatMapViz({ shots, maxShots = 900 }: { shots: ShotPoint[]; maxShots?: number }) {
   const [hidden, setHidden] = useState<Set<ShotLayer>>(new Set());
   const toggle = (layer: ShotLayer) =>
     setHidden(prev => { const next = new Set(prev); next.has(layer) ? next.delete(layer) : next.add(layer); return next; });
 
   const sy = (y: number) => 42.5 - y;
-  const pts = shots.slice(-800);
-  const layers: { key: ShotLayer; pts: ShotPoint[]; r: string; fill: string; opacity: string }[] = [
-    { key: "low",  pts: pts.filter(s => !s.goal && s.xg < 0.05),               r: "3",   fill: "#22c55e", opacity: "0.65" },
-    { key: "med",  pts: pts.filter(s => !s.goal && s.xg >= 0.05 && s.xg < 0.12), r: "3",   fill: "#fbbf24", opacity: "0.70" },
-    { key: "high", pts: pts.filter(s => !s.goal && s.xg >= 0.12 && s.xg < 0.22), r: "3",   fill: "#f97316", opacity: "0.75" },
-    { key: "hot",  pts: pts.filter(s => !s.goal && s.xg >= 0.22),               r: "3",   fill: "#dc2626", opacity: "0.80" },
-    { key: "goal", pts: pts.filter(s => s.goal),                                 r: "3.2", fill: "#b91c1c", opacity: "0.95" },
-  ];
+  const pts = shots.slice(-maxShots);
 
-  const legendItems: { key: ShotLayer; label: string; color?: string; tw?: string }[] = [
-    { key: "low",  label: "Low",  tw: "bg-green-500" },
-    { key: "med",  label: "Med",  tw: "bg-yellow-400" },
-    { key: "high", label: "High", tw: "bg-orange-500" },
-    { key: "hot",  label: "Hot",  tw: "bg-red-600" },
-    { key: "goal", label: "Goal", color: "#b91c1c" },
+  const lo   = pts.filter(s => !s.goal && s.xg < 0.08);
+  const med  = pts.filter(s => !s.goal && s.xg >= 0.08 && s.xg < 0.20);
+  const hi   = pts.filter(s => !s.goal && s.xg >= 0.20);
+  const goals = pts.filter(s => s.goal);
+
+  const legendItems: { key: ShotLayer; label: string; tw: string }[] = [
+    { key: "lo",   label: "Low xG",        tw: "bg-sky-400" },
+    { key: "med",  label: "Med xG",        tw: "bg-orange-400" },
+    { key: "hi",   label: "High xG",       tw: "bg-red-700" },
+    { key: "goal", label: "Goal",          tw: "bg-red-950" },
   ];
 
   return (
     <>
       <svg viewBox="0 0 100 85" width="100%" className="block mx-auto max-w-[420px]"
         style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}>
+        <defs>
+          {/* Blur per tier — tighter blur on high-xG so hot spots stay crisp */}
+          <filter id="heatLo"   x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="5"/></filter>
+          <filter id="heatMed"  x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="4.5"/></filter>
+          <filter id="heatHi"   x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="4"/></filter>
+          <filter id="heatGoal" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="3.5"/></filter>
+        </defs>
         <HalfRinkMarkings />
-        {layers.map(({ key, pts: lpts, r, fill, opacity }) =>
-          hidden.has(key) ? null : lpts.map((s, i) =>
-            <circle key={`${key}${i}`} cx={s.x} cy={sy(s.y)} r={r} fill={fill} opacity={opacity} />
-          )
+        {/* Low xG — sky blue, large blur, low opacity per circle */}
+        {!hidden.has("lo") && lo.length > 0 && (
+          <g filter="url(#heatLo)">
+            {lo.map((s, i) => <circle key={i} cx={s.x} cy={sy(s.y)} r="4" fill="#38bdf8" opacity="0.13" />)}
+          </g>
+        )}
+        {/* Med xG — orange mid-layer */}
+        {!hidden.has("med") && med.length > 0 && (
+          <g filter="url(#heatMed)">
+            {med.map((s, i) => <circle key={i} cx={s.x} cy={sy(s.y)} r="5" fill="#f97316" opacity="0.16" />)}
+          </g>
+        )}
+        {/* High xG saves — red hot zone */}
+        {!hidden.has("hi") && hi.length > 0 && (
+          <g filter="url(#heatHi)">
+            {hi.map((s, i) => <circle key={i} cx={s.x} cy={sy(s.y)} r="5.5" fill="#dc2626" opacity="0.20" />)}
+          </g>
+        )}
+        {/* Goals — darkest red, extra radius so goal clusters glow more than saves */}
+        {!hidden.has("goal") && goals.length > 0 && (
+          <g filter="url(#heatGoal)">
+            {goals.map((s, i) => <circle key={i} cx={s.x} cy={sy(s.y)} r="7" fill="#7f1d1d" opacity="0.28" />)}
+          </g>
         )}
       </svg>
-      <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-2 text-[10px] font-semibold tracking-wide uppercase">
-        {legendItems.map(({ key, label, tw, color }) => {
+      <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 mt-2 text-[10px] font-semibold tracking-wide uppercase">
+        {legendItems.map(({ key, label, tw }) => {
           const off = hidden.has(key);
           return (
             <span key={key} onClick={() => toggle(key)}
               className={`flex items-center gap-1.5 cursor-pointer select-none transition-opacity ${off ? "opacity-25" : "opacity-100"}`}
               style={{ color: off ? "#52525b" : "#71717a" }}>
-              <span className={`inline-block w-2.5 h-2.5 rounded-full ${tw ?? ""}`}
-                style={color ? { backgroundColor: color } : {}} />
+              <span className={`inline-block w-2.5 h-2.5 rounded-full ${tw}`} />
               {label}
             </span>
           );
@@ -1215,56 +1237,147 @@ function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
   );
 }
 
-/** Shot map of shots AGAINST a goalie — same xG-tiered dots with toggleable layers. */
+/** Skater shot map — blurred xG heat map */
+function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
+  return <ShotHeatMapViz shots={shots} maxShots={800} />;
+}
+
+/** Goalie shots-against map — same heat map, more shots */
 function GoalieShotMapViz({ shots }: { shots: ShotPoint[] }) {
-  const [hidden, setHidden] = useState<Set<ShotLayer>>(new Set());
-  const toggle = (layer: ShotLayer) =>
-    setHidden(prev => { const next = new Set(prev); next.has(layer) ? next.delete(layer) : next.add(layer); return next; });
+  return <ShotHeatMapViz shots={shots} maxShots={900} />;
+}
 
-  const sy = (y: number) => 42.5 - y;
-  const pts = shots.slice(-800);
-  const layers: { key: ShotLayer; pts: ShotPoint[]; r: string; fill: string; opacity: string }[] = [
-    { key: "low",  pts: pts.filter(s => !s.goal && s.xg < 0.05),               r: "3",   fill: "#22c55e", opacity: "0.65" },
-    { key: "med",  pts: pts.filter(s => !s.goal && s.xg >= 0.05 && s.xg < 0.12), r: "3",   fill: "#fbbf24", opacity: "0.70" },
-    { key: "high", pts: pts.filter(s => !s.goal && s.xg >= 0.12 && s.xg < 0.22), r: "3",   fill: "#f97316", opacity: "0.75" },
-    { key: "hot",  pts: pts.filter(s => !s.goal && s.xg >= 0.22),               r: "3",   fill: "#dc2626", opacity: "0.80" },
-    { key: "goal", pts: pts.filter(s => s.goal),                                 r: "3.2", fill: "#b91c1c", opacity: "0.95" },
-  ];
+/** Goalie shot-type + zone breakdown — "neural net" tendency analysis */
+interface GoalieNetData {
+  status: string;
+  total_shots: number;
+  goals_allowed: number;
+  overall_sv_pct: number | null;
+  shot_types: { type: string; shots: number; goals: number; sv_pct: number }[];
+  zones: { side: string; dist: string; shots: number; goals: number; sv_pct: number }[];
+}
 
-  const legendItems = [
-    { key: "low"  as ShotLayer, label: "Low",  tw: "bg-green-500" },
-    { key: "med"  as ShotLayer, label: "Med",  tw: "bg-yellow-400" },
-    { key: "high" as ShotLayer, label: "High", tw: "bg-orange-500" },
-    { key: "hot"  as ShotLayer, label: "Hot",  tw: "bg-red-600" },
-    { key: "goal" as ShotLayer, label: "Goal", color: "#b91c1c" },
-  ];
+// League-average save% by shot type (approximate from MoneyPuck population)
+const LEAGUE_SV_BY_TYPE: Record<string, number> = {
+  "Wrist": 0.919, "Slap": 0.921, "Snap": 0.912,
+  "Tip-In": 0.844, "Deflection": 0.832, "Backhand": 0.888, "Wraparound": 0.880,
+};
+
+// League-average sv% by (side, dist) — close shots are hardest regardless of side
+const LEAGUE_SV_BY_ZONE: Record<string, Record<string, number>> = {
+  close: { left: 0.876, center: 0.848, right: 0.876 },
+  mid:   { left: 0.925, center: 0.912, right: 0.925 },
+  far:   { left: 0.952, center: 0.946, right: 0.952 },
+};
+
+function GoalieNeuralNetViz({ netData }: { netData: GoalieNetData }) {
+  const svColor = (sv: number, leagueAvg: number) => {
+    const delta = sv - leagueAvg;
+    if (delta >= 0.025) return "#15803d";   // green — well above average
+    if (delta >= 0.005) return "#65a30d";   // light green
+    if (delta >= -0.005) return "#a16207";  // amber — near average
+    if (delta >= -0.025) return "#c2410c";  // orange — below average
+    return "#991b1b";                       // red — well below average
+  };
+
+  const fmtSv = (sv: number) => `${(sv * 100).toFixed(1)}%`;
+
+  // Zone grid: 3 dist rows (close/mid/far) × 3 side columns (left/center/right)
+  const distOrder = ["close", "mid", "far"] as const;
+  const sideOrder = ["left", "center", "right"] as const;
+  const distLabel: Record<string, string> = { close: "< 25ft", mid: "25–45ft", far: "> 45ft" };
+  const sideLabel: Record<string, string> = { left: "Left", center: "Center", right: "Right" };
+
+  const zoneMap: Record<string, Record<string, { sv_pct: number; shots: number } | null>> = {};
+  for (const d of distOrder) { zoneMap[d] = {}; for (const s of sideOrder) zoneMap[d][s] = null; }
+  for (const z of netData.zones) zoneMap[z.dist]?.[z.side] !== undefined && (zoneMap[z.dist][z.side] = { sv_pct: z.sv_pct, shots: z.shots });
 
   return (
-    <>
-      <svg viewBox="0 0 100 85" width="100%" className="block mx-auto max-w-[420px]"
-        style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}>
-        <HalfRinkMarkings />
-        {layers.map(({ key, pts: lpts, r, fill, opacity }) =>
-          hidden.has(key) ? null : lpts.map((s, i) =>
-            <circle key={`${key}${i}`} cx={s.x} cy={sy(s.y)} r={r} fill={fill} opacity={opacity} />
-          )
-        )}
-      </svg>
-      <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-2 text-[10px] font-semibold tracking-wide uppercase">
-        {legendItems.map(({ key, label, tw, color }) => {
-          const off = hidden.has(key);
-          return (
-            <span key={key} onClick={() => toggle(key)}
-              className={`flex items-center gap-1.5 cursor-pointer select-none transition-opacity ${off ? "opacity-25" : "opacity-100"}`}
-              style={{ color: off ? "#52525b" : "#71717a" }}>
-              <span className={`inline-block w-2.5 h-2.5 rounded-full ${tw ?? ""}`}
-                style={color ? { backgroundColor: color } : {}} />
-              {label}
-            </span>
-          );
-        })}
+    <div className="space-y-5">
+      {/* Zone grid */}
+      <div>
+        <p className="text-[9px] font-semibold uppercase tracking-widest text-white/25 text-center mb-2">
+          Save % by Distance &amp; Lateral Zone
+        </p>
+        <div className="overflow-x-auto">
+          <table className="w-full text-center border-collapse" style={{ minWidth: 220 }}>
+            <thead>
+              <tr>
+                <th className="text-[8px] font-semibold text-white/20 uppercase tracking-wider pb-1 pr-1 text-left w-14"></th>
+                {sideOrder.map(s => (
+                  <th key={s} className="text-[8px] font-semibold text-white/30 uppercase tracking-wider pb-1 px-1">
+                    {sideLabel[s]}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {distOrder.map(dist => (
+                <tr key={dist}>
+                  <td className="text-[8px] text-white/25 font-medium pr-2 py-0.5 text-left whitespace-nowrap">
+                    {distLabel[dist]}
+                  </td>
+                  {sideOrder.map(side => {
+                    const cell = zoneMap[dist][side];
+                    const lg = LEAGUE_SV_BY_ZONE[dist]?.[side] ?? 0.91;
+                    if (!cell) {
+                      return <td key={side} className="px-1 py-0.5"><span className="text-[9px] text-white/15">—</span></td>;
+                    }
+                    const bg = svColor(cell.sv_pct, lg);
+                    return (
+                      <td key={side} className="px-1 py-0.5">
+                        <div className="rounded py-1 px-0.5" style={{ backgroundColor: bg + "33", border: `1px solid ${bg}55` }}>
+                          <div className="text-[10px] font-bold" style={{ color: bg }}>{fmtSv(cell.sv_pct)}</div>
+                          <div className="text-[7px] text-white/20">{cell.shots}sh</div>
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-[7.5px] text-white/15 text-center mt-1">
+          Green = above avg · Red = below avg · vs league baseline
+        </p>
       </div>
-    </>
+
+      {/* Shot type breakdown */}
+      {netData.shot_types.length > 0 && (
+        <div>
+          <p className="text-[9px] font-semibold uppercase tracking-widest text-white/25 text-center mb-2">
+            Save % by Shot Type
+          </p>
+          <div className="space-y-1.5">
+            {netData.shot_types.map(t => {
+              const lg = LEAGUE_SV_BY_TYPE[t.type] ?? 0.91;
+              const col = svColor(t.sv_pct, lg);
+              const barPct = Math.round(t.sv_pct * 100);
+              const lgBarPct = Math.round(lg * 100);
+              return (
+                <div key={t.type} className="flex items-center gap-2">
+                  <span className="text-[9px] text-white/40 font-semibold w-20 shrink-0 text-right">{t.type}</span>
+                  <div className="flex-1 relative h-4 rounded bg-white/[0.04] overflow-hidden">
+                    <div className="absolute inset-y-0 left-0 rounded transition-all"
+                      style={{ width: `${barPct}%`, backgroundColor: col + "55" }} />
+                    {/* League avg tick */}
+                    <div className="absolute inset-y-0 border-l border-dashed border-white/20"
+                      style={{ left: `${lgBarPct}%` }} />
+                    <span className="absolute inset-y-0 right-1 flex items-center text-[9px] font-bold"
+                      style={{ color: col }}>{fmtSv(t.sv_pct)}</span>
+                  </div>
+                  <span className="text-[8px] text-white/20 w-10 shrink-0">{t.shots}sh</span>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[7.5px] text-white/15 text-center mt-2">
+            Dashed line = league avg · last 2 seasons
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 /** Goalie save% by zone — color-coded half-rink with HD/MD/LD bands. */
@@ -1471,6 +1584,7 @@ export default function PlayerProfilePage() {
   const [imgErr, setImgErr] = useState(false);
   const [shots, setShots] = useState<ShotPoint[]>([]);
   const [goalieShots, setGoalieShots] = useState<ShotPoint[]>([]);
+  const [goalieNetData, setGoalieNetData] = useState<GoalieNetData | null>(null);
   // Current-season stats fetched from nhl-team route
   const [nhlStats, setNhlStats] = useState<{
     gp: number; goals: number; assists: number; points: number; plus_minus: number;
@@ -1660,6 +1774,14 @@ export default function PlayerProfilePage() {
     fetch(`/api/goalie-shots/${data.player_id}`)
       .then(r => r.json())
       .then(d => { if (d.shots?.length) setGoalieShots(d.shots); })
+      .catch(() => {});
+  }, [data?.player_id, data?.is_goalie]);
+
+  useEffect(() => {
+    if (!data?.player_id || !data?.is_goalie) return;
+    fetch(`/api/goalie-neural-net/${data.player_id}`)
+      .then(r => r.json())
+      .then(d => { if (d.status === "ok") setGoalieNetData(d); })
       .catch(() => {});
   }, [data?.player_id, data?.is_goalie]);
 
@@ -2646,6 +2768,18 @@ export default function PlayerProfilePage() {
                 Color coded vs league averages · green = above avg · red = below avg
               </p>
               <GoalieZoneViz data={data} />
+            </Card>
+          </div>
+        )}
+
+        {/* Goalie — neural net: shot-type + zone tendencies */}
+        {isGoalie && goalieNetData && (
+          <div className="sm:col-span-2">
+            <Card title="Shot Tendency Analysis" style={cardStyle}>
+              <p className="text-[9px] text-white/25 uppercase tracking-wider text-center mb-4">
+                {goalieNetData.total_shots} shots faced · {goalieNetData.goals_allowed} goals · sv {goalieNetData.overall_sv_pct != null ? `${(goalieNetData.overall_sv_pct * 100).toFixed(1)}%` : "—"} · last 2 seasons
+              </p>
+              <GoalieNeuralNetViz netData={goalieNetData} />
             </Card>
           </div>
         )}

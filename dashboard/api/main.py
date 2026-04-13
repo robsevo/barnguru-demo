@@ -6330,3 +6330,111 @@ async def goalie_shots(player_id: int):
         })
     return {"shots": shots_out, "count": len(shots_out), "status": "ok"}
 
+
+
+@app.get("/goalie-neural-net/{player_id}")
+async def goalie_neural_net(player_id: int):
+    """Return shot-type + zone save% breakdown for a goalie — last 2 seasons."""
+    shots_dir = _GRETZKY_DATA_DIR / "shots"
+    if not shots_dir.exists():
+        return {"status": "no_data", "shot_types": [], "zones": []}
+    files = sorted(shots_dir.glob("*.parquet"))
+    if not files:
+        return {"status": "no_data", "shot_types": [], "zones": []}
+    import polars as pl
+
+    want_cols = {"goalie_id", "arena_adj_x", "arena_adj_y", "is_goal", "shot_type"}
+    dfs = []
+    for f in files[-2:]:
+        try:
+            schema = pl.read_parquet_schema(f)
+            cols = [c for c in want_cols if c in schema]
+            if "goalie_id" not in cols:
+                continue
+            dfs.append(pl.read_parquet(f, columns=cols))
+        except Exception:
+            pass
+    if not dfs:
+        return {"status": "no_data", "shot_types": [], "zones": []}
+
+    combined = pl.concat(dfs, how="diagonal_relaxed")
+    df = combined.filter(pl.col("goalie_id") == player_id)
+    if len(df) == 0:
+        return {"status": "no_shots", "shot_types": [], "zones": []}
+
+    total = len(df)
+    goals_allowed = int(df["is_goal"].cast(pl.Int64).sum()) if "is_goal" in df.columns else 0
+
+    type_labels = {
+        "WRIST": "Wrist", "SLAP": "Slap", "SNAP": "Snap",
+        "TIP": "Tip-In", "DEFL": "Deflection", "BACK": "Backhand", "WRAP": "Wraparound",
+    }
+    shot_types_out = []
+    if "shot_type" in df.columns:
+        by_type = (
+            df.filter(pl.col("shot_type").is_not_null())
+            .group_by("shot_type")
+            .agg([
+                pl.len().alias("shots"),
+                pl.col("is_goal").cast(pl.Int64).sum().alias("goals"),
+            ])
+            .with_columns(
+                (1.0 - pl.col("goals").cast(pl.Float64) / pl.col("shots").cast(pl.Float64)).alias("sv_pct")
+            )
+            .filter(pl.col("shots") >= 10)
+            .sort("shots", descending=True)
+        )
+        for row in by_type.to_dicts():
+            shot_types_out.append({
+                "type": type_labels.get(row["shot_type"], row["shot_type"]),
+                "shots": int(row["shots"]),
+                "goals": int(row["goals"]),
+                "sv_pct": round(float(row["sv_pct"]), 4),
+            })
+
+    zones_out = []
+    if "arena_adj_x" in df.columns and "arena_adj_y" in df.columns:
+        df2 = (
+            df
+            .filter(pl.col("arena_adj_x").is_not_null() & pl.col("arena_adj_y").is_not_null())
+            .with_columns([
+                ((89.0 - pl.col("arena_adj_x").cast(pl.Float64)) ** 2
+                 + pl.col("arena_adj_y").cast(pl.Float64) ** 2).sqrt().alias("_dist"),
+                pl.when(pl.col("arena_adj_y").cast(pl.Float64) > 14).then(pl.lit("right"))
+                  .when(pl.col("arena_adj_y").cast(pl.Float64) < -14).then(pl.lit("left"))
+                  .otherwise(pl.lit("center")).alias("_side"),
+            ])
+            .with_columns(
+                pl.when(pl.col("_dist") < 25).then(pl.lit("close"))
+                  .when(pl.col("_dist") < 45).then(pl.lit("mid"))
+                  .otherwise(pl.lit("far")).alias("_dist_zone"),
+            )
+        )
+        by_zone = (
+            df2.group_by(["_side", "_dist_zone"])
+            .agg([
+                pl.len().alias("shots"),
+                pl.col("is_goal").cast(pl.Int64).sum().alias("goals"),
+            ])
+            .with_columns(
+                (1.0 - pl.col("goals").cast(pl.Float64) / pl.col("shots").cast(pl.Float64)).alias("sv_pct")
+            )
+            .filter(pl.col("shots") >= 5)
+        )
+        for row in by_zone.to_dicts():
+            zones_out.append({
+                "side": str(row["_side"]),
+                "dist": str(row["_dist_zone"]),
+                "shots": int(row["shots"]),
+                "goals": int(row["goals"]),
+                "sv_pct": round(float(row["sv_pct"]), 4),
+            })
+
+    return {
+        "status": "ok",
+        "total_shots": total,
+        "goals_allowed": goals_allowed,
+        "overall_sv_pct": round(1.0 - goals_allowed / total, 4) if total > 0 else None,
+        "shot_types": shot_types_out,
+        "zones": zones_out,
+    }
