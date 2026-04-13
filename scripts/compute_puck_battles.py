@@ -114,24 +114,27 @@ def _fetch_nhl_realtime_stats(season: int) -> pl.DataFrame:
     if not rows:
         return pl.DataFrame()
 
+    MIN_GP = 10  # ignore fringe call-ups with inflated per-60 rates
     records = []
     for r in rows:
         pid = r.get("playerId")
         if pid is None:
             continue
-        gp = r.get("gamesPlayed") or 0
-        # timeOnIcePerGame is seconds (NHL API)
-        toi_pg = r.get("timeOnIcePerGame") or 0
-        toi_ev = toi_pg * gp  # total seconds on ice (approx EV — we use total as proxy)
-        if toi_ev == 0:
-            toi_ev = 1800.0  # safe default
+        gp = int(r.get("gamesPlayed") or 0)
+        if gp < MIN_GP:
+            continue
+        # timeOnIcePerGame is in seconds (NHL Stats API)
+        toi_pg_secs = float(r.get("timeOnIcePerGame") or 0.0)
+        toi_ev = toi_pg_secs * gp
+        if toi_ev < 600:  # < 10 minutes total → skip
+            continue
         records.append({
-            "player_id": int(pid),
-            "team": str(r.get("teamAbbrevs") or "UNK").split(",")[0].strip(),
-            "hits": float(r.get("hits") or 0),
-            "blocked_shots": float(r.get("blockedShots") or 0),
-            "toi_ev": float(toi_ev),
-            "season": season,
+            "player_id":     int(pid),
+            "team":          str(r.get("teamAbbrevs") or "UNK").split(",")[0].strip(),
+            "hits":          float(r.get("hits") or 0.0),
+            "blocked_shots": float(r.get("blockedShots") or 0.0),
+            "toi_ev":        toi_ev,
+            "season":        season,
         })
 
     return pl.DataFrame(records).with_columns([
