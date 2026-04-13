@@ -374,6 +374,12 @@ class RegimeChangeDetector:
     def save(self, path: Path) -> None:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        # Remove before writing — joblib.dump fails with PermissionError if
+        # the file is owned by a different user from a prior CI run.
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
         joblib.dump({
             "states":            self._states,
             "alert_log":         self._alert_log,
