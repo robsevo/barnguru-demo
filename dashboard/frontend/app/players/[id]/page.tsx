@@ -1161,120 +1161,88 @@ function HalfRinkMarkings() {
 }
 
 /** Shared heat map legend rendered as HTML (ensures Barlow font loads correctly). */
-function HeatMapLegend({ goalLabel = "High xG / Goal" }: { goalLabel?: string }) {
+function HeatMapLegend() {
   return (
-    <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 mt-2 text-[10px] font-semibold tracking-wide uppercase text-zinc-500">
+    <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-2 text-[10px] font-semibold tracking-wide uppercase text-zinc-500">
       <span className="flex items-center gap-1.5">
-        <span className="inline-block w-2.5 h-2.5 rounded-full bg-sky-400 opacity-70" />Low xG
+        <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500 opacity-75" />Low
       </span>
       <span className="flex items-center gap-1.5">
-        <span className="inline-block w-2.5 h-2.5 rounded-full bg-yellow-400 opacity-70" />Med xG
+        <span className="inline-block w-2.5 h-2.5 rounded-full bg-yellow-400 opacity-80" />Med
       </span>
       <span className="flex items-center gap-1.5">
-        <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-700 opacity-80" />{goalLabel}
+        <span className="inline-block w-2.5 h-2.5 rounded-full bg-orange-500 opacity-80" />High
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-600 opacity-85" />Hot
       </span>
     </div>
   );
 }
 
-function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
-  // NHL coords: x 0→100 (center ice → end boards), y -42.5→42.5
-  // y flipped: positive y = left side of ice → top of SVG (broadcast convention)
+/** Density-based KDE heat map kernel — renders 4 layers of ALL shots at decreasing blur radii.
+ *  Wide blur → green outer halo. Progressively tighter blurs → yellow, orange, red center.
+ *  Dense areas (slot) saturate all 4 layers; sparse areas (point) only show outer green. */
+function HeatKernel({ shots, prefix }: { shots: ShotPoint[]; prefix: string }) {
   const sy = (y: number) => 42.5 - y;
-
-  const loShots = shots.filter(s => s.xg < 0.08);
-  const medShots = shots.filter(s => s.xg >= 0.08 && s.xg < 0.2);
-  const hiShots = shots.filter(s => s.xg >= 0.2 && !s.goal);
-  const goals = shots.filter(s => s.goal);
-
+  const pts = shots.slice(-800);
   return (
     <>
-      <svg
-        viewBox="0 0 100 85"
-        width="100%"
-        className="block mx-auto max-w-[420px]"
-        style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}
-      >
+      {/* Green — widest spread, outer halo */}
+      <g filter={`url(#${prefix}G)`}>
+        {pts.map((s, i) => <circle key={i} cx={s.x} cy={sy(s.y)} r="5" fill="#22c55e" opacity="0.09" />)}
+      </g>
+      {/* Yellow — medium spread */}
+      <g filter={`url(#${prefix}Y)`}>
+        {pts.map((s, i) => <circle key={i} cx={s.x} cy={sy(s.y)} r="4" fill="#fbbf24" opacity="0.12" />)}
+      </g>
+      {/* Orange — inner ring */}
+      <g filter={`url(#${prefix}O)`}>
+        {pts.map((s, i) => <circle key={i} cx={s.x} cy={sy(s.y)} r="3.5" fill="#f97316" opacity="0.15" />)}
+      </g>
+      {/* Red — hot center, tightest blur */}
+      <g filter={`url(#${prefix}R)`}>
+        {pts.map((s, i) => <circle key={i} cx={s.x} cy={sy(s.y)} r="3" fill="#ef4444" opacity="0.18" />)}
+      </g>
+    </>
+  );
+}
+
+function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
+  return (
+    <>
+      <svg viewBox="0 0 100 85" width="100%" className="block mx-auto max-w-[420px]"
+        style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}>
         <defs>
-          <filter id="heatLo"  x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4.5"/></filter>
-          <filter id="heatMed" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4"/></filter>
-          <filter id="heatHi"  x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3.5"/></filter>
+          <filter id="hG" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="10"/></filter>
+          <filter id="hY" x="-70%" y="-70%" width="240%" height="240%"><feGaussianBlur stdDeviation="6.5"/></filter>
+          <filter id="hO" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="4"/></filter>
+          <filter id="hR" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2"/></filter>
         </defs>
-
         <HalfRinkMarkings />
-
-        {/* Heat layer — low xG: cool blue */}
-        <g filter="url(#heatLo)">
-          {loShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="7" fill="#38bdf8" opacity="0.44" />
-          ))}
-        </g>
-        {/* Heat layer — mid xG: orange/yellow */}
-        <g filter="url(#heatMed)">
-          {medShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="7.5" fill="#fbbf24" opacity="0.44" />
-          ))}
-        </g>
-        {/* Heat layer — high xG saves + goals: dark red */}
-        <g filter="url(#heatHi)">
-          {hiShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="6" fill="#b91c1c" opacity="0.22" />
-          ))}
-          {goals.map((s, i) => (
-            <circle key={`g${i}`} cx={s.x} cy={sy(s.y)} r="8" fill="#7f1d1d" opacity="0.30" />
-          ))}
-        </g>
+        <HeatKernel shots={shots} prefix="h" />
       </svg>
       <HeatMapLegend />
     </>
   );
 }
 
-/** Heat map of shots AGAINST a goalie. Same coordinate system — shots shown from shooter's POV. */
+/** Heat map of shots AGAINST a goalie — same density kernel. */
 function GoalieShotMapViz({ shots }: { shots: ShotPoint[] }) {
-  const sy = (y: number) => 42.5 - y;
-
-  const loShots = shots.filter(s => s.xg < 0.08);
-  const medShots = shots.filter(s => s.xg >= 0.08 && s.xg < 0.2);
-  const hiShots = shots.filter(s => s.xg >= 0.2 && !s.goal);
-  const goals = shots.filter(s => s.goal);
-
   return (
     <>
-      <svg
-        viewBox="0 0 100 85"
-        width="100%"
-        className="block mx-auto max-w-[420px]"
-        style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}
-      >
+      <svg viewBox="0 0 100 85" width="100%" className="block mx-auto max-w-[420px]"
+        style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}>
         <defs>
-          <filter id="gheatLo"  x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4.5"/></filter>
-          <filter id="gheatMed" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4"/></filter>
-          <filter id="gheatHi"  x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3.5"/></filter>
+          <filter id="gG" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="10"/></filter>
+          <filter id="gY" x="-70%" y="-70%" width="240%" height="240%"><feGaussianBlur stdDeviation="6.5"/></filter>
+          <filter id="gO" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="4"/></filter>
+          <filter id="gR" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2"/></filter>
         </defs>
-
         <HalfRinkMarkings />
-
-        <g filter="url(#gheatLo)">
-          {loShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="7" fill="#38bdf8" opacity="0.44" />
-          ))}
-        </g>
-        <g filter="url(#gheatMed)">
-          {medShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="7.5" fill="#fbbf24" opacity="0.44" />
-          ))}
-        </g>
-        <g filter="url(#gheatHi)">
-          {hiShots.map((s, i) => (
-            <circle key={i} cx={s.x} cy={sy(s.y)} r="6" fill="#b91c1c" opacity="0.22" />
-          ))}
-          {goals.map((s, i) => (
-            <circle key={`g${i}`} cx={s.x} cy={sy(s.y)} r="8" fill="#7f1d1d" opacity="0.30" />
-          ))}
-        </g>
+        <HeatKernel shots={shots} prefix="g" />
       </svg>
-      <HeatMapLegend goalLabel="High xG / Goal Allowed" />
+      <HeatMapLegend />
     </>
   );
 }
