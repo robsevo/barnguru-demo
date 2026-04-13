@@ -1197,15 +1197,15 @@ function ShotDots({ shots }: { shots: ShotPoint[] }) {
   return (
     <>
       {/* Green — low xG, drawn first (bottom layer) */}
-      {green.map((s, i) => <circle key={`g${i}`} cx={s.x} cy={sy(s.y)} r="3" fill="#22c55e" opacity="1" />)}
+      {green.map((s, i) => <circle key={`g${i}`} cx={s.x} cy={sy(s.y)} r="3" fill="#22c55e" opacity="0.65" />)}
       {/* Yellow — medium-low xG */}
-      {yellow.map((s, i) => <circle key={`y${i}`} cx={s.x} cy={sy(s.y)} r="3" fill="#fbbf24" opacity="1" />)}
+      {yellow.map((s, i) => <circle key={`y${i}`} cx={s.x} cy={sy(s.y)} r="3" fill="#fbbf24" opacity="0.70" />)}
       {/* Orange — medium-high xG */}
-      {orange.map((s, i) => <circle key={`o${i}`} cx={s.x} cy={sy(s.y)} r="3" fill="#f97316" opacity="1" />)}
+      {orange.map((s, i) => <circle key={`o${i}`} cx={s.x} cy={sy(s.y)} r="3" fill="#f97316" opacity="0.75" />)}
       {/* Red — high xG saves */}
-      {red.map((s, i) => <circle key={`r${i}`} cx={s.x} cy={sy(s.y)} r="3" fill="#dc2626" opacity="1" />)}
+      {red.map((s, i) => <circle key={`r${i}`} cx={s.x} cy={sy(s.y)} r="3" fill="#dc2626" opacity="0.80" />)}
       {/* Dark red — goals, always on top */}
-      {goals.map((s, i) => <circle key={`dr${i}`} cx={s.x} cy={sy(s.y)} r="3.2" fill="#b91c1c" opacity="1" />)}
+      {goals.map((s, i) => <circle key={`dr${i}`} cx={s.x} cy={sy(s.y)} r="3.2" fill="#b91c1c" opacity="0.95" />)}
     </>
   );
 }
