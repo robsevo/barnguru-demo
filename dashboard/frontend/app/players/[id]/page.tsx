@@ -2188,8 +2188,8 @@ export default function PlayerProfilePage() {
         {!isGoalie && (
           <div className="sm:col-span-2">
             <Card title="Zone Tendencies" icon="🗺️" style={cardStyle}>
-              <div className="flex flex-col sm:flex-row gap-6 items-start justify-center">
-                <div className="flex-1 min-w-0">
+              <div className="flex flex-col sm:flex-row gap-8 items-center justify-center">
+                <div className="flex flex-col items-center w-full sm:w-auto sm:flex-1 min-w-0">
                   <p className="text-[9px] font-semibold uppercase tracking-wider text-white/30 mb-2 text-center">
                     Offensive Zone Tendency
                   </p>
@@ -2205,7 +2205,7 @@ export default function PlayerProfilePage() {
                     </div>
                   )}
                 </div>
-                <div className="flex-1 min-w-0 flex flex-col items-center">
+                <div className="flex flex-col items-center w-full sm:w-auto sm:flex-1 min-w-0">
                   <p className="text-[9px] font-semibold uppercase tracking-wider text-white/30 mb-2 text-center">
                     Ice Time By Zone
                   </p>
