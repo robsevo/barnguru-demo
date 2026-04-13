@@ -171,11 +171,11 @@ def build_stints(
         pl.col("game_seconds_end").cast(pl.Float64),
     ])
 
-    # Compute shot game_seconds
-    period_arr  = xg_df["period"].cast(pl.Int64).to_numpy()
-    time_raw    = xg_df["time"].to_list()
-    time_secs   = np.array([_parse_time_to_secs(t) for t in time_raw], dtype=np.float64)
-    gsecs_arr   = (period_arr - 1) * float(SECS_PER_PERIOD) + time_secs
+    # Compute shot game_seconds.
+    # MoneyPuck's `time` column is cumulative game-seconds (e.g. period-2 shots
+    # have time ≈ 1200–2400), NOT seconds-within-period.  Use it directly.
+    time_raw  = xg_df["time"].to_list()
+    gsecs_arr = np.array([_parse_time_to_secs(t) for t in time_raw], dtype=np.float64)
 
     xg_df = xg_df.with_columns(
         pl.Series("game_seconds", gsecs_arr, dtype=pl.Float64)
