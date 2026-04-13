@@ -1246,11 +1246,11 @@ function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
   const sy = (y: number) => 42.5 - y;
   const pts = shots.slice(-800);
   const dotLayers: { key: DotLayer; pts: ShotPoint[]; r: string; fill: string; opacity: string }[] = [
-    { key: "low",  pts: pts.filter(s => !s.goal && s.xg < 0.05),                r: "3",   fill: "#22c55e", opacity: "0.65" },
-    { key: "med",  pts: pts.filter(s => !s.goal && s.xg >= 0.05 && s.xg < 0.12), r: "3",   fill: "#fbbf24", opacity: "0.70" },
-    { key: "high", pts: pts.filter(s => !s.goal && s.xg >= 0.12 && s.xg < 0.22), r: "3",   fill: "#f97316", opacity: "0.75" },
-    { key: "hot",  pts: pts.filter(s => !s.goal && s.xg >= 0.22),                r: "3",   fill: "#dc2626", opacity: "0.80" },
-    { key: "goal", pts: pts.filter(s => s.goal),                                  r: "3.2", fill: "#b91c1c", opacity: "0.95" },
+    { key: "low",  pts: pts.filter(s => !s.goal && s.xg < 0.05),                r: "0.8", fill: "#22c55e", opacity: "0.65" },
+    { key: "med",  pts: pts.filter(s => !s.goal && s.xg >= 0.05 && s.xg < 0.12), r: "0.8", fill: "#fbbf24", opacity: "0.70" },
+    { key: "high", pts: pts.filter(s => !s.goal && s.xg >= 0.12 && s.xg < 0.22), r: "0.8", fill: "#f97316", opacity: "0.75" },
+    { key: "hot",  pts: pts.filter(s => !s.goal && s.xg >= 0.22),                r: "0.8", fill: "#dc2626", opacity: "0.80" },
+    { key: "goal", pts: pts.filter(s => s.goal),                                  r: "1.2", fill: "#b91c1c", opacity: "0.95" },
   ];
   const dotLegend: { key: DotLayer; label: string; color?: string; tw?: string }[] = [
     { key: "low",  label: "Low",  tw: "bg-green-500" },
@@ -1303,11 +1303,11 @@ function GoalieShotMapViz({ shots }: { shots: ShotPoint[] }) {
   const sy = (y: number) => 42.5 - y;
   const pts = shots.slice(-900);
   const dotLayers: { key: DotLayer; pts: ShotPoint[]; r: string; fill: string; opacity: string }[] = [
-    { key: "low",  pts: pts.filter(s => !s.goal && s.xg < 0.05),                r: "3",   fill: "#22c55e", opacity: "0.65" },
-    { key: "med",  pts: pts.filter(s => !s.goal && s.xg >= 0.05 && s.xg < 0.12), r: "3",   fill: "#fbbf24", opacity: "0.70" },
-    { key: "high", pts: pts.filter(s => !s.goal && s.xg >= 0.12 && s.xg < 0.22), r: "3",   fill: "#f97316", opacity: "0.75" },
-    { key: "hot",  pts: pts.filter(s => !s.goal && s.xg >= 0.22),                r: "3",   fill: "#dc2626", opacity: "0.80" },
-    { key: "goal", pts: pts.filter(s => s.goal),                                  r: "3.2", fill: "#b91c1c", opacity: "0.95" },
+    { key: "low",  pts: pts.filter(s => !s.goal && s.xg < 0.05),                r: "0.8", fill: "#22c55e", opacity: "0.65" },
+    { key: "med",  pts: pts.filter(s => !s.goal && s.xg >= 0.05 && s.xg < 0.12), r: "0.8", fill: "#fbbf24", opacity: "0.70" },
+    { key: "high", pts: pts.filter(s => !s.goal && s.xg >= 0.12 && s.xg < 0.22), r: "0.8", fill: "#f97316", opacity: "0.75" },
+    { key: "hot",  pts: pts.filter(s => !s.goal && s.xg >= 0.22),                r: "0.8", fill: "#dc2626", opacity: "0.80" },
+    { key: "goal", pts: pts.filter(s => s.goal),                                  r: "1.2", fill: "#b91c1c", opacity: "0.95" },
   ];
   const dotLegend: { key: DotLayer; label: string; color?: string; tw?: string }[] = [
     { key: "low",  label: "Low",  tw: "bg-green-500" },
@@ -1624,20 +1624,20 @@ function ZoneTendencyMap({ data, teamColor }: { data: ProfileData; teamColor: st
       <circle cx="64.5" cy="31" r="0.85" fill="#cc2222" opacity="0.5" />
 
       {/* Zone labels — Barlow font, clean */}
-      <text x="42.5" y="64" textAnchor="middle" fontSize="3.5" fontWeight="600" fill="rgba(30,40,80,0.5)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.5">PERIM</text>
-      <text x="42.5" y="71" textAnchor="middle" fontSize="6" fontWeight="800" fill="rgba(30,40,80,0.75)" fontFamily="Barlow, ui-sans-serif, sans-serif">{perim.toFixed(0)}%</text>
+      <text x="42.5" y="64" textAnchor="middle" fontSize="2.5" fontWeight="600" fill="rgba(30,40,80,0.5)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.5">PERIM</text>
+      <text x="42.5" y="70" textAnchor="middle" fontSize="4.5" fontWeight="800" fill="rgba(30,40,80,0.75)" fontFamily="Barlow, ui-sans-serif, sans-serif">{perim.toFixed(0)}%</text>
 
-      <text x="15" y="34" textAnchor="middle" fontSize="3" fontWeight="600" fill="rgba(30,40,80,0.5)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.4">CORNER</text>
-      <text x="15" y="41" textAnchor="middle" fontSize="5.5" fontWeight="800" fill="rgba(30,40,80,0.75)" fontFamily="Barlow, ui-sans-serif, sans-serif">{corner.toFixed(0)}%</text>
+      <text x="15" y="34" textAnchor="middle" fontSize="2.2" fontWeight="600" fill="rgba(30,40,80,0.5)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.4">CORNER</text>
+      <text x="15" y="40" textAnchor="middle" fontSize="4" fontWeight="800" fill="rgba(30,40,80,0.75)" fontFamily="Barlow, ui-sans-serif, sans-serif">{corner.toFixed(0)}%</text>
 
-      <text x="70" y="34" textAnchor="middle" fontSize="3" fontWeight="600" fill="rgba(30,40,80,0.5)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.4">CORNER</text>
-      <text x="70" y="41" textAnchor="middle" fontSize="5.5" fontWeight="800" fill="rgba(30,40,80,0.75)" fontFamily="Barlow, ui-sans-serif, sans-serif">{hold.toFixed(0)}%</text>
+      <text x="70" y="34" textAnchor="middle" fontSize="2.2" fontWeight="600" fill="rgba(30,40,80,0.5)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.4">CORNER</text>
+      <text x="70" y="40" textAnchor="middle" fontSize="4" fontWeight="800" fill="rgba(30,40,80,0.75)" fontFamily="Barlow, ui-sans-serif, sans-serif">{hold.toFixed(0)}%</text>
 
-      <text x="42.5" y="31" textAnchor="middle" fontSize="3.5" fontWeight="600" fill="rgba(30,40,80,0.5)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.4">SLOT</text>
-      <text x="42.5" y="38.5" textAnchor="middle" fontSize="6" fontWeight="800" fill="rgba(30,40,80,0.75)" fontFamily="Barlow, ui-sans-serif, sans-serif">{slot.toFixed(0)}%</text>
+      <text x="42.5" y="31" textAnchor="middle" fontSize="2.5" fontWeight="600" fill="rgba(30,40,80,0.5)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.4">SLOT</text>
+      <text x="42.5" y="37.5" textAnchor="middle" fontSize="4.5" fontWeight="800" fill="rgba(30,40,80,0.75)" fontFamily="Barlow, ui-sans-serif, sans-serif">{slot.toFixed(0)}%</text>
 
-      <text x="42.5" y="16.5" textAnchor="middle" fontSize="2.8" fontWeight="600" fill="rgba(120,75,0,0.65)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.3">NET FRONT</text>
-      <text x="42.5" y="22" textAnchor="middle" fontSize="4.5" fontWeight="800" fill="rgba(120,75,0,0.80)" fontFamily="Barlow, ui-sans-serif, sans-serif">{net.toFixed(0)}%</text>
+      <text x="42.5" y="16.5" textAnchor="middle" fontSize="2" fontWeight="600" fill="rgba(120,75,0,0.65)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.3">NET FRONT</text>
+      <text x="42.5" y="21.5" textAnchor="middle" fontSize="3.5" fontWeight="800" fill="rgba(120,75,0,0.80)" fontFamily="Barlow, ui-sans-serif, sans-serif">{net.toFixed(0)}%</text>
     </svg>
   );
 }
@@ -1655,22 +1655,21 @@ function IceTimeByZoneBars({ data }: { data: ProfileData }) {
   ];
 
   return (
-    <div className="w-full flex flex-col space-y-4 px-1">
-      <p className="text-[9px] font-semibold uppercase tracking-wider text-white/30 mb-2 text-center">Ice Time By Zone</p>
+    <div className="w-full flex flex-col space-y-2.5 px-1">
+      <p className="text-[8px] font-semibold uppercase tracking-wider text-white/30 mb-1 text-center">Ice Time By Zone</p>
       {bars.map(b => (
-        <div key={b.label} className="flex items-center gap-3">
-          <span className="text-[11px] font-black uppercase tracking-wider w-7 shrink-0" style={{ color: b.color }}>{b.label}</span>
-          <div className="flex-1 relative h-7 rounded-full overflow-hidden" style={{ background: b.track }}>
+        <div key={b.label} className="flex items-center gap-2">
+          <span className="text-[9px] font-black uppercase tracking-wider w-5 shrink-0" style={{ color: b.color }}>{b.label}</span>
+          <div className="flex-1 relative h-4 rounded-full overflow-hidden" style={{ background: b.track }}>
             <div
               className="absolute inset-y-0 left-0 rounded-full transition-all duration-700"
               style={{ width: `${b.pct}%`, background: `linear-gradient(90deg, ${b.color}cc, ${b.color})` }}
             />
-            {/* Subtle grid lines at 25 / 50 / 75% */}
             {[25, 50, 75].map(g => (
               <div key={g} className="absolute inset-y-0 w-px opacity-20" style={{ left: `${g}%`, background: "rgba(255,255,255,0.5)" }} />
             ))}
           </div>
-          <span className="text-[15px] font-black tabular-nums w-10 text-right shrink-0" style={{ color: b.color }}>{b.pct.toFixed(0)}%</span>
+          <span className="text-[11px] font-black tabular-nums w-8 text-right shrink-0" style={{ color: b.color }}>{b.pct.toFixed(0)}%</span>
         </div>
       ))}
     </div>
