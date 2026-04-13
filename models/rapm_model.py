@@ -100,6 +100,7 @@ RAPM_OUTPUT_SCHEMA: dict[str, pl.DataType] = {
     "rapm_ev_def":  pl.Float64,
     "rapm_pp":      pl.Float64,
     "rapm_pk":      pl.Float64,
+    "xgf_60":       pl.Float64,
     "xga_60":       pl.Float64,
     "model_version": pl.Utf8,
 }
@@ -524,15 +525,17 @@ def _compute_player_teams(shifts_df: pl.DataFrame) -> dict[int, str]:
     return {int(r["player_id"]): str(r["team"]) for r in teams.to_dicts()}
 
 
-def _compute_player_xga_60(ev_stints: pl.DataFrame) -> dict[int, float]:
-    """Per-player even-strength xGA per 60 minutes derived from stint on-ice xG.
+def _compute_player_xg_60(ev_stints: pl.DataFrame) -> tuple[dict[int, float], dict[int, float]]:
+    """Per-player EV xGF/60 and xGA/60 from on-ice stint xG.
 
-    For each EV stint a player was on ice, the opposing team's xGF is their xGA.
-    Returns xGA/60 = (sum_xGA / sum_toi_secs) * 3600.
+    Returns (xgf_60_map, xga_60_map) where each value is per-60-minute rate.
+    xGF for a player = their team's xGF while they were on ice.
+    xGA for a player = the opposing team's xGF while they were on ice.
     """
     if ev_stints.is_empty():
-        return {}
+        return {}, {}
 
+    xgf: dict[int, float] = {}
     xga: dict[int, float] = {}
     toi: dict[int, float] = {}
 
@@ -542,17 +545,25 @@ def _compute_player_xga_60(ev_stints: pl.DataFrame) -> dict[int, float]:
         xgf_away = row["xgf_away"]
 
         for pid in row["home_player_ids"]:
-            xga[pid] = xga.get(pid, 0.0) + xgf_away   # xGA for home player = away xGF
+            xgf[pid] = xgf.get(pid, 0.0) + xgf_home
+            xga[pid] = xga.get(pid, 0.0) + xgf_away
             toi[pid] = toi.get(pid, 0.0) + dur
 
         for pid in row["away_player_ids"]:
-            xga[pid] = xga.get(pid, 0.0) + xgf_home   # xGA for away player = home xGF
+            xgf[pid] = xgf.get(pid, 0.0) + xgf_away
+            xga[pid] = xga.get(pid, 0.0) + xgf_home
             toi[pid] = toi.get(pid, 0.0) + dur
 
-    return {
-        pid: (xga.get(pid, 0.0) / t * 3600.0) if t > 0 else 0.0
-        for pid, t in toi.items()
-    }
+    return (
+        {pid: (xgf.get(pid, 0.0) / t * 3600.0) if t > 0 else 0.0 for pid, t in toi.items()},
+        {pid: (xga.get(pid, 0.0) / t * 3600.0) if t > 0 else 0.0 for pid, t in toi.items()},
+    )
+
+
+def _compute_player_xga_60(ev_stints: pl.DataFrame) -> dict[int, float]:
+    """Legacy wrapper — returns only xGA/60. Use _compute_player_xg_60 for both."""
+    _, xga_60 = _compute_player_xg_60(ev_stints)
+    return xga_60
 
 
 # ---------------------------------------------------------------------------
@@ -675,8 +686,8 @@ class RAPMModel:
         toi_pp = self._toi_from_stints(pp_stints, player_ids)
         toi_pk = self._toi_from_stints(pk_stints, player_ids)
 
-        # ---- EV xGA/60 from on-ice xG exposure ----
-        xga_60_all = _compute_player_xga_60(ev_stints)
+        # ---- EV xGF/60 and xGA/60 from on-ice xG exposure ----
+        xgf_60_all, xga_60_all = _compute_player_xg_60(ev_stints)
 
         # ---- assemble output ----
         rows = []
@@ -694,6 +705,7 @@ class RAPMModel:
                 "rapm_ev_def":  rapm_ev_def.get(pid, 0.0),
                 "rapm_pp":      rapm_pp.get(pid, 0.0),
                 "rapm_pk":      rapm_pk.get(pid, 0.0),
+                "xgf_60":       xgf_60_all.get(pid, 0.0),
                 "xga_60":       xga_60_all.get(pid, 0.0),
                 "model_version": self._version,
             })

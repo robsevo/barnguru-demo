@@ -3250,7 +3250,12 @@ async def player_profile(player_id: int) -> dict:
                     toi_ev_val = round(float(rapm_row["toi_ev"][0]), 1) if "toi_ev" in rapm_df.columns else None
                     shots_p60  = round(float(rapm_row["shots_per60"][0]), 2) if "shots_per60" in rapm_df.columns else None
                     goals_p60  = round(float(rapm_row["goals_per60"][0]), 2) if "goals_per60" in rapm_df.columns else None
-                    xgf_p60    = round(float(rapm_row["xgf_per60"][0]), 2) if "xgf_per60" in rapm_df.columns else None
+                    if "xgf_60" in rapm_df.columns:
+                        xgf_p60 = round(float(rapm_row["xgf_60"][0]), 2)
+                    elif "xgf_per60" in rapm_df.columns:
+                        xgf_p60 = round(float(rapm_row["xgf_per60"][0]), 2)
+                    else:
+                        xgf_p60 = None
 
                     # Derive per-60 from raw counts + toi_ev when RAPM parquet lacks them
                     toi_h = (toi_ev_val or 0) / 3600
