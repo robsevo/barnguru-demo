@@ -861,7 +861,7 @@ function PlayerRadarChart({ data, teamColor }: { data: ProfileData; teamColor: s
                 <circle
                   key={props.index}
                   cx={props.cx} cy={props.cy}
-                  r={isActive ? 5 : 3}
+                  r={isActive ? 8 : 5}
                   fill={isActive ? teamColor : `${teamColor}99`}
                   stroke={isActive ? "rgba(255,255,255,0.6)" : "none"}
                   strokeWidth={1.5}
@@ -1000,7 +1000,7 @@ function GoalieRadarChart({ data, teamColor, nhlSvPct, nhlGaa }: { data: Profile
                 <circle
                   key={props.index}
                   cx={props.cx} cy={props.cy}
-                  r={isActive ? 5 : 3}
+                  r={isActive ? 8 : 5}
                   fill={isActive ? teamColor : `${teamColor}99`}
                   stroke={isActive ? "rgba(255,255,255,0.6)" : "none"}
                   strokeWidth={1.5}
