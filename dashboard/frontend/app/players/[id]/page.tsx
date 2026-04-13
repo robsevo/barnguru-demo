@@ -1161,78 +1161,109 @@ function HalfRinkMarkings() {
 }
 
 /** Shared heat map legend rendered as HTML (ensures Barlow font loads correctly). */
-function HeatMapLegend() {
-  return (
-    <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-2 text-[10px] font-semibold tracking-wide uppercase text-zinc-500">
-      <span className="flex items-center gap-1.5">
-        <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500" />Low
-      </span>
-      <span className="flex items-center gap-1.5">
-        <span className="inline-block w-2.5 h-2.5 rounded-full bg-yellow-400" />Med
-      </span>
-      <span className="flex items-center gap-1.5">
-        <span className="inline-block w-2.5 h-2.5 rounded-full bg-orange-500" />High
-      </span>
-      <span className="flex items-center gap-1.5">
-        <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-600" />Hot
-      </span>
-      <span className="flex items-center gap-1.5">
-        <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "#b91c1c" }} />Goal
-      </span>
-    </div>
-  );
-}
-
-/** Density-based KDE heat map kernel — renders 4 layers of ALL shots at decreasing blur radii.
- *  Wide blur → green outer halo. Progressively tighter blurs → yellow, orange, red center.
- *  Dense areas (slot) saturate all 4 layers; sparse areas (point) only show outer green. */
-function ShotDots({ shots }: { shots: ShotPoint[] }) {
-  const sy = (y: number) => 42.5 - y;
-  const pts = shots.slice(-800);
-  const green  = pts.filter(s => !s.goal && s.xg < 0.05);
-  const yellow = pts.filter(s => !s.goal && s.xg >= 0.05 && s.xg < 0.12);
-  const orange = pts.filter(s => !s.goal && s.xg >= 0.12 && s.xg < 0.22);
-  const red    = pts.filter(s => !s.goal && s.xg >= 0.22);
-  const goals  = pts.filter(s => s.goal);
-  return (
-    <>
-      {/* Green — low xG, drawn first (bottom layer) */}
-      {green.map((s, i) => <circle key={`g${i}`} cx={s.x} cy={sy(s.y)} r="3" fill="#22c55e" opacity="0.65" />)}
-      {/* Yellow — medium-low xG */}
-      {yellow.map((s, i) => <circle key={`y${i}`} cx={s.x} cy={sy(s.y)} r="3" fill="#fbbf24" opacity="0.70" />)}
-      {/* Orange — medium-high xG */}
-      {orange.map((s, i) => <circle key={`o${i}`} cx={s.x} cy={sy(s.y)} r="3" fill="#f97316" opacity="0.75" />)}
-      {/* Red — high xG saves */}
-      {red.map((s, i) => <circle key={`r${i}`} cx={s.x} cy={sy(s.y)} r="3" fill="#dc2626" opacity="0.80" />)}
-      {/* Dark red — goals, always on top */}
-      {goals.map((s, i) => <circle key={`dr${i}`} cx={s.x} cy={sy(s.y)} r="3.2" fill="#b91c1c" opacity="0.95" />)}
-    </>
-  );
-}
+type ShotLayer = "low" | "med" | "high" | "hot" | "goal";
 
 function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
+  const [hidden, setHidden] = useState<Set<ShotLayer>>(new Set());
+  const toggle = (layer: ShotLayer) =>
+    setHidden(prev => { const next = new Set(prev); next.has(layer) ? next.delete(layer) : next.add(layer); return next; });
+
+  const sy = (y: number) => 42.5 - y;
+  const pts = shots.slice(-800);
+  const layers: { key: ShotLayer; pts: ShotPoint[]; r: string; fill: string; opacity: string }[] = [
+    { key: "low",  pts: pts.filter(s => !s.goal && s.xg < 0.05),               r: "3",   fill: "#22c55e", opacity: "0.65" },
+    { key: "med",  pts: pts.filter(s => !s.goal && s.xg >= 0.05 && s.xg < 0.12), r: "3",   fill: "#fbbf24", opacity: "0.70" },
+    { key: "high", pts: pts.filter(s => !s.goal && s.xg >= 0.12 && s.xg < 0.22), r: "3",   fill: "#f97316", opacity: "0.75" },
+    { key: "hot",  pts: pts.filter(s => !s.goal && s.xg >= 0.22),               r: "3",   fill: "#dc2626", opacity: "0.80" },
+    { key: "goal", pts: pts.filter(s => s.goal),                                 r: "3.2", fill: "#b91c1c", opacity: "0.95" },
+  ];
+
+  const legendItems: { key: ShotLayer; label: string; color: string; tw?: string }[] = [
+    { key: "low",  label: "Low",  tw: "bg-green-500" },
+    { key: "med",  label: "Med",  tw: "bg-yellow-400" },
+    { key: "high", label: "High", tw: "bg-orange-500" },
+    { key: "hot",  label: "Hot",  tw: "bg-red-600" },
+    { key: "goal", label: "Goal", color: "#b91c1c" },
+  ] as { key: ShotLayer; label: string; color?: string; tw?: string }[];
+
   return (
     <>
       <svg viewBox="0 0 100 85" width="100%" className="block mx-auto max-w-[420px]"
         style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}>
         <HalfRinkMarkings />
-        <ShotDots shots={shots} />
+        {layers.map(({ key, pts: lpts, r, fill, opacity }) =>
+          hidden.has(key) ? null : lpts.map((s, i) =>
+            <circle key={`${key}${i}`} cx={s.x} cy={sy(s.y)} r={r} fill={fill} opacity={opacity} />
+          )
+        )}
       </svg>
-      <HeatMapLegend />
+      <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-2 text-[10px] font-semibold tracking-wide uppercase">
+        {legendItems.map(({ key, label, tw, color }) => {
+          const off = hidden.has(key);
+          return (
+            <span key={key} onClick={() => toggle(key)}
+              className={`flex items-center gap-1.5 cursor-pointer select-none transition-opacity ${off ? "opacity-25" : "opacity-100"}`}
+              style={{ color: off ? "#52525b" : "#71717a" }}>
+              <span className={`inline-block w-2.5 h-2.5 rounded-full ${tw ?? ""}`}
+                style={color ? { backgroundColor: color } : {}} />
+              {label}
+            </span>
+          );
+        })}
+      </div>
     </>
   );
 }
 
-/** Shot map of shots AGAINST a goalie — same xG-tiered dots. */
+/** Shot map of shots AGAINST a goalie — same xG-tiered dots with toggleable layers. */
 function GoalieShotMapViz({ shots }: { shots: ShotPoint[] }) {
+  const [hidden, setHidden] = useState<Set<ShotLayer>>(new Set());
+  const toggle = (layer: ShotLayer) =>
+    setHidden(prev => { const next = new Set(prev); next.has(layer) ? next.delete(layer) : next.add(layer); return next; });
+
+  const sy = (y: number) => 42.5 - y;
+  const pts = shots.slice(-800);
+  const layers: { key: ShotLayer; pts: ShotPoint[]; r: string; fill: string; opacity: string }[] = [
+    { key: "low",  pts: pts.filter(s => !s.goal && s.xg < 0.05),               r: "3",   fill: "#22c55e", opacity: "0.65" },
+    { key: "med",  pts: pts.filter(s => !s.goal && s.xg >= 0.05 && s.xg < 0.12), r: "3",   fill: "#fbbf24", opacity: "0.70" },
+    { key: "high", pts: pts.filter(s => !s.goal && s.xg >= 0.12 && s.xg < 0.22), r: "3",   fill: "#f97316", opacity: "0.75" },
+    { key: "hot",  pts: pts.filter(s => !s.goal && s.xg >= 0.22),               r: "3",   fill: "#dc2626", opacity: "0.80" },
+    { key: "goal", pts: pts.filter(s => s.goal),                                 r: "3.2", fill: "#b91c1c", opacity: "0.95" },
+  ];
+
+  const legendItems = [
+    { key: "low"  as ShotLayer, label: "Low",  tw: "bg-green-500" },
+    { key: "med"  as ShotLayer, label: "Med",  tw: "bg-yellow-400" },
+    { key: "high" as ShotLayer, label: "High", tw: "bg-orange-500" },
+    { key: "hot"  as ShotLayer, label: "Hot",  tw: "bg-red-600" },
+    { key: "goal" as ShotLayer, label: "Goal", color: "#b91c1c" },
+  ];
+
   return (
     <>
       <svg viewBox="0 0 100 85" width="100%" className="block mx-auto max-w-[420px]"
         style={{ filter: "drop-shadow(0 3px 14px rgba(0,0,0,0.5))" }}>
         <HalfRinkMarkings />
-        <ShotDots shots={shots} />
+        {layers.map(({ key, pts: lpts, r, fill, opacity }) =>
+          hidden.has(key) ? null : lpts.map((s, i) =>
+            <circle key={`${key}${i}`} cx={s.x} cy={sy(s.y)} r={r} fill={fill} opacity={opacity} />
+          )
+        )}
       </svg>
-      <HeatMapLegend />
+      <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-2 text-[10px] font-semibold tracking-wide uppercase">
+        {legendItems.map(({ key, label, tw, color }) => {
+          const off = hidden.has(key);
+          return (
+            <span key={key} onClick={() => toggle(key)}
+              className={`flex items-center gap-1.5 cursor-pointer select-none transition-opacity ${off ? "opacity-25" : "opacity-100"}`}
+              style={{ color: off ? "#52525b" : "#71717a" }}>
+              <span className={`inline-block w-2.5 h-2.5 rounded-full ${tw ?? ""}`}
+                style={color ? { backgroundColor: color } : {}} />
+              {label}
+            </span>
+          );
+        })}
+      </div>
     </>
   );
 }
