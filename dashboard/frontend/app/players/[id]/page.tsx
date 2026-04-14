@@ -2550,9 +2550,11 @@ export default function PlayerProfilePage() {
                     <p className="text-[9px] text-white/20 uppercase tracking-wider">Model not yet trained</p>
                   </div>
                 )}
-                {/* Ice Time By Zone bars */}
+                {/* Ice Time By Zone bars — narrower than the rink */}
                 {data.skating_zone_time_oz_pct != null ? (
-                  <IceTimeByZoneBars data={data} />
+                  <div className="w-full max-w-[260px] mx-auto">
+                    <IceTimeByZoneBars data={data} />
+                  </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center py-4 gap-1.5">
                     <p className="text-[9px] text-white/20 uppercase tracking-wider">Model not yet trained</p>
