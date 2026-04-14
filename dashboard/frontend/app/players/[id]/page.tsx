@@ -1681,21 +1681,26 @@ function ZoneTendencyMap({ data, teamColor }: { data: ProfileData; teamColor: st
       <line x1="79.5" y1="29.5" x2="82" y2="29.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
       <line x1="79.5" y1="32.5" x2="82" y2="32.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
 
-      {/* Zone labels — Barlow font, clean */}
-      <text x="42.5" y="64" textAnchor="middle" fontSize="2.5" fontWeight="600" fill="rgba(30,40,80,0.5)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.5">PERIM</text>
-      <text x="42.5" y="70" textAnchor="middle" fontSize="4.5" fontWeight="800" fill="rgba(30,40,80,0.75)" fontFamily="Barlow, ui-sans-serif, sans-serif">{perim.toFixed(0)}%</text>
+      {/* Zone labels — positioned in open areas clear of all ice lines */}
+      {/* PERIM — large open strip y=45–75, no lines here */}
+      <text x="42.5" y="55" textAnchor="middle" fontSize="2.2" fontWeight="600" fill="rgba(30,40,80,0.45)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.5">PERIM</text>
+      <text x="42.5" y="62" textAnchor="middle" fontSize="4" fontWeight="800" fill="rgba(30,40,80,0.70)" fontFamily="Barlow, ui-sans-serif, sans-serif">{perim.toFixed(0)}%</text>
 
-      <text x="15" y="34" textAnchor="middle" fontSize="2.2" fontWeight="600" fill="rgba(30,40,80,0.5)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.4">CORNER</text>
-      <text x="15" y="40" textAnchor="middle" fontSize="4" fontWeight="800" fill="rgba(30,40,80,0.75)" fontFamily="Barlow, ui-sans-serif, sans-serif">{corner.toFixed(0)}%</text>
+      {/* CORNER left — pressed to left board (x<5.5), above faceoff circle (circle starts y=16) */}
+      <text x="7" y="14" textAnchor="middle" fontSize="1.9" fontWeight="600" fill="rgba(30,40,80,0.45)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.3">CORNER</text>
+      <text x="7" y="18.5" textAnchor="middle" fontSize="3.2" fontWeight="800" fill="rgba(30,40,80,0.70)" fontFamily="Barlow, ui-sans-serif, sans-serif">{corner.toFixed(0)}%</text>
 
-      <text x="70" y="34" textAnchor="middle" fontSize="2.2" fontWeight="600" fill="rgba(30,40,80,0.5)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.4">CORNER</text>
-      <text x="70" y="40" textAnchor="middle" fontSize="4" fontWeight="800" fill="rgba(30,40,80,0.75)" fontFamily="Barlow, ui-sans-serif, sans-serif">{hold.toFixed(0)}%</text>
+      {/* CORNER right — pressed to right board (x>79.5), above faceoff circle */}
+      <text x="78" y="14" textAnchor="middle" fontSize="1.9" fontWeight="600" fill="rgba(30,40,80,0.45)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.3">CORNER</text>
+      <text x="78" y="18.5" textAnchor="middle" fontSize="3.2" fontWeight="800" fill="rgba(30,40,80,0.70)" fontFamily="Barlow, ui-sans-serif, sans-serif">{hold.toFixed(0)}%</text>
 
-      <text x="42.5" y="31" textAnchor="middle" fontSize="2.5" fontWeight="600" fill="rgba(30,40,80,0.5)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.4">SLOT</text>
-      <text x="42.5" y="37.5" textAnchor="middle" fontSize="4.5" fontWeight="800" fill="rgba(30,40,80,0.75)" fontFamily="Barlow, ui-sans-serif, sans-serif">{slot.toFixed(0)}%</text>
+      {/* SLOT — below faceoff circle midpoints; at y=37–42 slot center x=35–50 is clear of both circles */}
+      <text x="42.5" y="37" textAnchor="middle" fontSize="2" fontWeight="600" fill="rgba(30,40,80,0.45)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.4">SLOT</text>
+      <text x="42.5" y="42" textAnchor="middle" fontSize="4" fontWeight="800" fill="rgba(30,40,80,0.70)" fontFamily="Barlow, ui-sans-serif, sans-serif">{slot.toFixed(0)}%</text>
 
-      <text x="42.5" y="16.5" textAnchor="middle" fontSize="2" fontWeight="600" fill="rgba(120,75,0,0.65)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.3">NET FRONT</text>
-      <text x="42.5" y="21.5" textAnchor="middle" fontSize="3.5" fontWeight="800" fill="rgba(120,75,0,0.80)" fontFamily="Barlow, ui-sans-serif, sans-serif">{net.toFixed(0)}%</text>
+      {/* NET FRONT — below crease arc (crease peaks at y=17); y=20–23 is clear */}
+      <text x="42.5" y="20" textAnchor="middle" fontSize="1.7" fontWeight="600" fill="rgba(120,75,0,0.60)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.3">NET FRONT</text>
+      <text x="42.5" y="23.5" textAnchor="middle" fontSize="2.8" fontWeight="800" fill="rgba(120,75,0,0.75)" fontFamily="Barlow, ui-sans-serif, sans-serif">{net.toFixed(0)}%</text>
     </svg>
   );
 }

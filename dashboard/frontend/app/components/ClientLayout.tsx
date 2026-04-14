@@ -109,13 +109,13 @@ const NAME_CLASS: Record<PhaseStatus, string> = {
 
 // Nav items — Live Games dot is rendered dynamically based on live status
 const NAV_ITEMS = [
-  { href: "/",              label: "Home",          shortLabel: "Home",   dot: "static", dotClass: "bg-white/20",                                                              active: (p: string) => p === "/" },
-  { href: "/gamecentre",    label: "Live",          shortLabel: "Live",   dot: "live",   dotClass: "",                                                                         active: (p: string) => p === "/gamecentre" || p.startsWith("/game/") },
-  { href: "/league/teams",  label: "Teams",         shortLabel: "Teams",  dot: "static", dotClass: "bg-white/20",                                                              active: (p: string) => p.startsWith("/league") || p.startsWith("/teams/") },
-  { href: "/standings",     label: "Standings",     shortLabel: "Stnd",   dot: "static", dotClass: "bg-[#fbbf24]/70 shadow-[0_0_5px_rgba(251,191,36,0.6)]",                   active: (p: string) => p === "/standings" },
-  { href: "/stats",         label: "Stats Leaders", shortLabel: "Stats",  dot: "static", dotClass: "bg-white/35 shadow-[0_0_5px_rgba(210,215,220,0.5)]",                      active: (p: string) => p === "/stats" },
-  { href: "/players",       label: "Cortex",        shortLabel: "Crtx",   dot: "static", dotClass: "bg-[#a78bfa] shadow-[0_0_6px_rgba(167,139,250,0.8)]",                     active: (p: string) => p === "/players" || p.startsWith("/players/") },
-  { href: "/barncentre",   label: "BarnCentre",    shortLabel: "Origin",   dot: "static", dotClass: "bg-[#C9A84C]/70 shadow-[0_0_5px_rgba(201,168,76,0.6)]",                    active: (p: string) => p === "/barncentre" },
+  { href: "/",             label: "Home",          dot: "static", dotClass: "bg-white/20",                                                           active: (p: string) => p === "/" },
+  { href: "/gamecentre",   label: "Live",          dot: "live",   dotClass: "",                                                                      active: (p: string) => p === "/gamecentre" || p.startsWith("/game/") },
+  { href: "/league/teams", label: "Teams",         dot: "static", dotClass: "bg-white/20",                                                           active: (p: string) => p.startsWith("/league") || p.startsWith("/teams/") },
+  { href: "/stats",        label: "Stats Leaders", dot: "static", dotClass: "bg-white/35 shadow-[0_0_5px_rgba(210,215,220,0.5)]",                   active: (p: string) => p === "/stats" },
+  { href: "/standings",    label: "Standings",     dot: "static", dotClass: "bg-[#fbbf24]/70 shadow-[0_0_5px_rgba(251,191,36,0.6)]",                active: (p: string) => p === "/standings" },
+  { href: "/players",      label: "Cortex",        dot: "static", dotClass: "bg-[#a78bfa] shadow-[0_0_6px_rgba(167,139,250,0.8)]",                  active: (p: string) => p === "/players" || p.startsWith("/players/") },
+  { href: "/barncentre",   label: "BarnCentre",    dot: "static", dotClass: "bg-[#C9A84C]/70 shadow-[0_0_5px_rgba(201,168,76,0.6)]",                active: (p: string) => p === "/barncentre" },
 ];
 
 function InnerLayout({ children }: { children: React.ReactNode }) {
@@ -244,6 +244,8 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
             </p>
             {NAV_ITEMS.map(({ href, label, active, dot, dotClass }) => {
               const isActive = active(pathname);
+              const isCortexItem = label === "Cortex";
+              const isBarnCentreItem = label === "BarnCentre";
               const liveDot = dot === "live"
                 ? hasLive
                   ? "bg-[#4ade80] shadow-[0_0_6px_rgba(74,222,128,0.9)] animate-pulse"
@@ -254,7 +256,24 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                   <div className={`flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all duration-150 ${isActive ? "bg-white/[0.08]" : "hover:bg-white/[0.04]"}`}>
                     <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${liveDot}`} />
                     <span className="text-[9px] font-semibold font-mono text-white/15 w-5 shrink-0">—</span>
-                    <span className={`text-[11px] font-medium leading-tight ${isActive ? "text-white/90" : "text-white/60"}`}>
+                    <span className={`text-[11px] font-medium leading-tight flex items-center gap-1.5 ${isActive ? "text-white/90" : "text-white/60"}`}>
+                      {isCortexItem && (
+                        <svg width="12" height="12" viewBox="0 0 48 48" fill="none" aria-hidden="true" className="shrink-0">
+                          <path d="M24 10 C18 10 11 14 9 20 C7 25 9 31 13 34 C17 37 21 37 24 37" stroke="#a78bfa" strokeWidth="2.5" strokeLinecap="round" fill="none"/>
+                          <path d="M24 10 C30 10 37 14 39 20 C41 25 39 31 35 34 C31 37 27 37 24 37" stroke="#a78bfa" strokeWidth="2.5" strokeLinecap="round" fill="none"/>
+                          <circle cx="24" cy="24" r="3.2" fill="#a78bfa" fillOpacity="0.95"/>
+                        </svg>
+                      )}
+                      {isBarnCentreItem && (
+                        <svg width="12" height="11" viewBox="0 0 14 13" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0" style={{ color: "#C9A84C" }}>
+                          <rect x="1" y="2" width="12" height="7.5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+                          <line x1="4.5" y1="9.5" x2="3.5" y2="12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                          <line x1="9.5" y1="9.5" x2="10.5" y2="12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                          <line x1="3" y1="12" x2="11" y2="12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                          <line x1="4.5" y1="2" x2="2.5" y2="0.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                          <line x1="9.5" y1="2" x2="11.5" y2="0.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                        </svg>
+                      )}
                       {label}
                     </span>
                   </div>
@@ -478,27 +497,10 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
             <div className="ml-auto flex items-center gap-0.5 sm:gap-1 shrink-0">
               {(
                 [
-                  { href: "/gamecentre",   labelSm: "Live",  label: "Live",   active: pathname === "/gamecentre" || pathname.startsWith("/game/") },
-                  { href: "/league/teams", labelSm: "Teams", label: "Teams",  active: pathname.startsWith("/league") || pathname.startsWith("/teams/") },
-                  { href: "/players",      labelSm: "Crtx",  label: "Cortex", active: pathname === "/players" || pathname.startsWith("/players/") },
+                  { href: "/gamecentre",   labelSm: "Live",  label: "Live",  active: pathname === "/gamecentre" || pathname.startsWith("/game/") },
+                  { href: "/league/teams", labelSm: "Teams", label: "Teams", active: pathname.startsWith("/league") || pathname.startsWith("/teams/") },
                 ] as const
               ).map(({ href, labelSm, label, active }) => {
-                const isCortex = label === "Cortex";
-                if (isCortex) {
-                  return (
-                    <Link
-                      key={href}
-                      href={href}
-                      className={`px-1.5 sm:px-2 py-1.5 sm:py-2 rounded-md text-[8px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border flex items-center justify-center ${
-                        active
-                          ? "bg-[#a78bfa]/15 text-[#a78bfa] border-[#a78bfa]/50 shadow-[0_0_8px_rgba(167,139,250,0.20)]"
-                          : "text-[#a78bfa]/50 border-[#a78bfa]/20 bg-[#a78bfa]/[0.04] hover:text-[#a78bfa]/80 hover:border-[#a78bfa]/40 hover:bg-[#a78bfa]/10"
-                      }`}
-                    >
-                      <MiniCortex />
-                    </Link>
-                  );
-                }
                 return (
                   <Link
                     key={href}
@@ -622,6 +624,23 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                       </div>
                     )}
                   </div>
+                );
+              })()}
+
+              {/* Cortex button — after Stats */}
+              {(() => {
+                const cortexActive = pathname === "/players" || pathname.startsWith("/players/");
+                return (
+                  <Link
+                    href="/players"
+                    className={`px-1.5 sm:px-2 py-1.5 sm:py-2 rounded-md text-[8px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border flex items-center justify-center ${
+                      cortexActive
+                        ? "bg-[#a78bfa]/15 text-[#a78bfa] border-[#a78bfa]/50 shadow-[0_0_8px_rgba(167,139,250,0.20)]"
+                        : "text-[#a78bfa]/50 border-[#a78bfa]/20 bg-[#a78bfa]/[0.04] hover:text-[#a78bfa]/80 hover:border-[#a78bfa]/40 hover:bg-[#a78bfa]/10"
+                    }`}
+                  >
+                    <MiniCortex />
+                  </Link>
                 );
               })()}
 
