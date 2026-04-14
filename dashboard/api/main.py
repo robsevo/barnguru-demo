@@ -4761,6 +4761,108 @@ async def game_streams(game_id: int) -> dict:
     return {"streams": streams, "game_id": game_id, "away": away_abbr, "home": home_abbr}
 
 
+# ===========================================================================
+# /game-iptv-streams/{game_id} — broadcast-matched IPTV channels
+# Returns only the IPTV channels whose network is actually broadcasting this
+# game, grouped by market (home / away / national).  Replaces the 138-channel
+# IPTV dump with a short, targeted list per game.
+# ===========================================================================
+
+# NHL API uses abbreviated network codes; map to the canonical prefix used in
+# our IPTV channel titles (e.g. "TVA Sports HD" starts with "TVA Sports").
+_BROADCAST_CODE_MAP: dict[str, str] = {
+    # Canadian French
+    "TVAS":  "TVA Sports",
+    "TVAS2": "TVA Sports 2",
+    "RDS":   "RDS",
+    "RDS2":  "RDS2",
+    # Canadian English — TSN
+    "TSN1": "TSN1", "TSN2": "TSN2", "TSN3": "TSN3", "TSN4": "TSN4", "TSN5": "TSN5",
+    # Canadian English — Sportsnet
+    "SN":  "Sportsnet",
+    "SNE": "Sportsnet East",
+    "SNO": "Sportsnet Ontario",
+    "SNW": "Sportsnet West",
+    "SNP": "Sportsnet Pacific",
+    # US National
+    "ESPN":  "ESPN",
+    "ESPN2": "ESPN2",
+    "NHLN":  "NHL Network",
+    "TNT":   "TNT",
+    "TBS":   "TBS",
+    "MAX":   "Max",
+    "ABC":   "ABC",
+    # US Regional
+    "MSG":   "MSG",
+    "MSGSN": "MSG+",
+    "NESN":  "NESN",
+    "NBCSP": "NBC Sports",
+    "FS1":   "FS1",
+    "FS2":   "FS2",
+}
+
+_game_iptv_cache: dict[int, tuple[list, float]] = {}
+_GAME_IPTV_TTL = 3600  # 1 hour — broadcasts don't change during a game
+
+
+@app.get("/game-iptv-streams/{game_id}")
+async def game_iptv_streams(game_id: int) -> dict:
+    """Return IPTV channels matched to this game's actual broadcast networks."""
+    import time as _t_iptv
+    cached = _game_iptv_cache.get(game_id)
+    if cached and (_t_iptv.monotonic() - cached[1]) < _GAME_IPTV_TTL:
+        return {"broadcasts": cached[0], "cached": True}
+
+    from data.nhl_client import NHLClient
+
+    # 1. Fetch tvBroadcasts from NHL API
+    try:
+        async with NHLClient() as client:
+            landing = await client.get_landing(game_id)
+        if isinstance(landing, Exception) or not landing:
+            return {"broadcasts": []}
+    except Exception:
+        return {"broadcasts": []}
+
+    tv_broadcasts: list[dict] = landing.get("tvBroadcasts") or []
+    if not tv_broadcasts:
+        return {"broadcasts": []}
+
+    # 2. Get our IPTV channel list (cached 1hr inside iptv_channels())
+    try:
+        iptv_result = await iptv_channels()
+        all_channels: list[dict] = iptv_result.get("channels", []) if isinstance(iptv_result, dict) else []
+    except Exception:
+        all_channels = []
+
+    # 3. Match each broadcast network to IPTV channels by title prefix
+    result: list[dict] = []
+    seen_codes: set[str] = set()
+    for b in tv_broadcasts:
+        code = (b.get("network") or "").strip()
+        market = b.get("market", "N")  # "H" | "A" | "N"
+        if not code or code in seen_codes:
+            continue
+        seen_codes.add(code)
+
+        display = _BROADCAST_CODE_MAP.get(code, code)
+        prefix = display.lower()
+        matched = [
+            ch for ch in all_channels
+            if ch.get("title", "").lower().startswith(prefix)
+        ]
+        if matched:
+            result.append({
+                "network": display,
+                "code": code,
+                "market": market,
+                "channels": matched,
+            })
+
+    _game_iptv_cache[game_id] = (result, _t_iptv.monotonic())
+    return {"broadcasts": result}
+
+
 # ---------------------------------------------------------------------------
 # Backup stream scrapers — all run in parallel, each returns [{url,feed,title}]
 # Priority assigned at the call-site based on URL patterns, not source.
