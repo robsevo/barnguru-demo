@@ -4877,6 +4877,7 @@ async def game_iptv_streams(game_id: int) -> dict:
         matched = [
             ch for ch in all_channels
             if ch.get("title", "").lower().startswith(prefix)
+            and ch.get("source") != "paid_iptv"
         ]
         if matched:
             result.append({
@@ -5452,6 +5453,8 @@ import time as _time
 
 _resolve_cache: dict[str, tuple[str | None, float]] = {}  # embed_url -> (m3u8_url|None, ts)
 _RESOLVE_TTL = 3600  # 1 hour — CDN tokens typically last 1–2 h; short enough to avoid stale caches
+_tvpass_resolve_cache: dict[str, tuple[str, float]] = {}  # tvpass url -> (resolved url, ts)
+_TVPASS_RESOLVE_TTL = 300  # 5 min — thetvapp.to tokens last ~1-2h but refresh is cheap
 
 
 async def _resolve_embed(embed_url: str) -> str | None:
@@ -5499,6 +5502,12 @@ async def stream_resolve(url: str) -> dict:
     # Follow the 302 — if it ends at an m3u8 we're done; otherwise embed the page.
     # Never fall through to yt-dlp/Playwright for these URLs.
     if "tvpass.org/live/" in lower:
+        # Check cache first (5-min TTL to avoid re-fetching token on every click)
+        _tv_cached = _tvpass_resolve_cache.get(url)
+        if _tv_cached and (_time.monotonic() - _tv_cached[1]) < _TVPASS_RESOLVE_TTL:
+            _cached_url = _tv_cached[0]
+            _ctype = "m3u8" if ".m3u8" in _cached_url else "embed"
+            return {"type": _ctype, "url": _cached_url, "cached": True}
         try:
             import httpx as _hx
             async with _hx.AsyncClient(
@@ -5513,10 +5522,12 @@ async def stream_resolve(url: str) -> dict:
                 r = await _cl.get(url)
                 final = str(r.url)
                 if ".m3u8" in final:
+                    _tvpass_resolve_cache[url] = (final, _time.monotonic())
                     return {"type": "m3u8", "url": final}
         except Exception:
             pass
         # Redirect didn't give us HLS — embed the tvpass page (has built-in player)
+        _tvpass_resolve_cache[url] = (url, _time.monotonic())
         return {"type": "embed", "url": url}
 
     # Try all extraction layers
