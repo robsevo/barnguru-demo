@@ -33,6 +33,9 @@ dashboard/frontend/.env
 dashboard/frontend/.env.local
 dashboard/frontend/.env.*.local
 
+# IPTV status report — generated on server by check-iptv, never commit
+dashboard/api/iptv_status.json
+
 # Environment / secrets
 .env
 .env.local
@@ -61,3 +64,4 @@ models/cv/*.pt
 .vscode/
 *.swp
 *.swo
+.vercel

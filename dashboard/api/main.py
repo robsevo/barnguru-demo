@@ -6717,11 +6717,22 @@ _NHL_KEYWORDS = [
     "nesn","nbcs","nbcsp","spectrum sportsnet","nhln",
 ]
 
-_M3U_SOURCES = [
-    "https://raw.githubusercontent.com/phosani/tvpass/refs/heads/main/tvpasshd.m3u",
-    "https://raw.githubusercontent.com/musicmashupstv-hue/tvpassplaylist/main/tvpassplaylist.m3u8",
-    "https://raw.githubusercontent.com/jburg229/iptv-playlist/main/playlist.m3u",
-]
+def _build_m3u_sources() -> list[str]:
+    public = [
+        "https://raw.githubusercontent.com/phosani/tvpass/refs/heads/main/tvpasshd.m3u",
+        "https://raw.githubusercontent.com/musicmashupstv-hue/tvpassplaylist/main/tvpassplaylist.m3u8",
+        "https://raw.githubusercontent.com/jburg229/iptv-playlist/main/playlist.m3u",
+    ]
+    paid: list[str] = []
+    for _i in range(1, 7):
+        _url  = os.environ.get(f"IPTV{_i}_URL", "").rstrip("/")
+        _user = os.environ.get(f"IPTV{_i}_USER", "")
+        _pw   = os.environ.get(f"IPTV{_i}_PASS", "")
+        if _url and _user and _pw:
+            paid.append(f"{_url}/get.php?username={_user}&password={_pw}&type=m3u_plus")
+    return public + paid
+
+_M3U_SOURCES = _build_m3u_sources()
 
 
 @app.get("/iptv-channels")
@@ -6731,6 +6742,17 @@ async def iptv_channels():
         return {"channels": _IPTV_CACHE["data"], "count": len(_IPTV_CACHE["data"]), "cached": True}
 
     channels = []
+
+    # Source 0: saved paid IPTV channels (extracted via extract-iptv, committed to git)
+    # Always available even when env vars are unset or accounts are unreachable.
+    _saved_path = Path(__file__).parent / "iptv_paid_channels.json"
+    if _saved_path.exists():
+        try:
+            import json as _json_iptv
+            for _ch in _json_iptv.loads(_saved_path.read_text()):
+                channels.append(_ch)
+        except Exception:
+            pass
 
     # Source 1: static tvpass.org slugs (always available)
     for name, slug, quality in _TVPASS_CHANNELS:
@@ -6808,9 +6830,35 @@ async def iptv_channels():
     except Exception:
         pass
 
+    # Deduplicate by exact URL — keeps first occurrence (highest-priority source wins)
+    _seen_urls: set[str] = set()
+    _deduped: list = []
+    for _ch in channels:
+        if _ch["url"] not in _seen_urls:
+            _seen_urls.add(_ch["url"])
+            _deduped.append(_ch)
+    channels = _deduped
+
     _IPTV_CACHE["data"] = channels
     _IPTV_CACHE["ts"] = now
     return {"channels": channels, "count": len(channels), "cached": False}
+
+
+@app.get("/iptv-channel-status")
+async def iptv_channel_status():
+    """Return the last check-iptv status report (working/broken per channel with URLs).
+
+    Written by `uv run python scripts/gretzky.py check-iptv`.
+    Returns empty result if check-iptv has never been run.
+    """
+    import json as _json_status
+    _status_path = Path(__file__).parent / "iptv_status.json"
+    if not _status_path.exists():
+        return {"checked_at": None, "summary": {}, "channels": []}
+    try:
+        return _json_status.loads(_status_path.read_text())
+    except Exception:
+        return {"checked_at": None, "summary": {}, "channels": []}
 
 
 # ===========================================================================

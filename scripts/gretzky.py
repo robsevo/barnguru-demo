@@ -56,6 +56,12 @@ COMMANDS: list[Cmd] = [
         "scripts.run_phase1_sync"),
     Cmd("ingest",     "phase1", "Ingest NHL historical PBP + shift data (required for train-rapm)",
         "scripts.run_historical_ingest"),
+    Cmd("extract-iptv", "phase1",
+        "Extract NHL channels from paid IPTV M3U playlists → iptv_paid_channels.json",
+        "scripts.extract_iptv"),
+    Cmd("check-iptv", "phase1",
+        "Test each saved IPTV channel URL and write iptv_status.json with working/broken status",
+        "scripts.check_iptv"),
 
     # ── Phase 2 — Player Rating Models ───────────────────────────────────
     Cmd("train-xg",   "phase2", "Train xG Finishing model (MoneyPuck shots)",
