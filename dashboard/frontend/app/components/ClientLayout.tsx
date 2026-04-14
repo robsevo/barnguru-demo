@@ -364,19 +364,10 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
           </div>
 
           {/* Sidebar footer */}
-          <div className="px-4 py-3 border-t border-white/[0.10] shrink-0 flex items-center justify-between">
+          <div className="px-4 py-3 border-t border-white/[0.10] shrink-0 flex items-center justify-center">
             <p className="text-[8px] font-semibold uppercase tracking-[0.2em] text-white/10">
               GRTZKY
             </p>
-            <button
-              onClick={async () => {
-                await fetch("/api/auth/logout", { method: "POST" });
-                window.location.href = "/login";
-              }}
-              className="text-[8px] font-semibold uppercase tracking-[0.2em] text-white/20 hover:text-[#f87171]/60 transition-colors duration-150"
-            >
-              Sign out
-            </button>
           </div>
         </aside>
 
@@ -524,16 +515,12 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                   </Link>
                 );
               })}
-              <button
-                onClick={async () => {
-                  await fetch("/api/auth/logout", { method: "POST" });
-                  window.location.href = "/login";
-                }}
-                className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md text-[8px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border text-[#f87171]/70 border-[#f87171]/25 bg-[#f87171]/[0.05] hover:text-[#f87171] hover:border-[#f87171]/50 hover:bg-[#f87171]/[0.10]"
+              <Link
+                href="/barncentre"
+                className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md text-[8px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border text-[#C9A84C]/80 border-[#C9A84C]/30 bg-[#C9A84C]/[0.07] hover:text-[#C9A84C] hover:border-[#C9A84C]/55 hover:bg-[#C9A84C]/[0.13]"
               >
-                <span className="sm:hidden">✕</span>
-                <span className="hidden sm:inline">Logout</span>
-              </button>
+                BC
+              </Link>
             </div>
           </header>
 
