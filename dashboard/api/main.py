@@ -4792,13 +4792,34 @@ _BROADCAST_CODE_MAP: dict[str, str] = {
     "TBS":   "TBS",
     "MAX":   "Max",
     "ABC":   "ABC",
-    # US Regional
+    # US Regional — general
     "MSG":   "MSG",
     "MSGSN": "MSG+",
     "NESN":  "NESN",
     "NBCSP": "NBC Sports",
     "FS1":   "FS1",
     "FS2":   "FS2",
+    # Victory+ (Anaheim Ducks streaming platform)
+    "Victory+": "Victory+",
+    "VICTORY":  "Victory+",
+    # Fanduel Sports (formerly Bally Sports) — NHL regional US networks
+    "FDSNNO":  "Fanduel Sports Network North",     # Minnesota Wild
+    "FDSNN":   "Fanduel Sports Network North",
+    "FDSNNOX": "Fanduel Sports Network North",
+    "FDSNWI":  "Fanduel Sports Network Wisconsin", # Chicago Blackhawks
+    "FDSNWIX": "Fanduel Sports Network Wisconsin",
+    "FDSNDET": "Fanduel Sports Network Detroit",   # Detroit Red Wings
+    "FDSNGL":  "Fanduel Sports Network Great Lakes",
+    "FDSNFL":  "Fanduel Sports Network Florida",   # Florida Panthers / Tampa Bay
+    "FDSNSUN": "Fanduel Sports Network Florida",
+    "FDSNOH":  "Fanduel Sports Network Ohio Cleveland",  # Columbus Blue Jackets
+    "FDSNIN":  "Fanduel Sports Indiana",           # Indiana / CHI overlap
+    "FDSNST":  "Fanduel Sports Network South Tennessee", # Nashville Predators
+    "FDSNSO":  "Fanduel Sports Southeast South Carolina", # Carolina Hurricanes
+    "FDSNSC":  "Fanduel Sports Southeast South Carolina",
+    "FDSNSCA": "Fanduel Sports Network Socal",     # Anaheim Ducks / LA Kings
+    "FDSNW":   "Fanduel Sports Network West",      # Utah Hockey Club / others
+    "FDSNOK":  "Fanduel Sports Network Oklahoma",
 }
 
 _game_iptv_cache: dict[int, tuple[list, float]] = {}
@@ -6682,7 +6703,13 @@ _TVPASS_CHANNELS = [
     ("RDS2 HD",  "RDS2",  "hd"),
 ]
 
-_NHL_KEYWORDS = ["espn","tnt","tbs","nhl","sportsnet","tsn","msg","foxsports","fs1","fs2","abc","nbc","tva","rds"]
+_NHL_KEYWORDS = [
+    "espn","tnt","tbs","nhl","sportsnet","tsn","msg","foxsports","fs1","fs2","abc","nbc","tva","rds",
+    # US regional sports (Fanduel = rebranded Bally Sports; Victory+ = Ducks)
+    "fanduel","bally","victory",
+    # Other regional US nets that carry NHL
+    "nesn","nbcs","nbcsp","spectrum sportsnet","nhln",
+]
 
 _M3U_SOURCES = [
     "https://raw.githubusercontent.com/phosani/tvpass/refs/heads/main/tvpasshd.m3u",
@@ -6710,22 +6737,30 @@ async def iptv_channels():
             "embed_only": False,
         })
 
-    # Source 2: albinchristo04/tvpass streams.json — pre-authenticated thetvapp.to HLS
+    # Source 2: albinchristo04/tvpass streams.json — tvpass.org redirect URLs with fresh tokens.
+    # The JSON has structure {"channels": [...]} where each entry has:
+    #   original_url: tvpass.org/live/<slug>/hd  ← use this (generates fresh token at stream time)
+    #   stream_url:   thetvapp.to/hls/...?token=... ← stale, expires within hours — do NOT use
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             r = await client.get("https://raw.githubusercontent.com/albinchristo04/tvpass/main/streams.json")
             if r.status_code == 200:
-                for entry in r.json():
+                payload = r.json()
+                entries = payload.get("channels", []) if isinstance(payload, dict) else payload
+                for entry in entries:
                     name_lower = (entry.get("name") or "").lower()
-                    stream_url = entry.get("stream_url") or ""
+                    # Prefer original_url (tvpass redirect → fresh token); fall back to stream_url
+                    original_url = entry.get("original_url") or ""
+                    stream_url   = entry.get("stream_url") or ""
+                    use_url = original_url if original_url.startswith("http") else stream_url
                     if (
                         entry.get("status") == "working"
-                        and stream_url.startswith("http")
+                        and use_url.startswith("http")
                         and any(k in name_lower for k in _NHL_KEYWORDS)
                     ):
                         channels.append({
                             "title": f"{entry['name']} (thetvapp)",
-                            "url": stream_url,
+                            "url": use_url,
                             "source": "thetvapp",
                             "feed": "iptv",
                             "priority": 0,
