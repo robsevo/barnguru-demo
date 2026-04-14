@@ -6718,6 +6718,15 @@ _NHL_KEYWORDS = [
 ]
 
 def _build_m3u_sources() -> list[str]:
+    # Load IPTV credentials from iptv.env sidecar (written by nightly deploy, gitignored)
+    _env_file = Path(__file__).parent / "iptv.env"
+    if _env_file.exists():
+        for _line in _env_file.read_text().splitlines():
+            _line = _line.strip()
+            if "=" in _line and not _line.startswith("#"):
+                _k, _, _v = _line.partition("=")
+                os.environ.setdefault(_k.strip(), _v.strip())
+
     public = [
         "https://raw.githubusercontent.com/phosani/tvpass/refs/heads/main/tvpasshd.m3u",
         "https://raw.githubusercontent.com/musicmashupstv-hue/tvpassplaylist/main/tvpassplaylist.m3u8",

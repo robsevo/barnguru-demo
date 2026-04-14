@@ -33,8 +33,9 @@ dashboard/frontend/.env
 dashboard/frontend/.env.local
 dashboard/frontend/.env.*.local
 
-# IPTV status report — generated on server by check-iptv, never commit
+# IPTV — generated on server by nightly deploy / check-iptv, never commit
 dashboard/api/iptv_status.json
+dashboard/api/iptv.env
 
 # Environment / secrets
 .env
