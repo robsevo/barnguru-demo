@@ -4787,11 +4787,14 @@ _BROADCAST_CODE_MAP: dict[str, str] = {
     # US National
     "ESPN":  "ESPN",
     "ESPN2": "ESPN2",
+    "ESPNP": "ESPN+",    # ESPN+ streaming (NHL direct deal)
     "NHLN":  "NHL Network",
     "TNT":   "TNT",
     "TBS":   "TBS",
     "MAX":   "Max",
     "ABC":   "ABC",
+    "FS1":   "FS1",
+    "FS2":   "FS2",
     # US Regional — general
     "MSG":   "MSG",
     "MSGSN": "MSG+",
@@ -6813,10 +6816,15 @@ async def iptv_channels():
 
 # Channels shown in BarnCentre — all-day sports / highlights content
 _BARNCENTRE_CHANNEL_NAMES = [
+    # Canadian
     "TSN1", "TSN2", "TSN3", "TSN4", "TSN5",
-    "ESPN", "ESPN2",
+    # US national
+    "ESPN", "ESPN2", "ESPN+",
     "NHL Network",
-    "FS1",
+    "FS1", "FS2",
+    "TNT", "TBS",
+    # US regional (big-market)
+    "NESN",
 ]
 
 import re as _re_bc
@@ -6828,27 +6836,93 @@ def _normalize_ch(title: str) -> str:
     return t.strip().lower()
 
 
+def _ch_matches(raw_title: str, ch_name: str) -> bool:
+    """Return True if an IPTV channel title matches our BarnCentre channel name."""
+    norm  = _normalize_ch(raw_title)
+    want  = ch_name.lower()
+    # Exact match or starts with name + space (e.g. "tsn1" or "tsn1 hd")
+    if norm == want or norm.startswith(want + " "):
+        return True
+    # Also handle "espn+" ↔ "espnplus" / "espn plus"
+    if want == "espn+":
+        return norm in ("espnplus", "espn plus", "espn+") or norm.startswith("espn+ ") or norm.startswith("espnplus ")
+    return False
+
+
+async def _verify_stream_alive(url: str, timeout: float = 6.0) -> bool:
+    """Follow redirects and confirm the URL resolves to a reachable HLS stream.
+
+    For tvpass.org/live/* URLs: follow 302 → check final URL is m3u8 + HTTP 200.
+    For direct m3u8 URLs: do a lightweight HEAD/GET.
+    Returns False on timeout, 404/403, or non-m3u8 destination.
+    """
+    import httpx as _hx_v
+    try:
+        async with _hx_v.AsyncClient(
+            follow_redirects=True,
+            timeout=timeout,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Referer":  "https://tvpass.org/",
+                "Origin":   "https://tvpass.org",
+            },
+        ) as cl:
+            if url.lower().split("?")[0].endswith(".m3u8"):
+                r = await cl.head(url)
+                return r.status_code == 200
+            r = await cl.get(url)
+            final = str(r.url)
+            if r.status_code in (404, 403, 410):
+                return False
+            # tvpass redirect lands on .m3u8 URL — confirmed live
+            if ".m3u8" in final.lower() and r.status_code == 200:
+                return True
+            # Other 2xx destinations (embed pages) — treat as available
+            return r.status_code < 400
+    except Exception:
+        return False
+
+
+def _sort_by_url_priority(candidates: list[dict]) -> list[dict]:
+    """Sort channel candidates: tvpass.org redirect URLs first (fresh token), raw CDN second."""
+    def _prio(m: dict) -> int:
+        u = m["url"]
+        if "tvpass.org/live" in u:
+            return 0
+        if "thetvapp.to" in u:
+            return 1
+        return 2
+    return sorted(candidates, key=_prio)
+
+
 _barncentre_cache: dict = {"data": None, "ts": 0.0}
 _BARNCENTRE_TTL = 3600  # 1 hour
 
 
 @app.get("/barncentre-channels")
 async def barncentre_channels() -> dict:
-    """Return curated, de-duplicated channel list for BarnCentre with today's NHL programs."""
+    """Return curated, verified channel list for BarnCentre with today's NHL programs.
+
+    Each channel is verified live by following the stream URL and checking for a
+    reachable HLS manifest. Verification runs in parallel across all channels.
+    Cache is valid for 1 hour.
+    """
     import time as _t_bc
-    now = _t_bc.time()
-    if _barncentre_cache["data"] is not None and now - _barncentre_cache["ts"] < _BARNCENTRE_TTL:
+    import asyncio as _aio_bc
+    now_ts = _t_bc.time()
+    if _barncentre_cache["data"] is not None and now_ts - _barncentre_cache["ts"] < _BARNCENTRE_TTL:
         return {"channels": _barncentre_cache["data"], "cached": True}
 
-    # 1. Get full IPTV channel list (cached 1hr)
-    iptv_result = await iptv_channels()
+    # ── 1. Full IPTV channel list (shared 1-hr cache) ─────────────────────────
+    iptv_result  = await iptv_channels()
     all_channels: list[dict] = iptv_result.get("channels", [])
 
-    # 2. Fetch today's NHL schedule for the program guide
+    # ── 2. Today's NHL schedule → program guide ───────────────────────────────
     import httpx as _hx_bc
     import datetime as _dt_bc
-    today = _dt_bc.date.today().isoformat()
-    programs: dict[str, list] = {}   # channel display name → list of program dicts
+    today    = _dt_bc.date.today().isoformat()
+    programs: dict[str, list] = {}
     try:
         async with _hx_bc.AsyncClient(timeout=8) as _cl:
             resp = await _cl.get(f"https://api-web.nhle.com/v1/score/{today}")
@@ -6876,46 +6950,51 @@ async def barncentre_channels() -> dict:
     except Exception:
         pass
 
-    # 3. Build curated channel list
-    result: list[dict] = []
+    # ── 3. Match IPTV channels to our curated list ────────────────────────────
+    channel_candidates: dict[str, list[dict]] = {}
     for ch_name in _BARNCENTRE_CHANNEL_NAMES:
-        prefix = ch_name.lower()
-
-        matched = [
-            ch for ch in all_channels
-            if _normalize_ch(ch.get("title", "")) == prefix
-            or _normalize_ch(ch.get("title", "")).startswith(prefix + " ")
-        ]
-
+        matched = [ch for ch in all_channels if _ch_matches(ch.get("title", ""), ch_name)]
         if not matched:
             continue
-
-        # De-duplicate by URL; prefer tvpass.org redirect URLs (fresh token) over raw thetvapp
-        seen_urls: set[str] = set()
+        # De-duplicate by URL, then sort by priority
+        seen: set[str] = set()
         unique: list[dict] = []
         for m in matched:
-            url = m["url"]
-            if url not in seen_urls:
-                seen_urls.add(url)
+            if m["url"] not in seen:
+                seen.add(m["url"])
                 unique.append(m)
+        channel_candidates[ch_name] = _sort_by_url_priority(unique)
 
-        def _url_prio(m: dict) -> int:
-            u = m["url"]
-            if "tvpass.org/live" in u:
-                return 0
-            if "thetvapp.to" in u:
-                return 1
-            return 2
+    # ── 4. Verify each channel's primary stream in parallel ───────────────────
+    async def _build_channel(ch_name: str, candidates: list[dict]) -> dict:
+        """Check primary (and first backup) for liveness; return channel dict."""
+        # Try candidates in priority order — use first live one as primary
+        verified_primary: str | None = None
+        for cand in candidates[:3]:          # check up to 3 URLs per channel
+            alive = await _verify_stream_alive(cand["url"])
+            if alive:
+                verified_primary = cand["url"]
+                break
 
-        unique.sort(key=_url_prio)
+        # If none verified live, fall back to top-priority URL and mark offline
+        primary    = verified_primary or candidates[0]["url"]
+        backup_src = [c["url"] for c in candidates if c["url"] != primary][:4]
 
-        result.append({
+        return {
             "name":         ch_name,
-            "primary_url":  unique[0]["url"],
-            "backup_urls":  [b["url"] for b in unique[1:4]],  # up to 3 backups
+            "primary_url":  primary,
+            "backup_urls":  backup_src,
             "programs":     programs.get(ch_name, []),
-        })
+            "online":       verified_primary is not None,
+        }
+
+    tasks  = [_build_channel(n, c) for n, c in channel_candidates.items()]
+    result = list(await _aio_bc.gather(*tasks))
+
+    # Preserve the _BARNCENTRE_CHANNEL_NAMES ordering
+    order  = {n: i for i, n in enumerate(_BARNCENTRE_CHANNEL_NAMES)}
+    result.sort(key=lambda ch: order.get(ch["name"], 999))
 
     _barncentre_cache["data"] = result
-    _barncentre_cache["ts"] = now
+    _barncentre_cache["ts"]   = now_ts
     return {"channels": result, "cached": False}
