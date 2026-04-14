@@ -4391,12 +4391,14 @@ async def game_centre(game_id: int) -> dict:
         "venue":         (landing.get("venue") or {}).get("default", ""),
         "game_date":     landing.get("gameDate", ""),
         "away": {
-            "team":  away_abbrev,
-            "score": away_raw.get("score", 0),
+            "team":   away_abbrev,
+            "score":  away_raw.get("score", 0),
+            "record": away_raw.get("record", ""),
         },
         "home": {
-            "team":  home_abbrev,
-            "score": home_raw.get("score", 0),
+            "team":   home_abbrev,
+            "score":  home_raw.get("score", 0),
+            "record": home_raw.get("record", ""),
         },
         "scoring":    scoring_out,
         "penalties":  penalties_out,
@@ -6824,6 +6826,8 @@ _BARNCENTRE_CHANNEL_NAMES = [
     "FS1", "FS2",
     # US regional (big-market)
     "NESN",
+    # US sports betting / general sports
+    "FanDuel",
 ]
 
 import re as _re_bc

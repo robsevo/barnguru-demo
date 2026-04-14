@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { logoUrl, TEAM_COLORS, TEAM_SECONDARY, normalizePlayerName } from "@/utils/nhl";
 import TeamLogoLink from "@/components/TeamLogoLink";
 import { useTheme } from "@/utils/themeContext";
@@ -1140,17 +1141,45 @@ function HalfRinkMarkings() {
       {/* Trapezoid */}
       <polygon points="100,28.5 89,33.5 89,51.5 100,56.5"
         fill="none" stroke="#cc2222" strokeWidth="0.5" opacity="0.4" />
-      {/* Crease */}
-      <path d="M 89 36 A 8 8 0 0 0 89 49"
-        fill="rgba(30,100,200,0.09)" stroke="#1155bb" strokeWidth="0.8" opacity="0.75" />
-      {/* Net */}
-      <rect x="89" y="38.5" width="6" height="8" rx="1"
+      {/* Crease — filled D-shape, r=6, sweeps toward center ice (sweep=0 = left/CCW) */}
+      <path d="M 89 36.5 A 6 6 0 0 0 89 48.5 Z"
+        fill="rgba(30,100,200,0.13)" stroke="#1155bb" strokeWidth="0.8" opacity="0.75" />
+      {/* Net — narrow depth, 6ft post-to-post */}
+      <rect x="89" y="39.5" width="2.5" height="6" rx="0.5"
         fill="rgba(180,180,180,0.5)" stroke="#777" strokeWidth="0.6" />
       {/* Faceoff circles */}
-      <circle cx="69" cy="20.5" r="9" fill="none" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <circle cx="69" cy="64.5" r="9" fill="none" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <circle cx="69" cy="20.5" r="15" fill="none" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <circle cx="69" cy="64.5" r="15" fill="none" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
       <circle cx="69" cy="20.5" r="0.85" fill="#cc2222" opacity="0.55" />
       <circle cx="69" cy="64.5" r="0.85" fill="#cc2222" opacity="0.55" />
+      {/* Interior hashmarks — top OZ circle (⊞, tight around dot) */}
+      <line x1="67.5" y1="16.5" x2="67.5" y2="19.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <line x1="70.5" y1="16.5" x2="70.5" y2="19.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <line x1="67.5" y1="21.5" x2="67.5" y2="24.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <line x1="70.5" y1="21.5" x2="70.5" y2="24.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <line x1="65" y1="19" x2="68" y2="19" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <line x1="70" y1="19" x2="73" y2="19" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <line x1="65" y1="22" x2="68" y2="22" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <line x1="70" y1="22" x2="73" y2="22" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      {/* Exterior hashmarks — top OZ circle (2 marks outside ring, top & bottom) */}
+      <line x1="67.5" y1="3" x2="67.5" y2="5.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <line x1="70.5" y1="3" x2="70.5" y2="5.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <line x1="67.5" y1="35.5" x2="67.5" y2="38" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <line x1="70.5" y1="35.5" x2="70.5" y2="38" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      {/* Interior hashmarks — bottom OZ circle */}
+      <line x1="67.5" y1="60.5" x2="67.5" y2="63.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <line x1="70.5" y1="60.5" x2="70.5" y2="63.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <line x1="67.5" y1="65.5" x2="67.5" y2="68.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <line x1="70.5" y1="65.5" x2="70.5" y2="68.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <line x1="65" y1="63" x2="68" y2="63" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <line x1="70" y1="63" x2="73" y2="63" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <line x1="65" y1="66" x2="68" y2="66" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <line x1="70" y1="66" x2="73" y2="66" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      {/* Exterior hashmarks — bottom OZ circle (2 marks outside ring, top & bottom) */}
+      <line x1="67.5" y1="47" x2="67.5" y2="49.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <line x1="70.5" y1="47" x2="70.5" y2="49.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <line x1="67.5" y1="79.5" x2="67.5" y2="82" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+      <line x1="70.5" y1="79.5" x2="70.5" y2="82" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
       <circle cx="20" cy="20.5" r="0.85" fill="#cc2222" opacity="0.35" />
       <circle cx="20" cy="64.5" r="0.85" fill="#cc2222" opacity="0.35" />
       {/* Center ice boundary */}
@@ -1613,15 +1642,44 @@ function ZoneTendencyMap({ data, teamColor }: { data: ProfileData; teamColor: st
       {/* (x,y)→(y,100-x): end boards y=0 wide (28.5→56.5), goal line y=11 narrow (33.5→51.5) */}
       <polygon points="28.5,0 56.5,0 51.5,11 33.5,11"
         fill="none" stroke="#cc2222" strokeWidth="0.5" opacity="0.4" clipPath="url(#ztClip)" />
-      {/* Net — sits above goal line (y=5→11), centered (x=36→49) */}
-      <rect x="36" y="5" width="13" height="6" rx="1" fill="rgba(180,180,180,0.45)" stroke="#666" strokeWidth="0.7" />
-      {/* Crease — arc curving into ice (sweep-flag 0 = CCW = downward) */}
-      <path d="M 33 11 A 9 9 0 0 0 52 11" fill="rgba(30,100,200,0.09)" stroke="#1155bb" strokeWidth="0.8" opacity="0.65" />
-      {/* Faceoff circles — orig (69,20.5)→(20.5,31) and (69,64.5)→(64.5,31) */}
-      <circle cx="20.5" cy="31" r="9" fill="none" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
-      <circle cx="64.5" cy="31" r="9" fill="none" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      {/* Net — narrow, 6ft wide, centered at x=42.5 */}
+      <rect x="39.5" y="8.5" width="6" height="2.5" rx="0.5" fill="rgba(180,180,180,0.45)" stroke="#666" strokeWidth="0.7" />
+      {/* Crease — filled D-shape, r=6, sweep=1 bows into ice (larger y) */}
+      <path d="M 36.5 11 A 6 6 0 0 0 48.5 11 Z"
+        fill="rgba(30,100,200,0.13)" stroke="#1155bb" strokeWidth="0.8" opacity="0.7" />
+      {/* Faceoff circles — r=15 (correct NHL scale: 15ft radius) */}
+      <circle cx="20.5" cy="31" r="15" fill="none" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <circle cx="64.5" cy="31" r="15" fill="none" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
       <circle cx="20.5" cy="31" r="0.85" fill="#cc2222" opacity="0.5" />
       <circle cx="64.5" cy="31" r="0.85" fill="#cc2222" opacity="0.5" />
+      {/* Interior hashmarks — left OZ circle (⊞, tight around dot) */}
+      <line x1="19" y1="27" x2="19" y2="30" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <line x1="22" y1="27" x2="22" y2="30" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <line x1="19" y1="32" x2="19" y2="35" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <line x1="22" y1="32" x2="22" y2="35" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <line x1="16.5" y1="29.5" x2="19.5" y2="29.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <line x1="21.5" y1="29.5" x2="24.5" y2="29.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <line x1="16.5" y1="32.5" x2="19.5" y2="32.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <line x1="21.5" y1="32.5" x2="24.5" y2="32.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      {/* Exterior hashmarks — left OZ circle (2 marks outside ring, left & right) */}
+      <line x1="3" y1="29.5" x2="5.5" y2="29.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <line x1="3" y1="32.5" x2="5.5" y2="32.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <line x1="35.5" y1="29.5" x2="38" y2="29.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <line x1="35.5" y1="32.5" x2="38" y2="32.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      {/* Interior hashmarks — right OZ circle */}
+      <line x1="63" y1="27" x2="63" y2="30" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <line x1="66" y1="27" x2="66" y2="30" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <line x1="63" y1="32" x2="63" y2="35" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <line x1="66" y1="32" x2="66" y2="35" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <line x1="60.5" y1="29.5" x2="63.5" y2="29.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <line x1="65.5" y1="29.5" x2="68.5" y2="29.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <line x1="60.5" y1="32.5" x2="63.5" y2="32.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <line x1="65.5" y1="32.5" x2="68.5" y2="32.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      {/* Exterior hashmarks — right OZ circle (2 marks outside ring, left & right) */}
+      <line x1="47" y1="29.5" x2="49.5" y2="29.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <line x1="47" y1="32.5" x2="49.5" y2="32.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <line x1="79.5" y1="29.5" x2="82" y2="29.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
+      <line x1="79.5" y1="32.5" x2="82" y2="32.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
 
       {/* Zone labels — Barlow font, clean */}
       <text x="42.5" y="64" textAnchor="middle" fontSize="2.5" fontWeight="600" fill="rgba(30,40,80,0.5)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.5">PERIM</text>
@@ -2004,8 +2062,22 @@ export default function PlayerProfilePage() {
     <main className="min-h-screen p-4 sm:p-6 max-w-3xl mx-auto w-full overflow-x-hidden w-full overflow-x-hidden">
 
       {/* ── Search bar — team-colored ── */}
-      <div className="flex justify-center mb-5">
-        <div className="relative w-full max-w-md">
+      <div className="flex justify-center mb-5 gap-2">
+        {/* Team page button */}
+        {displayTeam && (
+          <Link
+            href={`/teams/${displayTeam}`}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl shrink-0 transition-all hover:opacity-80"
+            style={{ background: `${teamColor}15`, border: `1px solid ${teamColor}30` }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={`https://assets.nhle.com/logos/nhl/svg/${displayTeam}_dark.svg`}
+              alt={displayTeam} width={20} height={20} className="object-contain" draggable={false} />
+            <span className="text-[11px] font-black uppercase tracking-[0.12em]"
+              style={{ color: teamColor }}>Team</span>
+          </Link>
+        )}
+        <div className="relative flex-1 max-w-md">
           <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm pointer-events-none select-none"
             style={{ color: `${teamColor}60` }}>⌕</span>
           <input
@@ -2053,6 +2125,7 @@ export default function PlayerProfilePage() {
           )}
         </div>
       </div>
+
 
       {/* ── Hero section — centered NHL.com style ── */}
       <div className="rounded-2xl overflow-hidden mb-4 shadow-[0_16px_60px_rgba(0,0,0,0.75)]"

@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { logoUrl, TEAM_COLORS } from "@/utils/nhl";
+import { TEAM_COLORS } from "@/utils/nhl";
+import { logoUrl } from "@/utils/nhl";
 import { useScoreHidden, useHideAllScores } from "@/utils/scoreVisibility";
 import { useTheme } from "@/utils/themeContext";
 
@@ -135,36 +136,21 @@ function useCountdown(g: Game): { text: string; secs: number } | null {
 }
 
 // ---------------------------------------------------------------------------
-// Team logo
+// Team logo — no link wrapper (card is already a link to the game page)
 // ---------------------------------------------------------------------------
 function Logo({ abbrev, size = 28, smSize }: { abbrev: string; size?: number; smSize?: number }) {
-  const [err, setErr] = useState(false);
-  if (err)
-    return (
-      <span style={{ width: smSize ?? size, height: smSize ?? size }} className="flex items-center justify-center text-[9px] font-black text-white/20">
-        {abbrev.slice(0, 3)}
-      </span>
-    );
-  const makeImg = (imgSize: number) => (
-    <img
-      src={logoUrl(abbrev)}
-      alt={abbrev}
-      width={imgSize}
-      height={imgSize}
-      style={{ width: imgSize, height: imgSize, filter: "drop-shadow(0 0 8px rgba(255,255,255,0.70)) drop-shadow(0 2px 4px rgba(0,0,0,0.60))" }}
-      className="shrink-0 object-contain"
-      onError={() => setErr(true)}
-    />
+  if (!abbrev) return <span style={{ width: smSize ?? size, height: smSize ?? size }} className="shrink-0 inline-flex" />;
+  const img = (s: number) => (
+    <img src={logoUrl(abbrev)} alt={abbrev} width={s} height={s}
+      className="object-contain shrink-0" style={{ width: s, height: s }} draggable={false} />
   );
-  if (smSize) {
-    return (
-      <>
-        <span className="sm:hidden inline-flex">{makeImg(size)}</span>
-        <span className="hidden sm:inline-flex">{makeImg(smSize)}</span>
-      </>
-    );
-  }
-  return makeImg(size);
+  if (!smSize) return img(size);
+  return (
+    <>
+      <span className="sm:hidden inline-flex">{img(size)}</span>
+      <span className="hidden sm:inline-flex">{img(smSize)}</span>
+    </>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -254,7 +240,8 @@ function GameCard({ g }: { g: Game }) {
   const countdownClr = countdownSecs <= 300 ? "text-[#f87171]" : "text-white/35";
 
   return (
-    <div className={`relative group flex flex-col justify-center gap-1 px-2 py-1.5 shrink-0 w-[132px] rounded-xl transition-all duration-200 border ${cardCls}`}>
+    <Link href={`/game/${g.game_id}`} className="block shrink-0 w-[132px]">
+    <div className={`relative group flex flex-col justify-center gap-1 px-2 py-1.5 w-full rounded-xl transition-all duration-200 border ${cardCls}`}>
       {row(g.away_team, g.away_score, awayWins, false)}
       {row(g.home_team, g.home_score, homeWins, true)}
 
@@ -323,6 +310,7 @@ function GameCard({ g }: { g: Game }) {
         </button>
       )}
     </div>
+    </Link>
   );
 }
 
