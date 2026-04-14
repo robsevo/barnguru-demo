@@ -6822,7 +6822,6 @@ _BARNCENTRE_CHANNEL_NAMES = [
     "ESPN", "ESPN2", "ESPN+",
     "NHL Network",
     "FS1", "FS2",
-    "TNT", "TBS",
     # US regional (big-market)
     "NESN",
 ]
