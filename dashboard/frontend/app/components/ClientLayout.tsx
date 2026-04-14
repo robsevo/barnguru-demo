@@ -110,7 +110,7 @@ const NAME_CLASS: Record<PhaseStatus, string> = {
 // Nav items — Live Games dot is rendered dynamically based on live status
 const NAV_ITEMS = [
   { href: "/",             label: "Home",          dot: "static", dotClass: "bg-white/20",                                                           active: (p: string) => p === "/" },
-  { href: "/gamecentre",   label: "Live",          dot: "live",   dotClass: "",                                                                      active: (p: string) => p === "/gamecentre" || p.startsWith("/game/") },
+  { href: "/gamecentre",   label: "Games",         dot: "live",   dotClass: "",                                                                      active: (p: string) => p === "/gamecentre" || p.startsWith("/game/") },
   { href: "/league/teams", label: "Teams",         dot: "static", dotClass: "bg-white/20",                                                           active: (p: string) => p.startsWith("/league") || p.startsWith("/teams/") },
   { href: "/stats",        label: "Stats Leaders", dot: "static", dotClass: "bg-white/35 shadow-[0_0_5px_rgba(210,215,220,0.5)]",                   active: (p: string) => p === "/stats" },
   { href: "/standings",    label: "Standings",     dot: "static", dotClass: "bg-[#fbbf24]/70 shadow-[0_0_5px_rgba(251,191,36,0.6)]",                active: (p: string) => p === "/standings" },
@@ -497,7 +497,7 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
             <div className="ml-auto flex items-center gap-0.5 sm:gap-1 shrink-0">
               {(
                 [
-                  { href: "/gamecentre",   labelSm: "Live",  label: "Live",  active: pathname === "/gamecentre" || pathname.startsWith("/game/") },
+                  { href: "/gamecentre",   labelSm: "Games",  label: "Games",  active: pathname === "/gamecentre" || pathname.startsWith("/game/") },
                   { href: "/league/teams", labelSm: "Teams", label: "Teams", active: pathname.startsWith("/league") || pathname.startsWith("/teams/") },
                 ] as const
               ).map(({ href, labelSm, label, active }) => {
@@ -560,27 +560,14 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                 };
                 return (
                   <div ref={statsDropRef} className="relative flex items-stretch">
-                    {/* Main Stats button */}
-                    <Link
-                      href="/stats"
-                      className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-l-md text-[8px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border-y border-l border-r-0 flex items-center"
+                    {/* Stats button — opens dropdown */}
+                    <button
+                      onClick={() => setStatsDropOpen(o => !o)}
+                      className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md text-[8px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border flex items-center gap-1"
                       style={activeStyle}
                     >
                       <span className="sm:hidden">Stats</span>
                       <span className="hidden sm:inline">Stats</span>
-                    </Link>
-                    {/* Chevron toggle */}
-                    <button
-                      onClick={() => setStatsDropOpen(o => !o)}
-                      className="px-1 py-0.5 sm:py-1 rounded-r-md text-[8px] sm:text-[9px] font-black transition-all duration-150 border-y border-r border-l-0 flex items-center"
-                      style={{
-                        ...activeStyle,
-                        borderLeftColor: theme
-                          ? "rgba(255,255,255,0.12)"
-                          : `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.10)`,
-                      }}
-                      aria-label="Stats menu"
-                    >
                       <svg width="8" height="5" viewBox="0 0 8 5" fill="currentColor" className={`transition-transform duration-150 ${statsDropOpen ? "rotate-180" : ""}`}>
                         <path d="M0.5 0.5L4 4L7.5 0.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
                       </svg>
