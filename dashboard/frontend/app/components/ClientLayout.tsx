@@ -115,6 +115,7 @@ const NAV_ITEMS = [
   { href: "/standings",     label: "Standings",     shortLabel: "Stnd",   dot: "static", dotClass: "bg-[#fbbf24]/70 shadow-[0_0_5px_rgba(251,191,36,0.6)]",                   active: (p: string) => p === "/standings" },
   { href: "/stats",         label: "Stats Leaders", shortLabel: "Stats",  dot: "static", dotClass: "bg-white/35 shadow-[0_0_5px_rgba(210,215,220,0.5)]",                      active: (p: string) => p === "/stats" },
   { href: "/players",       label: "Cortex",        shortLabel: "Crtx",   dot: "static", dotClass: "bg-[#a78bfa] shadow-[0_0_6px_rgba(167,139,250,0.8)]",                     active: (p: string) => p === "/players" || p.startsWith("/players/") },
+  { href: "/barncentre",   label: "BarnCentre",    shortLabel: "Origin",   dot: "static", dotClass: "bg-[#C9A84C]/70 shadow-[0_0_5px_rgba(201,168,76,0.6)]",                    active: (p: string) => p === "/barncentre" },
 ];
 
 function InnerLayout({ children }: { children: React.ReactNode }) {

@@ -6805,3 +6805,117 @@ async def iptv_channels():
     _IPTV_CACHE["data"] = channels
     _IPTV_CACHE["ts"] = now
     return {"channels": channels, "count": len(channels), "cached": False}
+
+
+# ===========================================================================
+# /barncentre-channels — curated sports highlight channels for BarnCentre TV
+# ===========================================================================
+
+# Channels shown in BarnCentre — all-day sports / highlights content
+_BARNCENTRE_CHANNEL_NAMES = [
+    "TSN1", "TSN2", "TSN3", "TSN4", "TSN5",
+    "ESPN", "ESPN2",
+    "NHL Network",
+    "FS1",
+]
+
+import re as _re_bc
+
+def _normalize_ch(title: str) -> str:
+    """Strip source suffix and HD/SD qualifier for channel name matching."""
+    t = _re_bc.sub(r"\s*\(thetvapp\)|\s*\(playlist\)", "", title, flags=_re_bc.I)
+    t = _re_bc.sub(r"\s+(hd|sd)\s*$", "", t, flags=_re_bc.I)
+    return t.strip().lower()
+
+
+_barncentre_cache: dict = {"data": None, "ts": 0.0}
+_BARNCENTRE_TTL = 3600  # 1 hour
+
+
+@app.get("/barncentre-channels")
+async def barncentre_channels() -> dict:
+    """Return curated, de-duplicated channel list for BarnCentre with today's NHL programs."""
+    import time as _t_bc
+    now = _t_bc.time()
+    if _barncentre_cache["data"] is not None and now - _barncentre_cache["ts"] < _BARNCENTRE_TTL:
+        return {"channels": _barncentre_cache["data"], "cached": True}
+
+    # 1. Get full IPTV channel list (cached 1hr)
+    iptv_result = await iptv_channels()
+    all_channels: list[dict] = iptv_result.get("channels", [])
+
+    # 2. Fetch today's NHL schedule for the program guide
+    import httpx as _hx_bc
+    import datetime as _dt_bc
+    today = _dt_bc.date.today().isoformat()
+    programs: dict[str, list] = {}   # channel display name → list of program dicts
+    try:
+        async with _hx_bc.AsyncClient(timeout=8) as _cl:
+            resp = await _cl.get(f"https://api-web.nhle.com/v1/score/{today}")
+            if resp.status_code == 200:
+                for game in (resp.json().get("games") or []):
+                    gid        = game.get("id")
+                    away       = (game.get("awayTeam") or {}).get("abbrev", "")
+                    home       = (game.get("homeTeam") or {}).get("abbrev", "")
+                    start_utc  = game.get("startTimeUTC", "")
+                    game_state = game.get("gameState", "PRE")
+                    away_score = (game.get("awayTeam") or {}).get("score")
+                    home_score = (game.get("homeTeam") or {}).get("score")
+                    for b in (game.get("tvBroadcasts") or []):
+                        code    = b.get("network", "")
+                        display = _BROADCAST_CODE_MAP.get(code, code)
+                        programs.setdefault(display, []).append({
+                            "game_id":    gid,
+                            "title":      f"{away} @ {home}",
+                            "start_utc":  start_utc,
+                            "state":      game_state,
+                            "market":     b.get("market", "N"),
+                            "away_score": away_score,
+                            "home_score": home_score,
+                        })
+    except Exception:
+        pass
+
+    # 3. Build curated channel list
+    result: list[dict] = []
+    for ch_name in _BARNCENTRE_CHANNEL_NAMES:
+        prefix = ch_name.lower()
+
+        matched = [
+            ch for ch in all_channels
+            if _normalize_ch(ch.get("title", "")) == prefix
+            or _normalize_ch(ch.get("title", "")).startswith(prefix + " ")
+        ]
+
+        if not matched:
+            continue
+
+        # De-duplicate by URL; prefer tvpass.org redirect URLs (fresh token) over raw thetvapp
+        seen_urls: set[str] = set()
+        unique: list[dict] = []
+        for m in matched:
+            url = m["url"]
+            if url not in seen_urls:
+                seen_urls.add(url)
+                unique.append(m)
+
+        def _url_prio(m: dict) -> int:
+            u = m["url"]
+            if "tvpass.org/live" in u:
+                return 0
+            if "thetvapp.to" in u:
+                return 1
+            return 2
+
+        unique.sort(key=_url_prio)
+
+        result.append({
+            "name":         ch_name,
+            "primary_url":  unique[0]["url"],
+            "backup_urls":  [b["url"] for b in unique[1:4]],  # up to 3 backups
+            "programs":     programs.get(ch_name, []),
+        })
+
+    _barncentre_cache["data"] = result
+    _barncentre_cache["ts"] = now
+    return {"channels": result, "cached": False}
