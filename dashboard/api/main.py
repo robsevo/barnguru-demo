@@ -5492,7 +5492,7 @@ async def stream_resolve(url: str) -> dict:
     """Resolve an embed page URL to a direct m3u8 URL (with caching)."""
     # Fast path: already a direct m3u8
     lower = url.split("?")[0].lower()
-    if lower.endswith(".m3u8") or lower.endswith(".mpd"):
+    if lower.endswith(".m3u8") or lower.endswith("/m3u8") or lower.endswith(".mpd"):
         return {"type": "m3u8", "url": url}
 
     # Fast path: tvpass.org/live/* URLs redirect to thetvapp.to.
