@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { PiPProvider } from "@/utils/pipContext";
 import { ThemeProvider, useTheme } from "@/utils/themeContext";
 import FloatingPlayer   from "./FloatingPlayer";
@@ -122,6 +122,8 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [username, setUsername] = useState<string | null>(null);
   const [hasLive, setHasLive] = useState(false);
+  const [statsDropOpen, setStatsDropOpen] = useState(false);
+  const statsDropRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
   const { theme, clearTheme, cortexPinned, setCortexPinned } = useTheme();
   const isCortexPage = pathname.startsWith("/players");
@@ -135,6 +137,20 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
       .then((d) => setUsername(d.username ?? null))
       .catch(() => {});
   }, []);
+
+  // Close stats dropdown when clicking outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (statsDropRef.current && !statsDropRef.current.contains(e.target as Node)) {
+        setStatsDropOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  // Close stats dropdown on navigation
+  useEffect(() => { setStatsDropOpen(false); }, [pathname]);
 
   // Poll scoreboard to know if any games are currently live
   useEffect(() => {
@@ -462,11 +478,9 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
             <div className="ml-auto flex items-center gap-0.5 sm:gap-1 shrink-0">
               {(
                 [
-                  { href: "/gamecentre",   labelSm: "Live",  label: "Live",      active: pathname === "/gamecentre" || pathname.startsWith("/game/") },
-                  { href: "/league/teams", labelSm: "Teams", label: "Teams",     active: pathname.startsWith("/league") || pathname.startsWith("/teams/") },
-                  { href: "/standings",    labelSm: "Stnd",  label: "Standings", active: pathname === "/standings" },
-                  { href: "/stats",        labelSm: "Stats", label: "Stats",     active: pathname === "/stats" },
-                  { href: "/players",      labelSm: "Crtx",  label: "Cortex",    active: pathname === "/players" || pathname.startsWith("/players/") },
+                  { href: "/gamecentre",   labelSm: "Live",  label: "Live",   active: pathname === "/gamecentre" || pathname.startsWith("/game/") },
+                  { href: "/league/teams", labelSm: "Teams", label: "Teams",  active: pathname.startsWith("/league") || pathname.startsWith("/teams/") },
+                  { href: "/players",      labelSm: "Crtx",  label: "Cortex", active: pathname === "/players" || pathname.startsWith("/players/") },
                 ] as const
               ).map(({ href, labelSm, label, active }) => {
                 const isCortex = label === "Cortex";
@@ -515,11 +529,117 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                   </Link>
                 );
               })}
+
+              {/* Stats + Standings split-button dropdown */}
+              {(() => {
+                const statsActive  = pathname === "/stats";
+                const stndActive   = pathname === "/standings";
+                const anyActive    = statsActive || stndActive;
+                const activeStyle = anyActive ? (theme ? {
+                  background: "rgba(255,255,255,0.18)", color: "#ffffff",
+                  borderColor: "rgba(255,255,255,0.45)",
+                } : {
+                  background: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.15)`,
+                  color: brandHex,
+                  borderColor: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.40)`,
+                }) : (theme ? {
+                  color: "rgba(255,255,255,0.55)", borderColor: "rgba(255,255,255,0.15)",
+                  background: "rgba(255,255,255,0.05)",
+                } : {
+                  color: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.45)`,
+                  borderColor: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.15)`,
+                  background: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.04)`,
+                });
+                const dropItemStyle = (active: boolean) => active ? {
+                  background: theme ? "rgba(255,255,255,0.12)" : `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.12)`,
+                  color: theme ? "#fff" : brandHex,
+                } : {
+                  color: theme ? "rgba(255,255,255,0.65)" : `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.65)`,
+                };
+                return (
+                  <div ref={statsDropRef} className="relative flex items-stretch">
+                    {/* Main Stats button */}
+                    <Link
+                      href="/stats"
+                      className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-l-md text-[8px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border-y border-l border-r-0 flex items-center"
+                      style={activeStyle}
+                    >
+                      <span className="sm:hidden">Stats</span>
+                      <span className="hidden sm:inline">Stats</span>
+                    </Link>
+                    {/* Chevron toggle */}
+                    <button
+                      onClick={() => setStatsDropOpen(o => !o)}
+                      className="px-1 py-0.5 sm:py-1 rounded-r-md text-[8px] sm:text-[9px] font-black transition-all duration-150 border-y border-r border-l-0 flex items-center"
+                      style={{
+                        ...activeStyle,
+                        borderLeftColor: theme
+                          ? "rgba(255,255,255,0.12)"
+                          : `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.10)`,
+                      }}
+                      aria-label="Stats menu"
+                    >
+                      <svg width="8" height="5" viewBox="0 0 8 5" fill="currentColor" className={`transition-transform duration-150 ${statsDropOpen ? "rotate-180" : ""}`}>
+                        <path d="M0.5 0.5L4 4L7.5 0.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+                      </svg>
+                    </button>
+                    {/* Dropdown */}
+                    {statsDropOpen && (
+                      <div
+                        className="absolute top-full right-0 mt-1 z-50 rounded-lg overflow-hidden"
+                        style={{
+                          minWidth: "110px",
+                          background: theme ? "rgba(20,22,28,0.97)" : "rgba(10,12,16,0.97)",
+                          border: theme ? "1px solid rgba(255,255,255,0.12)" : `1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.20)`,
+                          boxShadow: "0 8px 24px rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.4)",
+                        }}
+                      >
+                        <Link
+                          href="/standings"
+                          className="flex items-center gap-2 px-3 py-2 text-[9px] font-black uppercase tracking-[0.1em] transition-colors duration-100 hover:brightness-125"
+                          style={dropItemStyle(stndActive)}
+                          onClick={() => setStatsDropOpen(false)}
+                        >
+                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="0.5" y="6.5" width="2" height="3" rx="0.5" fill="currentColor" opacity="0.9"/>
+                            <rect x="4" y="3.5" width="2" height="6" rx="0.5" fill="currentColor" opacity="0.9"/>
+                            <rect x="7.5" y="0.5" width="2" height="9" rx="0.5" fill="currentColor" opacity="0.9"/>
+                          </svg>
+                          Standings
+                        </Link>
+                        <Link
+                          href="/stats"
+                          className="flex items-center gap-2 px-3 py-2 text-[9px] font-black uppercase tracking-[0.1em] transition-colors duration-100 hover:brightness-125"
+                          style={dropItemStyle(statsActive)}
+                          onClick={() => setStatsDropOpen(false)}
+                        >
+                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="5" cy="5" r="3.5" stroke="currentColor" strokeWidth="1.2"/>
+                            <circle cx="5" cy="5" r="1.2" fill="currentColor"/>
+                          </svg>
+                          Player Stats
+                        </Link>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* BarnCentre — TV icon */}
               <Link
                 href="/barncentre"
-                className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md text-[8px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border text-[#C9A84C]/80 border-[#C9A84C]/30 bg-[#C9A84C]/[0.07] hover:text-[#C9A84C] hover:border-[#C9A84C]/55 hover:bg-[#C9A84C]/[0.13]"
+                className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md transition-all duration-150 border flex items-center justify-center text-[#C9A84C]/80 border-[#C9A84C]/30 bg-[#C9A84C]/[0.07] hover:text-[#C9A84C] hover:border-[#C9A84C]/55 hover:bg-[#C9A84C]/[0.13]"
+                title="BarnCentre"
               >
-                BC
+                {/* TV icon */}
+                <svg width="14" height="13" viewBox="0 0 14 13" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="1" y="2" width="12" height="7.5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+                  <line x1="4.5" y1="9.5" x2="3.5" y2="12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                  <line x1="9.5" y1="9.5" x2="10.5" y2="12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                  <line x1="3" y1="12" x2="11" y2="12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                  <line x1="4.5" y1="2" x2="2.5" y2="0.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                  <line x1="9.5" y1="2" x2="11.5" y2="0.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                </svg>
               </Link>
             </div>
           </header>
