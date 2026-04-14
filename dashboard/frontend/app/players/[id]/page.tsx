@@ -2552,7 +2552,7 @@ export default function PlayerProfilePage() {
                 )}
                 {/* Ice Time By Zone bars — narrower than the rink */}
                 {data.skating_zone_time_oz_pct != null ? (
-                  <div className="w-full max-w-[260px] mx-auto">
+                  <div className="w-full max-w-[360px] mx-auto">
                     <IceTimeByZoneBars data={data} />
                   </div>
                 ) : (
