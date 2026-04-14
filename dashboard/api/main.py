@@ -7024,6 +7024,211 @@ async def _fetch_espn_schedule() -> dict[str, list[dict]]:
     return data
 
 
+# ---------------------------------------------------------------------------
+# MLB schedule — statsapi.mlb.com returns broadcast network names per game
+# ---------------------------------------------------------------------------
+_MLB_NETWORK_TO_CHANNEL: dict[str, str] = {
+    "ESPN":         "ESPN",
+    "ESPN2":        "ESPN2",
+    "FS1":          "FS1",
+    "FS2":          "FS2",
+    "NESN":         "NESN",
+    "TSN":          "TSN1",
+    "TSN1":         "TSN1",
+    "TSN2":         "TSN2",
+    "TSN3":         "TSN3",
+    "TSN4":         "TSN4",
+    "TSN5":         "TSN5",
+    "FanDuel Sports Network": "FanDuel",
+    "FanDuel":      "FanDuel",
+}
+
+_mlb_schedule_cache: dict = {"data": None, "ts": 0.0}
+
+
+async def _fetch_mlb_schedule() -> dict[str, list[dict]]:
+    """Fetch today's MLB schedule with broadcast info; return {channel_name: [programs]}."""
+    import time as _t_mlb
+    import httpx as _hx_mlb
+    import datetime as _dt_mlb
+
+    now_ts = _t_mlb.time()
+    if _mlb_schedule_cache["data"] is not None and now_ts - _mlb_schedule_cache["ts"] < _ESPN_SCHEDULE_TTL:
+        return _mlb_schedule_cache["data"]
+
+    today = _dt_mlb.date.today().isoformat()
+    url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}&hydrate=broadcasts(all),game(content(summary)),linescore"
+    data: dict[str, list[dict]] = {}
+    try:
+        async with _hx_mlb.AsyncClient(timeout=8, headers={"User-Agent": "Mozilla/5.0 BarnCentre/1.0"}) as cl:
+            r = await cl.get(url)
+            if r.status_code != 200:
+                return {}
+            for date_block in r.json().get("dates", []):
+                for game in date_block.get("games", []):
+                    away = (game.get("teams", {}).get("away", {}).get("team", {}).get("abbreviation") or
+                            game.get("teams", {}).get("away", {}).get("team", {}).get("name", ""))
+                    home = (game.get("teams", {}).get("home", {}).get("team", {}).get("abbreviation") or
+                            game.get("teams", {}).get("home", {}).get("team", {}).get("name", ""))
+                    start_utc = game.get("gameDate", "")
+                    status = game.get("status", {}).get("codedGameState", "S")
+                    if status in ("F", "FT", "FR", "FO"):
+                        game_state = "FINAL"
+                    elif status in ("I", "MA", "MF"):
+                        game_state = "LIVE"
+                    else:
+                        game_state = "SCH"
+                    try:
+                        start_dt = _dt_mlb.datetime.fromisoformat(start_utc.replace("Z", "+00:00"))
+                        stop_dt  = start_dt + _dt_mlb.timedelta(hours=3, minutes=30)
+                        stop_utc = stop_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                    except Exception:
+                        stop_utc = ""
+                    for b in game.get("broadcasts", []):
+                        if b.get("type", "").upper() != "TV":
+                            continue
+                        net = b.get("name", "")
+                        ch_name = _MLB_NETWORK_TO_CHANNEL.get(net)
+                        if not ch_name:
+                            continue
+                        data.setdefault(ch_name, []).append({
+                            "game_id":   None,
+                            "title":     f"{away} @ {home} (MLB)",
+                            "desc":      "Major League Baseball",
+                            "start_utc": start_utc,
+                            "stop_utc":  stop_utc,
+                            "state":     game_state,
+                            "market":    "N",
+                        })
+    except Exception:
+        pass
+
+    # Deduplicate
+    for ch in data:
+        seen: set[tuple] = set()
+        unique = []
+        for p in data[ch]:
+            key = (p["title"], p["start_utc"])
+            if key not in seen:
+                seen.add(key)
+                unique.append(p)
+        data[ch] = unique
+
+    _mlb_schedule_cache["data"] = data
+    _mlb_schedule_cache["ts"]   = now_ts
+    return data
+
+
+# ---------------------------------------------------------------------------
+# NBA schedule — cdn.nba.com static JSON with broadcast info
+# ---------------------------------------------------------------------------
+_NBA_NETWORK_TO_CHANNEL: dict[str, str] = {
+    "ESPN":         "ESPN",
+    "ESPN2":        "ESPN2",
+    "ABC":          "ESPN",   # ABC games air on ESPN channel in our lineup
+    "TNT":          None,
+    "TBS":          None,
+    "Prime Video":  None,
+    "TSN":          "TSN1",
+    "TSN1":         "TSN1",
+    "TSN2":         "TSN2",
+    "TSN3":         "TSN3",
+    "TSN4":         "TSN4",
+    "TSN5":         "TSN5",
+    "NHLN":         "NHL Network",
+}
+
+_nba_schedule_cache: dict = {"data": None, "ts": 0.0}
+
+
+async def _fetch_nba_schedule() -> dict[str, list[dict]]:
+    """Fetch today's NBA schedule with broadcast info; return {channel_name: [programs]}."""
+    import time as _t_nba
+    import httpx as _hx_nba
+    import datetime as _dt_nba
+
+    now_ts = _t_nba.time()
+    if _nba_schedule_cache["data"] is not None and now_ts - _nba_schedule_cache["ts"] < _ESPN_SCHEDULE_TTL:
+        return _nba_schedule_cache["data"]
+
+    today = _dt_nba.date.today().isoformat()
+    url = "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2_1.json"
+    data: dict[str, list[dict]] = {}
+    try:
+        async with _hx_nba.AsyncClient(
+            timeout=10,
+            headers={"User-Agent": "Mozilla/5.0 BarnCentre/1.0", "Accept": "application/json"},
+        ) as cl:
+            r = await cl.get(url)
+            if r.status_code != 200:
+                return {}
+            league_schedule = r.json().get("leagueSchedule", {})
+            for date_block in league_schedule.get("gameDates", []):
+                game_date = date_block.get("gameDate", "")[:10]  # "04/14/2026 00:00:00" → first 10 chars
+                # Parse MM/DD/YYYY
+                try:
+                    gd = _dt_nba.datetime.strptime(game_date, "%m/%d/%Y").date().isoformat()
+                except Exception:
+                    gd = game_date
+                if gd != today:
+                    continue
+                for game in date_block.get("games", []):
+                    away = game.get("awayTeam", {}).get("teamTricode", "")
+                    home = game.get("homeTeam", {}).get("teamTricode", "")
+                    start_utc = game.get("gameDateTimeUTC", "")
+                    status_id = game.get("gameStatusId", 1)
+                    if status_id == 3:
+                        game_state = "FINAL"
+                    elif status_id == 2:
+                        game_state = "LIVE"
+                    else:
+                        game_state = "SCH"
+                    try:
+                        start_dt = _dt_nba.datetime.fromisoformat(start_utc.replace("Z", "+00:00"))
+                        stop_dt  = start_dt + _dt_nba.timedelta(hours=2, minutes=30)
+                        stop_utc = stop_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                    except Exception:
+                        stop_utc = ""
+                    broadcasters = game.get("broadcasters", {})
+                    all_nets: list[str] = []
+                    for key in ("nationalTvBroadcasters", "nationalRadioBroadcasters",
+                                "homeTvBroadcasters", "awayTvBroadcasters"):
+                        for b in broadcasters.get(key, []):
+                            disp = b.get("broadcasterDisplay") or b.get("broadcasterAbbreviation", "")
+                            if disp:
+                                all_nets.append(disp)
+                    for net in all_nets:
+                        ch_name = _NBA_NETWORK_TO_CHANNEL.get(net)
+                        if not ch_name:
+                            continue
+                        data.setdefault(ch_name, []).append({
+                            "game_id":   None,
+                            "title":     f"{away} @ {home} (NBA)",
+                            "desc":      "National Basketball Association",
+                            "start_utc": start_utc,
+                            "stop_utc":  stop_utc,
+                            "state":     game_state,
+                            "market":    "N",
+                        })
+    except Exception:
+        pass
+
+    # Deduplicate
+    for ch in data:
+        seen: set[tuple] = set()
+        unique = []
+        for p in data[ch]:
+            key = (p["title"], p["start_utc"])
+            if key not in seen:
+                seen.add(key)
+                unique.append(p)
+        data[ch] = unique
+
+    _nba_schedule_cache["data"] = data
+    _nba_schedule_cache["ts"]   = now_ts
+    return data
+
+
 _barncentre_cache: dict = {"data": None, "ts": 0.0}
 _BARNCENTRE_TTL = 3600  # 1 hour
 
@@ -7078,37 +7283,54 @@ async def barncentre_channels() -> dict:
     except Exception:
         pass
 
-    # ── 2b. ESPN multi-sport schedule data ───────────────────────────────────
-    epg_data = await _fetch_espn_schedule()
-    # Merge EPG programs with NHL programs; NHL games take priority (don't duplicate)
-    for ch_name, epg_programs in epg_data.items():
-        nhl_progs = programs.get(ch_name, [])
-        # Collect time ranges covered by NHL games (±3h window per game)
-        import datetime as _dt_merge
-        nhl_windows: list[tuple[str, str]] = []
-        for p in nhl_progs:
+    # ── 2b. ESPN / MLB / NBA multi-sport schedule data ───────────────────────
+    import asyncio as _aio_epg
+    epg_data, mlb_data, nba_data = await _aio_epg.gather(
+        _fetch_espn_schedule(),
+        _fetch_mlb_schedule(),
+        _fetch_nba_schedule(),
+    )
+
+    # Helper: merge a sport's channel programs, skipping time windows already
+    # covered by a higher-priority source (NHL takes priority, then ESPN, MLB, NBA).
+    import datetime as _dt_merge
+
+    def _existing_windows(ch_name: str) -> list[tuple[str, str]]:
+        windows = []
+        for p in programs.get(ch_name, []):
             if p.get("start_utc"):
                 try:
                     t = _dt_merge.datetime.fromisoformat(p["start_utc"].replace("Z", "+00:00"))
-                    nhl_windows.append((
+                    windows.append((
                         (t - _dt_merge.timedelta(hours=1)).isoformat(),
                         (t + _dt_merge.timedelta(hours=4)).isoformat(),
                     ))
                 except Exception:
                     pass
+        return windows
 
-        def _in_nhl_window(start: str) -> bool:
-            if not start or not nhl_windows:
-                return False
-            try:
-                t = _dt_merge.datetime.fromisoformat(start.replace("Z", "+00:00"))
-                ts = t.isoformat()
-                return any(lo <= ts <= hi for lo, hi in nhl_windows)
-            except Exception:
-                return False
+    def _in_windows(start: str, windows: list[tuple[str, str]]) -> bool:
+        if not start or not windows:
+            return False
+        try:
+            ts = _dt_merge.datetime.fromisoformat(start.replace("Z", "+00:00")).isoformat()
+            return any(lo <= ts <= hi for lo, hi in windows)
+        except Exception:
+            return False
 
-        non_overlapping = [p for p in epg_programs if not _in_nhl_window(p.get("start_utc", ""))]
-        programs[ch_name] = nhl_progs + non_overlapping
+    def _merge_sport(sport_data: dict[str, list[dict]]) -> None:
+        for ch_name, new_progs in sport_data.items():
+            windows = _existing_windows(ch_name)
+            non_overlap = [p for p in new_progs if not _in_windows(p.get("start_utc", ""), windows)]
+            programs.setdefault(ch_name, []).extend(non_overlap)
+
+    _merge_sport(epg_data)
+    _merge_sport(mlb_data)
+    _merge_sport(nba_data)
+
+    # Sort each channel's programs chronologically
+    for ch_name in programs:
+        programs[ch_name].sort(key=lambda p: p.get("start_utc", ""))
 
     # ── 3. Match IPTV channels to our curated list ────────────────────────────
     channel_candidates: dict[str, list[dict]] = {}
