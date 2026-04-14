@@ -6899,94 +6899,127 @@ def _sort_by_url_priority(candidates: list[dict]) -> list[dict]:
     return sorted(candidates, key=_prio)
 
 
-# EPG.pw channel IDs for BarnCentre channels
-# API: GET https://epg.pw/api/epg.json?channel_id=<id>&date=YYYY-MM-DD
-_EPG_PW_CHANNEL_IDS: dict[str, str] = {
-    "TSN1":        "TSN1.ca",
-    "TSN2":        "TSN2.ca",
-    "TSN3":        "TSN3.ca",
-    "TSN4":        "TSN4.ca",
-    "TSN5":        "TSN5.ca",
-    "ESPN":        "ESPN.us",
-    "ESPN2":       "ESPN2.us",
-    "ESPN+":       "ESPNPlus.us",
-    "NHL Network": "NHLNetwork.us",
-    "FS1":         "FS1.us",
-    "FS2":         "FS2.us",
-    "NESN":        "NESN.us",
-    "FanDuel":     "FuboSports.us",   # FanDuel TV (formerly fubo Sports)
+# ESPN broadcast name → BarnCentre channel name
+_ESPN_NETWORK_TO_CHANNEL: dict[str, str] = {
+    "ESPN":         "ESPN",
+    "ESPN2":        "ESPN2",
+    "ESPN+":        "ESPN+",
+    "ESPNU":        "ESPN",
+    "FS1":          "FS1",
+    "FS2":          "FS2",
+    "NHL Network":  "NHL Network",
+    "NHLN":         "NHL Network",
+    "TSN":          "TSN1",
+    "TSN2":         "TSN2",
+    "TSN3":         "TSN3",
+    "TSN4":         "TSN4",
+    "TSN5":         "TSN5",
+    "NESN":         "NESN",
+    "FanDuel TV":   "FanDuel",
+    "FuboSports":   "FanDuel",
 }
 
-_epg_pw_cache: dict = {"data": None, "ts": 0.0}
-_EPG_PW_TTL = 14400  # 4 hours — schedule doesn't change intraday
+# ESPN scoreboard API endpoints to poll for today's events
+_ESPN_SCHEDULE_ENDPOINTS = [
+    "https://site.api.espn.com/apis/v2/scoreboard/header?sport=hockey&league=nhl",
+    "https://site.api.espn.com/apis/v2/scoreboard/header?sport=basketball&league=nba",
+    "https://site.api.espn.com/apis/v2/scoreboard/header?sport=baseball&league=mlb",
+    "https://site.api.espn.com/apis/v2/scoreboard/header?sport=football&league=nfl",
+    "https://site.api.espn.com/apis/v2/scoreboard/header?sport=soccer&league=usa.1",
+    "https://site.api.espn.com/apis/v2/scoreboard/header?sport=soccer&league=eng.1",
+    "https://site.api.espn.com/apis/v2/scoreboard/header?sport=soccer&league=uefa.champions",
+]
+
+_espn_schedule_cache: dict = {"data": None, "ts": 0.0}
+_ESPN_SCHEDULE_TTL = 3600  # 1 hour
 
 
-async def _fetch_epg_pw_channel(
-    cl,  # httpx.AsyncClient
-    ch_name: str,
-    channel_id: str,
-    date_str: str,
-) -> tuple[str, list[dict]]:
-    """Fetch EPG.pw schedule for one channel; return (ch_name, programs list)."""
-    try:
-        resp = await cl.get(
-            "https://epg.pw/api/epg.json",
-            params={"channel_id": channel_id, "date": date_str},
-            timeout=10,
-        )
-        if resp.status_code != 200:
-            return ch_name, []
-        data = resp.json()
-        programs = []
-        for item in data:
-            title   = item.get("title") or item.get("name") or ""
-            start   = item.get("start") or item.get("start_timestamp") or ""
-            stop    = item.get("stop")  or item.get("stop_timestamp")  or ""
-            desc    = item.get("description") or item.get("desc") or ""
-            # Normalise to ISO timestamps if unix int
-            if isinstance(start, (int, float)):
-                import datetime as _dt_e
-                start = _dt_e.datetime.utcfromtimestamp(start).strftime("%Y-%m-%dT%H:%M:%SZ")
-            if isinstance(stop, (int, float)):
-                import datetime as _dt_e2
-                stop = _dt_e2.datetime.utcfromtimestamp(stop).strftime("%Y-%m-%dT%H:%M:%SZ")
-            programs.append({
-                "game_id":   None,
-                "title":     title,
-                "desc":      desc,
-                "start_utc": start,
-                "stop_utc":  stop,
-                "state":     "EPG",
-                "market":    "N",
-            })
-        return ch_name, programs
-    except Exception:
-        return ch_name, []
+async def _fetch_espn_schedule() -> dict[str, list[dict]]:
+    """Fetch today's ESPN multi-sport schedule; return {channel_name: [programs]}."""
+    import time as _t_es
+    import httpx as _hx_es
+    import asyncio as _aio_es
 
+    now_ts = _t_es.time()
+    if _espn_schedule_cache["data"] is not None and now_ts - _espn_schedule_cache["ts"] < _ESPN_SCHEDULE_TTL:
+        return _espn_schedule_cache["data"]
 
-async def _fetch_all_epg_pw(date_str: str) -> dict[str, list[dict]]:
-    """Fetch EPG.pw schedules for all BarnCentre channels; return {ch_name: [programs]}."""
-    import time as _t_epg
-    import httpx as _hx_epg
-    import asyncio as _aio_epg
+    async def _fetch_one(cl, url: str) -> list[dict]:
+        try:
+            r = await cl.get(url, timeout=8)
+            if r.status_code != 200:
+                return []
+            d = r.json()
+            events = []
+            for sport_block in d.get("sports", []):
+                sport_name = sport_block.get("name", "")
+                for league in sport_block.get("leagues", []):
+                    league_name = league.get("name", "")
+                    for event in league.get("events", []):
+                        broadcasts = event.get("broadcasts", [])
+                        short_name = event.get("shortName", "")
+                        date_utc   = event.get("date", "")
+                        state      = event.get("status", {}).get("type", {}).get("name", "STATUS_SCHEDULED")
+                        # Map state → our game states
+                        if "in_progress" in state.lower() or "progress" in state.lower():
+                            game_state = "LIVE"
+                        elif "final" in state.lower():
+                            game_state = "FINAL"
+                        else:
+                            game_state = "SCH"
+                        for b in broadcasts:
+                            net_name = b.get("name", "")
+                            ch_name = _ESPN_NETWORK_TO_CHANNEL.get(net_name)
+                            if not ch_name:
+                                continue
+                            # Build a 3-hour window stop time
+                            import datetime as _dt_es
+                            try:
+                                start_dt = _dt_es.datetime.fromisoformat(date_utc.replace("Z", "+00:00"))
+                                stop_dt  = start_dt + _dt_es.timedelta(hours=3)
+                                stop_utc = stop_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                            except Exception:
+                                stop_utc = ""
+                            events.append({
+                                "ch_name":   ch_name,
+                                "game_id":   None,
+                                "title":     f"{short_name} ({league_name})" if league_name else short_name,
+                                "desc":      sport_name,
+                                "start_utc": date_utc,
+                                "stop_utc":  stop_utc,
+                                "state":     game_state,
+                                "market":    "N",
+                            })
+            return events
+        except Exception:
+            return []
 
-    now_ts = _t_epg.time()
-    if _epg_pw_cache["data"] is not None and now_ts - _epg_pw_cache["ts"] < _EPG_PW_TTL:
-        return _epg_pw_cache["data"]
-
-    async with _hx_epg.AsyncClient(
-        headers={"User-Agent": "Mozilla/5.0 BarnCentreEPG/1.0"},
+    async with _hx_es.AsyncClient(
+        headers={"User-Agent": "Mozilla/5.0 BarnCentre/1.0"},
         follow_redirects=True,
     ) as cl:
-        tasks = [
-            _fetch_epg_pw_channel(cl, ch_name, channel_id, date_str)
-            for ch_name, channel_id in _EPG_PW_CHANNEL_IDS.items()
-        ]
-        results = await _aio_epg.gather(*tasks)
+        results = await _aio_es.gather(*[_fetch_one(cl, url) for url in _ESPN_SCHEDULE_ENDPOINTS])
 
-    data = {ch: progs for ch, progs in results}
-    _epg_pw_cache["data"] = data
-    _epg_pw_cache["ts"]   = now_ts
+    # Group by channel name
+    data: dict[str, list[dict]] = {}
+    for event_list in results:
+        for ev in event_list:
+            ch = ev.pop("ch_name")
+            data.setdefault(ch, []).append(ev)
+
+    # Deduplicate by (title, start_utc) within each channel
+    for ch in data:
+        seen: set[tuple] = set()
+        unique = []
+        for p in data[ch]:
+            key = (p["title"], p["start_utc"])
+            if key not in seen:
+                seen.add(key)
+                unique.append(p)
+        data[ch] = unique
+
+    _espn_schedule_cache["data"] = data
+    _espn_schedule_cache["ts"]   = now_ts
     return data
 
 
@@ -7044,8 +7077,8 @@ async def barncentre_channels() -> dict:
     except Exception:
         pass
 
-    # ── 2b. EPG.pw non-hockey schedule data ──────────────────────────────────
-    epg_data = await _fetch_all_epg_pw(today)
+    # ── 2b. ESPN multi-sport schedule data ───────────────────────────────────
+    epg_data = await _fetch_espn_schedule()
     # Merge EPG programs with NHL programs; NHL games take priority (don't duplicate)
     for ch_name, epg_programs in epg_data.items():
         nhl_progs = programs.get(ch_name, [])
