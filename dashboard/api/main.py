@@ -6899,6 +6899,97 @@ def _sort_by_url_priority(candidates: list[dict]) -> list[dict]:
     return sorted(candidates, key=_prio)
 
 
+# EPG.pw channel IDs for BarnCentre channels
+# API: GET https://epg.pw/api/epg.json?channel_id=<id>&date=YYYY-MM-DD
+_EPG_PW_CHANNEL_IDS: dict[str, str] = {
+    "TSN1":        "TSN1.ca",
+    "TSN2":        "TSN2.ca",
+    "TSN3":        "TSN3.ca",
+    "TSN4":        "TSN4.ca",
+    "TSN5":        "TSN5.ca",
+    "ESPN":        "ESPN.us",
+    "ESPN2":       "ESPN2.us",
+    "ESPN+":       "ESPNPlus.us",
+    "NHL Network": "NHLNetwork.us",
+    "FS1":         "FS1.us",
+    "FS2":         "FS2.us",
+    "NESN":        "NESN.us",
+    "FanDuel":     "FuboSports.us",   # FanDuel TV (formerly fubo Sports)
+}
+
+_epg_pw_cache: dict = {"data": None, "ts": 0.0}
+_EPG_PW_TTL = 14400  # 4 hours — schedule doesn't change intraday
+
+
+async def _fetch_epg_pw_channel(
+    cl,  # httpx.AsyncClient
+    ch_name: str,
+    channel_id: str,
+    date_str: str,
+) -> tuple[str, list[dict]]:
+    """Fetch EPG.pw schedule for one channel; return (ch_name, programs list)."""
+    try:
+        resp = await cl.get(
+            "https://epg.pw/api/epg.json",
+            params={"channel_id": channel_id, "date": date_str},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return ch_name, []
+        data = resp.json()
+        programs = []
+        for item in data:
+            title   = item.get("title") or item.get("name") or ""
+            start   = item.get("start") or item.get("start_timestamp") or ""
+            stop    = item.get("stop")  or item.get("stop_timestamp")  or ""
+            desc    = item.get("description") or item.get("desc") or ""
+            # Normalise to ISO timestamps if unix int
+            if isinstance(start, (int, float)):
+                import datetime as _dt_e
+                start = _dt_e.datetime.utcfromtimestamp(start).strftime("%Y-%m-%dT%H:%M:%SZ")
+            if isinstance(stop, (int, float)):
+                import datetime as _dt_e2
+                stop = _dt_e2.datetime.utcfromtimestamp(stop).strftime("%Y-%m-%dT%H:%M:%SZ")
+            programs.append({
+                "game_id":   None,
+                "title":     title,
+                "desc":      desc,
+                "start_utc": start,
+                "stop_utc":  stop,
+                "state":     "EPG",
+                "market":    "N",
+            })
+        return ch_name, programs
+    except Exception:
+        return ch_name, []
+
+
+async def _fetch_all_epg_pw(date_str: str) -> dict[str, list[dict]]:
+    """Fetch EPG.pw schedules for all BarnCentre channels; return {ch_name: [programs]}."""
+    import time as _t_epg
+    import httpx as _hx_epg
+    import asyncio as _aio_epg
+
+    now_ts = _t_epg.time()
+    if _epg_pw_cache["data"] is not None and now_ts - _epg_pw_cache["ts"] < _EPG_PW_TTL:
+        return _epg_pw_cache["data"]
+
+    async with _hx_epg.AsyncClient(
+        headers={"User-Agent": "Mozilla/5.0 BarnCentreEPG/1.0"},
+        follow_redirects=True,
+    ) as cl:
+        tasks = [
+            _fetch_epg_pw_channel(cl, ch_name, channel_id, date_str)
+            for ch_name, channel_id in _EPG_PW_CHANNEL_IDS.items()
+        ]
+        results = await _aio_epg.gather(*tasks)
+
+    data = {ch: progs for ch, progs in results}
+    _epg_pw_cache["data"] = data
+    _epg_pw_cache["ts"]   = now_ts
+    return data
+
+
 _barncentre_cache: dict = {"data": None, "ts": 0.0}
 _BARNCENTRE_TTL = 3600  # 1 hour
 
@@ -6952,6 +7043,38 @@ async def barncentre_channels() -> dict:
                         })
     except Exception:
         pass
+
+    # ── 2b. EPG.pw non-hockey schedule data ──────────────────────────────────
+    epg_data = await _fetch_all_epg_pw(today)
+    # Merge EPG programs with NHL programs; NHL games take priority (don't duplicate)
+    for ch_name, epg_programs in epg_data.items():
+        nhl_progs = programs.get(ch_name, [])
+        # Collect time ranges covered by NHL games (±3h window per game)
+        import datetime as _dt_merge
+        nhl_windows: list[tuple[str, str]] = []
+        for p in nhl_progs:
+            if p.get("start_utc"):
+                try:
+                    t = _dt_merge.datetime.fromisoformat(p["start_utc"].replace("Z", "+00:00"))
+                    nhl_windows.append((
+                        (t - _dt_merge.timedelta(hours=1)).isoformat(),
+                        (t + _dt_merge.timedelta(hours=4)).isoformat(),
+                    ))
+                except Exception:
+                    pass
+
+        def _in_nhl_window(start: str) -> bool:
+            if not start or not nhl_windows:
+                return False
+            try:
+                t = _dt_merge.datetime.fromisoformat(start.replace("Z", "+00:00"))
+                ts = t.isoformat()
+                return any(lo <= ts <= hi for lo, hi in nhl_windows)
+            except Exception:
+                return False
+
+        non_overlapping = [p for p in epg_programs if not _in_nhl_window(p.get("start_utc", ""))]
+        programs[ch_name] = nhl_progs + non_overlapping
 
     # ── 3. Match IPTV channels to our curated list ────────────────────────────
     channel_candidates: dict[str, list[dict]] = {}
