@@ -4920,6 +4920,23 @@ import re as _re_proxy
 
 def _rewrite_m3u8(content: str, original_url: str, proxy_base: str) -> str:
     """Rewrite .m3u8 and .ts URLs in a manifest to go through our proxy."""
+    from urllib.parse import urlparse, urlunparse
+
+    # If the original URL has query params (e.g. ?token=...&expires=...&user_id=...)
+    # those must be inherited by relative segment URLs that have no own params.
+    # thetvapp.to tokens are IP-locked and applied per-manifest; all segments share them.
+    parsed_original = urlparse(original_url)
+    inherited_query = parsed_original.query  # may be ""
+
+    def _abs_with_auth(base: str, relative: str) -> str:
+        """urljoin that preserves base query params for relative URLs with no own params."""
+        abs_url = urljoin(base, relative)
+        if inherited_query:
+            parsed = urlparse(abs_url)
+            if not parsed.query:
+                abs_url = urlunparse(parsed._replace(query=inherited_query))
+        return abs_url
+
     lines = content.splitlines()
     out = []
     for line in lines:
@@ -4928,13 +4945,13 @@ def _rewrite_m3u8(content: str, original_url: str, proxy_base: str) -> str:
             # Rewrite URI= attributes inside tags (e.g. #EXT-X-MEDIA, #EXT-X-I-FRAME-STREAM-INF)
             def replace_uri(m: _re_proxy.Match) -> str:
                 uri = m.group(1)
-                abs_uri = urljoin(original_url, uri)
+                abs_uri = _abs_with_auth(original_url, uri)
                 return f'URI="{proxy_base}{quote(abs_uri, safe="")}"'
             line = _re_proxy.sub(r'URI="([^"]+)"', replace_uri, line)
             out.append(line)
         elif stripped and not stripped.startswith("#"):
             # Segment or sub-manifest URL
-            abs_url = urljoin(original_url, stripped)
+            abs_url = _abs_with_auth(original_url, stripped)
             out.append(f"{proxy_base}{quote(abs_url, safe='')}")
         else:
             out.append(line)
@@ -5349,6 +5366,30 @@ async def stream_resolve(url: str) -> dict:
     if lower.endswith(".m3u8") or lower.endswith(".mpd"):
         return {"type": "m3u8", "url": url}
 
+    # Fast path: tvpass.org/live/* URLs redirect to thetvapp.to.
+    # Follow the 302 — if it ends at an m3u8 we're done; otherwise embed the page.
+    # Never fall through to yt-dlp/Playwright for these URLs.
+    if "tvpass.org/live/" in lower:
+        try:
+            import httpx as _hx
+            async with _hx.AsyncClient(
+                follow_redirects=True,
+                timeout=10,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Referer": "https://tvpass.org/",
+                    "Origin": "https://tvpass.org",
+                },
+            ) as _cl:
+                r = await _cl.get(url)
+                final = str(r.url)
+                if ".m3u8" in final:
+                    return {"type": "m3u8", "url": final}
+        except Exception:
+            pass
+        # Redirect didn't give us HLS — embed the tvpass page (has built-in player)
+        return {"type": "embed", "url": url}
+
     # Try all extraction layers
     m3u8 = await _resolve_embed(url)
     if m3u8:
@@ -5371,17 +5412,23 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
     # — otherwise the browser gets cross-origin URLs that CORS blocks.
     forwarded_host = request.headers.get("x-forwarded-host", "")
     if forwarded_host:
-        forwarded_proto = request.headers.get("x-forwarded-proto", "https")
+        # Use x-forwarded-proto if present; fall back to actual request scheme.
+        # Defaulting to "https" breaks local dev where Next.js forwards x-forwarded-host
+        # but no x-forwarded-proto, causing segment URLs to use https://localhost:3000.
+        forwarded_proto = request.headers.get("x-forwarded-proto") or request.url.scheme
         proxy_base = f"{forwarded_proto}://{forwarded_host}/api/stream-proxy?url="
     else:
         base = str(request.base_url).rstrip("/")
         proxy_base = f"{base}/stream-proxy?url="
 
+    # Choose referer based on the upstream CDN to avoid hotlink blocks.
+    # thetvapp.to tokens are IP-locked; tvpass.org is the expected referrer for that CDN.
+    _referer = "https://tvpass.org/" if "thetvapp.to" in url else "https://onhockey.tv/"
     _stream_headers = {
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://onhockey.tv/",
-        "Origin": "https://onhockey.tv",
+        "Referer": _referer,
+        "Origin": _referer.rstrip("/"),
     }
 
     cors_headers = {
@@ -5398,8 +5445,10 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
         content_type = resp.headers.get("content-type", "")
         body = resp.content
 
-        # If it's an m3u8 manifest, rewrite internal URLs
-        is_m3u8 = (
+        # If it's an m3u8 manifest, rewrite internal URLs.
+        # Only treat as M3U8 on success — a 403/404 with a .m3u8 URL returns HTML
+        # which must not be passed to _rewrite_m3u8 as garbage segment lines.
+        is_m3u8 = resp.status_code == 200 and (
             "mpegurl" in content_type.lower()
             or url.split("?")[0].endswith(".m3u8")
             or body[:7] == b"#EXTM3U"
@@ -5541,14 +5590,17 @@ async def cv_stop(game_id: int):
 
     Returns ``{"stopped": true}`` if a worker was running, or
     ``{"stopped": false}`` when no worker was found for that game.
+    Never 500s — if the CV module isn't loaded or no worker exists, returns stopped=false.
     """
     try:
+        if not hasattr(app.state, "cv"):
+            # No CV manager ever started — nothing to stop
+            return {"stopped": False, "game_id": game_id}
         mgr = _cv_manager()
         stopped = mgr.stop(game_id)
         return {"stopped": stopped, "game_id": game_id}
-    except Exception as exc:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception:
+        return {"stopped": False, "game_id": game_id}
 
 
 @app.get("/api/cv/status")

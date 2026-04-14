@@ -10,6 +10,13 @@ async function proxy(req: NextRequest, pathParts: string[]): Promise<NextRespons
   const headers = new Headers(req.headers);
   headers.set("ngrok-skip-browser-warning", "skip");
   headers.delete("host");
+  // Inject x-forwarded-proto so the backend's stream-proxy can correctly construct
+  // segment URLs. Next.js adds x-forwarded-host but not x-forwarded-proto, causing
+  // the backend (running on http://localhost:8000) to default to https and produce
+  // https://localhost:3000/api/stream-proxy?url=... which fails with ERR_SSL_PROTOCOL_ERROR.
+  if (!headers.has("x-forwarded-proto")) {
+    headers.set("x-forwarded-proto", req.url.startsWith("https://") ? "https" : "http");
+  }
 
   const upstream = await fetch(targetUrl, {
     method: req.method,
