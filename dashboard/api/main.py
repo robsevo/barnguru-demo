@@ -6738,7 +6738,7 @@ def _build_m3u_sources() -> list[str]:
         _user = os.environ.get(f"IPTV{_i}_USER", "")
         _pw   = os.environ.get(f"IPTV{_i}_PASS", "")
         if _url and _user and _pw:
-            paid.append(f"{_url}/get.php?username={_user}&password={_pw}&type=m3u_plus")
+            paid.append(f"{_url}/get.php?username={_user}&password={_pw}&type=m3u_plus&output=hls")
     return public + paid
 
 _M3U_SOURCES = _build_m3u_sources()

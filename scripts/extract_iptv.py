@@ -94,7 +94,7 @@ def main() -> None:
             if not (base_url and user and pw):
                 continue
 
-            m3u_url = f"{base_url}/get.php?username={user}&password={pw}&type=m3u_plus"
+            m3u_url = f"{base_url}/get.php?username={user}&password={pw}&type=m3u_plus&output=hls"
             account = _account_label(base_url)
             print(f"  [{account}] Fetching {base_url} ...")
 
