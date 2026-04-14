@@ -1274,12 +1274,23 @@ function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
 
   const sy = (y: number) => 42.5 - y;
   const pts = shots.slice(-800);
-  const dotLayers: { key: DotLayer; pts: ShotPoint[]; r: string; fill: string; opacity: string }[] = [
-    { key: "low",  pts: pts.filter(s => !s.goal && s.xg < 0.05),                r: "0.8", fill: "#22c55e", opacity: "0.65" },
-    { key: "med",  pts: pts.filter(s => !s.goal && s.xg >= 0.05 && s.xg < 0.12), r: "0.8", fill: "#fbbf24", opacity: "0.70" },
-    { key: "high", pts: pts.filter(s => !s.goal && s.xg >= 0.12 && s.xg < 0.22), r: "0.8", fill: "#f97316", opacity: "0.75" },
-    { key: "hot",  pts: pts.filter(s => !s.goal && s.xg >= 0.22),                r: "0.8", fill: "#dc2626", opacity: "0.80" },
-    { key: "goal", pts: pts.filter(s => s.goal),                                  r: "1.2", fill: "#b91c1c", opacity: "0.95" },
+
+  // Seed-stable jitter so goal dots spread out when stacked on the same location.
+  // Uses a simple LCG per-index so it's deterministic across renders.
+  const jitter = (i: number, scale: number) => {
+    const a = Math.sin(i * 127.1 + 311.7) * 43758.5453;
+    return (a - Math.floor(a) - 0.5) * scale;
+  };
+
+  const nonGoals = pts.filter(s => !s.goal);
+  const goals    = pts.filter(s => s.goal);
+
+  const dotLayers: { key: DotLayer; pts: ShotPoint[]; r: number; fill: string; opacity: number }[] = [
+    { key: "low",  pts: nonGoals.filter(s => s.xg < 0.05),                  r: 0.85, fill: "#22c55e", opacity: 0.65 },
+    { key: "med",  pts: nonGoals.filter(s => s.xg >= 0.05 && s.xg < 0.12), r: 0.85, fill: "#fbbf24", opacity: 0.70 },
+    { key: "high", pts: nonGoals.filter(s => s.xg >= 0.12 && s.xg < 0.22), r: 0.85, fill: "#f97316", opacity: 0.75 },
+    { key: "hot",  pts: nonGoals.filter(s => s.xg >= 0.22),                  r: 0.85, fill: "#dc2626", opacity: 0.80 },
+    { key: "goal", pts: goals,                                                r: 1.5,  fill: "#b91c1c", opacity: 1.00 },
   ];
   const dotLegend: { key: DotLayer; label: string; color?: string; tw?: string }[] = [
     { key: "low",  label: "Low",  tw: "bg-green-500" },
@@ -1297,9 +1308,20 @@ function ShotMapViz({ shots }: { shots: ShotPoint[] }) {
         <g transform="translate(0,100) rotate(-90)">
           <HalfRinkMarkings />
           {dotLayers.map(({ key, pts: lpts, r, fill, opacity }) =>
-            hidden.has(key) ? null : lpts.map((s, i) =>
-              <circle key={`${key}${i}`} cx={s.x} cy={sy(s.y)} r={r} fill={fill} opacity={opacity} />
-            )
+            hidden.has(key) ? null : lpts.map((s, i) => {
+              const isGoal = key === "goal";
+              const cx = s.x + (isGoal ? jitter(i * 2,     1.2) : 0);
+              const cy = sy(s.y) + (isGoal ? jitter(i * 2 + 1, 1.2) : 0);
+              return isGoal ? (
+                // Goals: filled dot + white ring so individual goals show through stacks
+                <g key={`${key}${i}`}>
+                  <circle cx={cx} cy={cy} r={r + 0.5} fill="white" opacity={0.55} />
+                  <circle cx={cx} cy={cy} r={r} fill={fill} opacity={opacity} />
+                </g>
+              ) : (
+                <circle key={`${key}${i}`} cx={cx} cy={cy} r={r} fill={fill} opacity={opacity} />
+              );
+            })
           )}
         </g>
       </svg>
