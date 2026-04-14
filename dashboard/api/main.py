@@ -6482,3 +6482,137 @@ async def goalie_neural_net(player_id: int):
         "shot_types": shot_types_out,
         "zones": zones_out,
     }
+
+
+# ---------------------------------------------------------------------------
+# IPTV Test Channels — ad-free NHL broadcast streams for testing
+# ---------------------------------------------------------------------------
+import re as _re_iptv
+import time as _time_iptv
+
+_IPTV_CACHE: dict = {"data": [], "ts": 0.0}
+_IPTV_TTL = 3600  # 1 hour
+
+# Static tvpass.org slugs — all confirmed HTTP 302 active
+_TVPASS_CHANNELS = [
+    ("NHL Network HD",       "NHLNetwork",                 "hd"),
+    ("NHL Network SD",       "NHLNetwork",                 "sd"),
+    ("ESPN HD",              "ESPN",                       "hd"),
+    ("ESPN SD",              "ESPN",                       "sd"),
+    ("ESPN2 HD",             "ESPN2",                      "hd"),
+    ("ESPN2 SD",             "ESPN2",                      "sd"),
+    ("ESPNU HD",             "ESPNU",                      "hd"),
+    ("TNT East HD",          "TNTEast",                    "hd"),
+    ("TNT East SD",          "TNTEast",                    "sd"),
+    ("TBS East HD",          "TBSEast",                    "hd"),
+    ("TBS East SD",          "TBSEast",                    "sd"),
+    ("FS1 HD",               "FoxSports1",                 "hd"),
+    ("FS1 SD",               "FoxSports1",                 "sd"),
+    ("FS2 HD",               "FoxSports2",                 "hd"),
+    ("MSG HD",               "msg-madison-square-gardens", "hd"),
+    ("MSG+ HD",              "msg-plus",                   "hd"),
+    ("Sportsnet East HD",    "sportsnet-east",             "hd"),
+    ("Sportsnet East SD",    "sportsnet-east",             "sd"),
+    ("Sportsnet Ontario HD", "sportsnet-ontario",          "hd"),
+    ("Sportsnet West HD",    "sportsnet-west",             "hd"),
+    ("Sportsnet Pacific HD", "sportsnet-pacific",          "hd"),
+    ("TSN1 HD",  "tsn1",  "hd"), ("TSN1 SD",  "tsn1",  "sd"),
+    ("TSN2 HD",  "tsn2",  "hd"), ("TSN2 SD",  "tsn2",  "sd"),
+    ("TSN3 HD",  "tsn3",  "hd"),
+    ("TSN4 HD",  "tsn4",  "hd"),
+    ("TSN5 HD",  "tsn5",  "hd"),
+    ("TVA Sports HD",   "TVASports",  "hd"), ("TVA Sports SD",  "TVASports",  "sd"),
+    ("TVA Sports 1 HD", "TVASports1", "hd"),
+    ("TVA Sports 2 HD", "TVASports2", "hd"),
+    ("RDS HD",   "RDS",   "hd"), ("RDS SD",   "RDS",   "sd"),
+    ("RDS2 HD",  "RDS2",  "hd"),
+]
+
+_NHL_KEYWORDS = ["espn","tnt","tbs","nhl","sportsnet","tsn","msg","foxsports","fs1","fs2","abc","nbc","tva","rds"]
+
+_M3U_SOURCES = [
+    "https://raw.githubusercontent.com/phosani/tvpass/refs/heads/main/tvpasshd.m3u",
+    "https://raw.githubusercontent.com/musicmashupstv-hue/tvpassplaylist/main/tvpassplaylist.m3u8",
+    "https://raw.githubusercontent.com/jburg229/iptv-playlist/main/playlist.m3u",
+]
+
+
+@app.get("/iptv-channels")
+async def iptv_channels():
+    now = _time_iptv.time()
+    if now - _IPTV_CACHE["ts"] < _IPTV_TTL and _IPTV_CACHE["data"]:
+        return {"channels": _IPTV_CACHE["data"], "count": len(_IPTV_CACHE["data"]), "cached": True}
+
+    channels = []
+
+    # Source 1: static tvpass.org slugs (always available)
+    for name, slug, quality in _TVPASS_CHANNELS:
+        channels.append({
+            "title": name,
+            "url": f"https://tvpass.org/live/{slug}/{quality}",
+            "source": "tvpass",
+            "feed": "iptv",
+            "priority": 1,
+            "embed_only": False,
+        })
+
+    # Source 2: albinchristo04/tvpass streams.json — pre-authenticated thetvapp.to HLS
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get("https://raw.githubusercontent.com/albinchristo04/tvpass/main/streams.json")
+            if r.status_code == 200:
+                for entry in r.json():
+                    name_lower = (entry.get("name") or "").lower()
+                    stream_url = entry.get("stream_url") or ""
+                    if (
+                        entry.get("status") == "working"
+                        and stream_url.startswith("http")
+                        and any(k in name_lower for k in _NHL_KEYWORDS)
+                    ):
+                        channels.append({
+                            "title": f"{entry['name']} (thetvapp)",
+                            "url": stream_url,
+                            "source": "thetvapp",
+                            "feed": "iptv",
+                            "priority": 0,
+                            "embed_only": False,
+                        })
+    except Exception:
+        pass
+
+    # Source 3: public M3U playlists — parse and filter for NHL channels
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            for m3u_url in _M3U_SOURCES:
+                try:
+                    r = await client.get(m3u_url)
+                    if r.status_code != 200:
+                        continue
+                    lines = r.text.splitlines()
+                    i = 0
+                    while i < len(lines) - 1:
+                        line = lines[i]
+                        if line.startswith("#EXTINF"):
+                            name_match = _re_iptv.search(r'tvg-name="([^"]+)"', line)
+                            display = name_match.group(1) if name_match else line.split(",")[-1].strip()
+                            url_line = lines[i + 1].strip()
+                            if any(k in display.lower() for k in _NHL_KEYWORDS) and url_line.startswith("http"):
+                                channels.append({
+                                    "title": f"{display} (playlist)",
+                                    "url": url_line,
+                                    "source": "m3u_playlist",
+                                    "feed": "iptv",
+                                    "priority": 1,
+                                    "embed_only": False,
+                                })
+                            i += 2
+                        else:
+                            i += 1
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    _IPTV_CACHE["data"] = channels
+    _IPTV_CACHE["ts"] = now
+    return {"channels": channels, "count": len(channels), "cached": False}
