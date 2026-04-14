@@ -4388,8 +4388,9 @@ async def game_centre(game_id: int) -> dict:
         "clock":         clock_raw.get("timeRemaining", ""),
         "in_intermission": bool(clock_raw.get("inIntermission", False)),
         "outcome_type":  outcome_type,
-        "venue":         (landing.get("venue") or {}).get("default", ""),
-        "game_date":     landing.get("gameDate", ""),
+        "venue":           (landing.get("venue") or {}).get("default", ""),
+        "game_date":       landing.get("gameDate", ""),
+        "start_time_utc":  landing.get("startTimeUTC", ""),
         "away": {
             "team":   away_abbrev,
             "score":  away_raw.get("score", 0),
