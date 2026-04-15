@@ -4709,6 +4709,7 @@ async def game_streams(game_id: int) -> dict:
             _scrape_sportsurge(away_kw, home_kw, away_abbr, home_abbr),
             _scrape_crackstreams(away_kw, home_kw, away_abbr, home_abbr),
             _scrape_buffstreams(away_kw, home_kw, away_abbr, home_abbr),
+            _scrape_pixelsports(away_kw, home_kw, away_abbr, home_abbr),
             return_exceptions=True,
         )
         seen_urls: set[str] = {s["url"] for s in streams}
@@ -5032,6 +5033,74 @@ async def _scrape_sportsurge(
         ("https://sportsurge.club/",            "https://sportsurge.club/"),
         ("https://sportsurge.app/",             "https://sportsurge.app/"),
     ], away_kw, home_kw, away_abbr, home_abbr)
+
+
+async def _scrape_pixelsports(
+    away_kw: list[str], home_kw: list[str], away_abbr: str, home_abbr: str,
+) -> list[dict]:
+    """
+    Pixelsports.tv live events API — returns direct CDN stream URLs.
+    Endpoint: GET https://pixelsport.tv/backend/liveTV/events
+    Response: list of event objects with channel.server1URL / server2URL / server3URL
+    """
+    try:
+        async with _httpx_backup.AsyncClient(timeout=8.0, follow_redirects=True) as hx:
+            r = await hx.get(
+                "https://pixelsport.tv/backend/liveTV/events",
+                headers={
+                    "User-Agent": _BROWSER_HEADERS["User-Agent"],
+                    "Accept": "application/json, */*",
+                    "Referer": "https://pixelsport.tv/",
+                    "Origin": "https://pixelsport.tv",
+                },
+            )
+        if r.status_code != 200:
+            return []
+        events = r.json()
+        if not isinstance(events, list):
+            # some responses are wrapped: {"data": [...]}
+            events = events.get("data") or events.get("events") or []
+    except Exception:
+        return []
+
+    results: list[dict] = []
+    seen: set[str] = set()
+
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        # Match name against our team keywords
+        match_name: str = (
+            ev.get("match_name") or ev.get("title") or ev.get("name") or ""
+        ).lower()
+        category: str = (
+            (ev.get("channel") or {}).get("TVCategory", {}).get("name", "") or
+            ev.get("category") or ""
+        ).lower()
+        combined = match_name + " " + category
+        if not _row_matches(combined, away_kw, home_kw):
+            continue
+
+        channel: dict = ev.get("channel") or {}
+        for field in ("server1URL", "server2URL", "server3URL", "stream_url", "streamURL"):
+            url = channel.get(field) or ev.get(field) or ""
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            title_raw = ev.get("match_name") or ev.get("title") or f"{away_abbr} @ {home_abbr}"
+            entry: dict = {
+                "url":   url,
+                "feed":  "main",
+                "title": str(title_raw),
+            }
+            # Direct m3u8 — mark as clean source
+            if url.endswith(".m3u8") or ".m3u8?" in url:
+                entry["_direct"] = True
+            else:
+                entry["embed_only"] = True
+            results.append(entry)
+
+    return results
 
 
 # ===========================================================================
@@ -6707,11 +6776,23 @@ _TVPASS_CHANNELS = [
     ("Sportsnet Ontario HD", "sportsnet-ontario",          "hd"),
     ("Sportsnet West HD",    "sportsnet-west",             "hd"),
     ("Sportsnet Pacific HD", "sportsnet-pacific",          "hd"),
+    ("Sportsnet 360 HD",     "sportsnet-360",              "hd"),
+    ("Sportsnet One HD",     "sportsnet-one",              "hd"),
     ("TSN1 HD",  "tsn1",  "hd"), ("TSN1 SD",  "tsn1",  "sd"),
     ("TSN2 HD",  "tsn2",  "hd"), ("TSN2 SD",  "tsn2",  "sd"),
     ("TSN3 HD",  "tsn3",  "hd"),
     ("TSN4 HD",  "tsn4",  "hd"),
     ("TSN5 HD",  "tsn5",  "hd"),
+    # FanDuel Sports Networks (formerly Bally Sports) — NHL regional US
+    ("Fanduel Sports Network Detroit HD",    "fanduel-sports-network-detroit",    "hd"),
+    ("Fanduel Sports Network Florida HD",    "fanduel-sports-network-florida",    "hd"),
+    ("Fanduel Sports Network North HD",      "fanduel-sports-network-north",      "hd"),
+    ("Fanduel Sports Network Wisconsin HD",  "fanduel-sports-network-wisconsin",  "hd"),
+    ("Fanduel Sports Network Ohio HD",       "fanduel-sports-network-ohio",       "hd"),
+    ("Fanduel Sports Network South HD",      "fanduel-sports-network-south",      "hd"),
+    ("Fanduel Sports Network Southeast HD",  "fanduel-sports-network-southeast",  "hd"),
+    ("Fanduel Sports Network West HD",       "fanduel-sports-network-west",       "hd"),
+    ("Fanduel Sports Network Socal HD",      "fanduel-sports-network-socal",      "hd"),
 ]
 
 _NHL_KEYWORDS = [
@@ -6857,6 +6938,7 @@ _BARNCENTRE_CHANNEL_NAMES = [
     "TSN1", "TSN2", "TSN3", "TSN4", "TSN5",
     # Canadian — Sportsnet
     "Sportsnet East", "Sportsnet Ontario", "Sportsnet West", "Sportsnet Pacific",
+    "Sportsnet 360", "Sportsnet One",
     # US national
     "ESPN", "ESPN2", "ESPN+",
     "NHL Network",
