@@ -111,6 +111,20 @@ async function fetchupstreamChannels(): Promise<Map<string, string[]>> {
   return channelMap;
 }
 
+// All BarnCentre channel names in display order — must stay in sync with
+// _BARNCENTRE_CHANNEL_NAMES in main.py
+const ALL_CHANNEL_NAMES = [
+  "TSN1","TSN2","TSN3","TSN4","TSN5",
+  "Sportsnet East","Sportsnet Ontario","Sportsnet West","Sportsnet Pacific",
+  "Sportsnet 360","Sportsnet One",
+  "RDS","RDS2","TVA Sports",
+  "ESPN","ESPN2","ESPN+",
+  "NHL Network",
+  "FS1","FS2",
+  "NESN",
+  "FanDuel",
+];
+
 export async function GET() {
   // Fetch base channel data from Python API + upstream in parallel
   const [baseResp, upstreamMap] = await Promise.allSettled([
@@ -127,19 +141,36 @@ export async function GET() {
     channels = d.channels ?? [];
   }
 
-  // Merge upstream URLs into matching channels
   const upstream = upstreamMap.status === "fulfilled" ? upstreamMap.value : new Map<string, string[]>();
+
+  // Merge upstream URLs into existing channels
   for (const ch of channels) {
-    const name = ch.name as string;
-    const urls = upstream.get(name);
+    const urls = upstream.get(ch.name as string);
     if (!urls?.length) continue;
-    // Prepend upstream URLs so they appear as primary options
     const existing = (ch.backup_urls as string[]) ?? [];
     ch.backup_urls = [...urls, ...existing.filter(u => !urls.includes(u))];
-    // If no primary_url, promote first upstream URL
     if (!ch.primary_url) ch.primary_url = urls[0];
     ch.online = true;
   }
+
+  // Add upstream-only channels that the Python API didn't return (e.g. RDS, TVA Sports)
+  const existingNames = new Set(channels.map(c => c.name as string));
+  for (const name of ALL_CHANNEL_NAMES) {
+    if (existingNames.has(name)) continue;
+    const urls = upstream.get(name);
+    if (!urls?.length) continue;
+    channels.push({
+      name,
+      primary_url:  urls[0],
+      backup_urls:  urls.slice(1),
+      programs:     [],
+      online:       true,
+    });
+  }
+
+  // Re-sort by ALL_CHANNEL_NAMES order
+  const order = Object.fromEntries(ALL_CHANNEL_NAMES.map((n, i) => [n, i]));
+  channels.sort((a, b) => (order[a.name as string] ?? 99) - (order[b.name as string] ?? 99));
 
   return NextResponse.json({ channels });
 }
