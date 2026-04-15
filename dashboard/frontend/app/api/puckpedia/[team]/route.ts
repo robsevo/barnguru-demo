@@ -33,7 +33,7 @@ const SLUGS: Record<string, string> = {
   STL: "st_louis_blues",
   TBL: "tampa_bay_lightning",
   TOR: "toronto_maple_leafs",
-  UTA: "utah_hockey_club",
+  UTA: "utah_mammoth",
   VAN: "vancouver_canucks",
   VGK: "vegas_golden_knights",
   WSH: "washington_capitals",
