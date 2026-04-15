@@ -4858,17 +4858,10 @@ async def game_iptv_streams(game_id: int) -> dict:
         all_channels = []
 
     # 3. Match each broadcast network to IPTV channels by title prefix.
-    # Use strict matching: title must be exactly "<Network>" or "<Network> [HD|SD]"
-    # or "<Network> <N> [HD|SD]" — never match regional suffixes like "California".
-    import re as _re_iptv
-    _QUALITY_TAIL = _re_iptv.compile(r"^(\s*(\d+)?\s*(hd|sd)?)?$", _re_iptv.I)
-
-    def _title_matches_network(title: str, prefix: str) -> bool:
-        t = title.lower()
-        if not t.startswith(prefix):
-            return False
-        remainder = t[len(prefix):]
-        return bool(_QUALITY_TAIL.match(remainder))
+    # Only match against curated tvpass static channels — NOT raw M3U playlist dumps
+    # which contain regional channels like "NBC Sports California" that would show up
+    # on games they never broadcast.
+    curated_channels = [ch for ch in all_channels if ch.get("source") == "tvpass"]
 
     result: list[dict] = []
     seen_codes: set[str] = set()
@@ -4882,8 +4875,8 @@ async def game_iptv_streams(game_id: int) -> dict:
         display = _BROADCAST_CODE_MAP.get(code, code)
         prefix = display.lower()
         matched = [
-            ch for ch in all_channels
-            if _title_matches_network(ch.get("title", ""), prefix)
+            ch for ch in curated_channels
+            if ch.get("title", "").lower().startswith(prefix)
         ]
         if matched:
             result.append({
