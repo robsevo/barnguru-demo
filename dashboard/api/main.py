@@ -4774,11 +4774,6 @@ async def game_streams(game_id: int) -> dict:
 # NHL API uses abbreviated network codes; map to the canonical prefix used in
 # our IPTV channel titles (e.g. "TVA Sports HD" starts with "TVA Sports").
 _BROADCAST_CODE_MAP: dict[str, str] = {
-    # Canadian French
-    "TVAS":  "TVA Sports",
-    "TVAS2": "TVA Sports 2",
-    "RDS":   "RDS",
-    "RDS2":  "RDS2",
     # Canadian English — TSN
     "TSN1": "TSN1", "TSN2": "TSN2", "TSN3": "TSN3", "TSN4": "TSN4", "TSN5": "TSN5",
     # Canadian English — Sportsnet
@@ -4862,7 +4857,19 @@ async def game_iptv_streams(game_id: int) -> dict:
     except Exception:
         all_channels = []
 
-    # 3. Match each broadcast network to IPTV channels by title prefix
+    # 3. Match each broadcast network to IPTV channels by title prefix.
+    # Use strict matching: title must be exactly "<Network>" or "<Network> [HD|SD]"
+    # or "<Network> <N> [HD|SD]" — never match regional suffixes like "California".
+    import re as _re_iptv
+    _QUALITY_TAIL = _re_iptv.compile(r"^(\s*(\d+)?\s*(hd|sd)?)?$", _re_iptv.I)
+
+    def _title_matches_network(title: str, prefix: str) -> bool:
+        t = title.lower()
+        if not t.startswith(prefix):
+            return False
+        remainder = t[len(prefix):]
+        return bool(_QUALITY_TAIL.match(remainder))
+
     result: list[dict] = []
     seen_codes: set[str] = set()
     for b in tv_broadcasts:
@@ -4876,7 +4883,7 @@ async def game_iptv_streams(game_id: int) -> dict:
         prefix = display.lower()
         matched = [
             ch for ch in all_channels
-            if ch.get("title", "").lower().startswith(prefix)
+            if _title_matches_network(ch.get("title", ""), prefix)
         ]
         if matched:
             result.append({
@@ -6712,11 +6719,6 @@ _TVPASS_CHANNELS = [
     ("TSN3 HD",  "tsn3",  "hd"),
     ("TSN4 HD",  "tsn4",  "hd"),
     ("TSN5 HD",  "tsn5",  "hd"),
-    ("TVA Sports HD",   "TVASports",  "hd"), ("TVA Sports SD",  "TVASports",  "sd"),
-    ("TVA Sports 1 HD", "TVASports1", "hd"),
-    ("TVA Sports 2 HD", "TVASports2", "hd"),
-    ("RDS HD",   "RDS",   "hd"), ("RDS SD",   "RDS",   "sd"),
-    ("RDS2 HD",  "RDS2",  "hd"),
 ]
 
 _NHL_KEYWORDS = [
