@@ -4710,6 +4710,7 @@ async def game_streams(game_id: int) -> dict:
             _scrape_crackstreams(away_kw, home_kw, away_abbr, home_abbr),
             _scrape_buffstreams(away_kw, home_kw, away_abbr, home_abbr),
             _scrape_pixelsports(away_kw, home_kw, away_abbr, home_abbr),
+            _scrape_bunchatv(away_kw, home_kw, away_abbr, home_abbr),
             return_exceptions=True,
         )
         seen_urls: set[str] = {s["url"] for s in streams}
@@ -4859,10 +4860,10 @@ async def game_iptv_streams(game_id: int) -> dict:
         all_channels = []
 
     # 3. Match each broadcast network to IPTV channels by title prefix.
-    # Only match against curated tvpass static channels — NOT raw M3U playlist dumps
+    # Only match against curated tvpass/upstream channels — NOT raw M3U playlist dumps
     # which contain regional channels like "NBC Sports California" that would show up
     # on games they never broadcast.
-    curated_channels = [ch for ch in all_channels if ch.get("source") == "tvpass"]
+    curated_channels = [ch for ch in all_channels if ch.get("source") in ("tvpass", "upstream")]
 
     result: list[dict] = []
     seen_codes: set[str] = set()
@@ -5099,6 +5100,96 @@ async def _scrape_pixelsports(
             else:
                 entry["embed_only"] = True
             results.append(entry)
+
+    return results
+
+
+async def _scrape_bunchatv(
+    away_kw: list[str], home_kw: list[str], away_abbr: str, home_abbr: str,
+) -> list[dict]:
+    """
+    bunchatv1.net sports streaming aggregator.
+    - Parse homepage for match containers (class: item_streaming)
+    - Hit each matching match page with the homepage URL as Referer
+    - Regex `"file":"https://..."` from player config to extract m3u8 URLs
+    """
+    BASE = "https://bunchatv1.net"
+    hdrs = {
+        **_BROWSER_HEADERS,
+        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+    }
+    try:
+        async with _httpx_backup.AsyncClient(timeout=10.0, follow_redirects=True) as hx:
+            r = await hx.get(BASE, headers=hdrs)
+        if r.status_code != 200:
+            return []
+        html = r.text
+    except Exception:
+        return []
+
+    # Find match links inside item_streaming containers
+    # Pattern: <div class="item_streaming ..."><a href="/match/...">...text...</a>
+    match_links: list[tuple[str, str]] = []
+    for m in _re_backup.finditer(
+        r'class=["\'][^"\']*item_streaming[^"\']*["\'][^>]*>.*?<a\s+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>',
+        html, _re_backup.S | _re_backup.I,
+    ):
+        href, text = m.group(1), _re_backup.sub(r"<[^>]+>", "", m.group(2)).strip()
+        combined = (href + " " + text).lower()
+        if _row_matches(combined, away_kw, home_kw):
+            full = href if href.startswith("http") else BASE + "/" + href.lstrip("/")
+            match_links.append((full, text))
+
+    if not match_links:
+        # Fallback: any anchor whose text matches our teams
+        for m in _re_backup.finditer(r'<a\s+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', html, _re_backup.S | _re_backup.I):
+            href, text = m.group(1), _re_backup.sub(r"<[^>]+>", "", m.group(2)).strip()
+            combined = (href + " " + text).lower()
+            if _row_matches(combined, away_kw, home_kw):
+                full = href if href.startswith("http") else BASE + "/" + href.lstrip("/")
+                match_links.append((full, text))
+
+    results: list[dict] = []
+    seen: set[str] = set()
+
+    for page_url, page_title in match_links[:5]:  # cap at 5 match pages
+        try:
+            async with _httpx_backup.AsyncClient(timeout=8.0, follow_redirects=True) as hx:
+                rp = await hx.get(page_url, headers={**hdrs, "Referer": BASE + "/"})
+            if rp.status_code != 200:
+                continue
+            page_html = rp.text
+        except Exception:
+            continue
+
+        # Extract m3u8/stream URLs from player config
+        for fm in _re_backup.finditer(
+            r'"file"\s*:\s*"(https?://[^"]+\.m3u8[^"]*)"', page_html, _re_backup.I
+        ):
+            url = fm.group(1)
+            if url not in seen:
+                seen.add(url)
+                results.append({
+                    "url":     url,
+                    "feed":    "main",
+                    "title":   page_title or f"{away_abbr} @ {home_abbr}",
+                    "_direct": True,  # direct m3u8 → priority 0
+                })
+
+        # Also catch non-m3u8 stream src patterns
+        for fm in _re_backup.finditer(
+            r'"(?:file|src|source)"\s*:\s*"(https?://[^"]+)"', page_html, _re_backup.I
+        ):
+            url = fm.group(1)
+            if url in seen or not any(ext in url for ext in (".m3u8", "/live/", "stream")):
+                continue
+            seen.add(url)
+            results.append({
+                "url":        url,
+                "feed":       "main",
+                "title":      page_title or f"{away_abbr} @ {home_abbr}",
+                "embed_only": True,
+            })
 
     return results
 
@@ -6803,6 +6894,69 @@ _NHL_KEYWORDS = [
     "nesn","nbcs","nbcsp","spectrum sportsnet","nhln",
 ]
 
+# ---------------------------------------------------------------------------
+# upstream Codes IPTV accounts — fetched at startup, cached 1hr alongside tvpass
+# Each entry: (label, host, port, username, password)
+# ---------------------------------------------------------------------------
+_upstream_ACCOUNTS: list[tuple[str, str, int, str, str]] = [
+    ("an upstream host",  "an upstream host.ddns.net", 8081, "PNbV7ywsHG",            "u7jmr3xvcM"),
+    ("tv14s",       "tv14s.xyz",           8080, "Serentiy2@ogbtv.com",   "0306@1954"),
+    ("ampztl-a",    "ampztl.xyz",          8080, "arturo",                "YZcm6gw6Ukwt"),
+    ("ampztl-b",    "ampztl.xyz",          8080, "webtv1847",             "YsAPRy6Jq8TJ"),
+    ("lunar",       "lunar.pm",            8080, "JeffOglesby",           "Marriage101"),
+]
+
+
+async def _fetch_upstream_channels(
+    label: str, host: str, port: int, username: str, password: str,
+) -> list[dict]:
+    """
+    Fetch the M3U playlist from an upstream Codes server and return NHL-relevant
+    channels as standardized channel dicts.
+
+    Stream URLs use HLS (output=m3u8) so hls.js can play them directly.
+    """
+    base = f"http://{host}:{port}"
+    url  = (
+        f"{base}/get.php?username={username}&password={password}"
+        f"&type=m3u_plus&output=m3u8"
+    )
+    try:
+        async with _httpx_backup.AsyncClient(timeout=20.0, follow_redirects=True) as hx:
+            r = await hx.get(url, headers={"User-Agent": _BROWSER_HEADERS["User-Agent"]})
+        if r.status_code != 200:
+            return []
+        text = r.text
+    except Exception:
+        return []
+
+    results: list[dict] = []
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines) - 1:
+        line = lines[i].strip()
+        if line.startswith("#EXTINF"):
+            # Channel name: last comma-separated segment
+            name_m = _re_iptv.search(r'tvg-name="([^"]+)"', line)
+            ch_name = name_m.group(1) if name_m else line.split(",")[-1].strip()
+            stream_url = lines[i + 1].strip() if i + 1 < len(lines) else ""
+            if (
+                stream_url.startswith("http")
+                and any(k in ch_name.lower() for k in _NHL_KEYWORDS)
+            ):
+                results.append({
+                    "title":      f"{ch_name} ({label})",
+                    "url":        stream_url,
+                    "source":     "upstream",
+                    "feed":       "iptv",
+                    "priority":   1,
+                    "embed_only": False,
+                })
+            i += 2
+        else:
+            i += 1
+    return results
+
 def _build_m3u_sources() -> list[str]:
     return [
         "https://raw.githubusercontent.com/phosani/tvpass/refs/heads/main/tvpasshd.m3u",
@@ -6894,6 +7048,19 @@ async def iptv_channels():
                             i += 1
                 except Exception:
                     continue
+    except Exception:
+        pass
+
+    # Source 4: upstream Codes accounts — fire all in parallel, merge results
+    try:
+        import asyncio as _aio_xt
+        xt_results = await _aio_xt.gather(
+            *[_fetch_upstream_channels(lbl, h, p, u, pw) for lbl, h, p, u, pw in _upstream_ACCOUNTS],
+            return_exceptions=True,
+        )
+        for res in xt_results:
+            if isinstance(res, list):
+                channels.extend(res)
     except Exception:
         pass
 
