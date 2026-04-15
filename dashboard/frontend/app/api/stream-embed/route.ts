@@ -96,10 +96,26 @@ const WRAPPER_INJECT = `<script>
     };
   }catch(e){}
 
-  // 5. Refocus on blur — kills popunder focus-steal pattern
+  // 5. Block automatic fullscreen requests on mobile — stream players call
+  //    requestFullscreen()/webkitEnterFullscreen() on video play which is jarring.
+  //    We override these to no-ops; the user can still manually tap fullscreen.
+  try{
+    var _noFS=function(){return Promise.resolve();};
+    Element.prototype.requestFullscreen=_noFS;
+    if('webkitRequestFullscreen' in Element.prototype)Element.prototype.webkitRequestFullscreen=_noFS;
+    if('mozRequestFullScreen' in Element.prototype)Element.prototype.mozRequestFullScreen=_noFS;
+    if('msRequestFullscreen' in Element.prototype)Element.prototype.msRequestFullscreen=_noFS;
+    // Also block on HTMLVideoElement directly (iOS webkitEnterFullscreen)
+    if(window.HTMLVideoElement&&'webkitEnterFullscreen' in HTMLVideoElement.prototype){
+      HTMLVideoElement.prototype.webkitEnterFullscreen=function(){};
+      HTMLVideoElement.prototype.webkitExitFullscreen=function(){};
+    }
+  }catch(e){}
+
+  // 6. Refocus on blur — kills popunder focus-steal pattern
   window.addEventListener('blur',function(){setTimeout(function(){try{window.focus();}catch(e){}},0);},true);
 
-  // 6. Block target="_blank" / "_new" / "_top" anchor clicks in wrapper context
+  // 7. Block target="_blank" / "_new" / "_top" anchor clicks in wrapper context
   document.addEventListener('click',function(e){
     var el=e.target;
     while(el&&el.tagName!=='A')el=el.parentElement;
@@ -108,7 +124,7 @@ const WRAPPER_INJECT = `<script>
     }
   },true);
 
-  // 7. MutationObserver — remove ad iframes/high-z overlays/suspicious anchors injected into wrapper doc
+  // 8. MutationObserver — remove ad iframes/high-z overlays/suspicious anchors injected into wrapper doc
   var streamIframe=null;
   function killAdNode(node){
     if(!node||!node.tagName)return;
@@ -136,7 +152,7 @@ const WRAPPER_INJECT = `<script>
     muts.forEach(function(m){m.addedNodes.forEach(killAdNode);});
   });
 
-  // 8. Auto-dismiss consent dialogs / ad overlays; auto-click play buttons
+  // 9. Auto-dismiss consent dialogs / ad overlays; auto-click play buttons
   var C=['[class*="close" i]','[class*="dismiss" i]','[class*="skip" i]','[id*="close" i]',
     '[id*="dismiss" i]','[aria-label*="close" i]','.ad-close','#ad-close','.skip-ad',
     '.fc-cta-consent','#didomi-notice-agree-button','.qc-cmp2-summary-buttons button',
