@@ -152,7 +152,21 @@ const WRAPPER_INJECT = `<script>
     run();
     setTimeout(run,300);setTimeout(run,800);
 
-    // 9. Sandbox failure detection — only when _BG_SANDBOX flag is set.
+    var _streamUrl=typeof _BG_URL!=='undefined'?_BG_URL:'';
+
+    // 9. Stream-killed detection — fires when an ad redirects the inner iframe
+    //    to a new URL. The first 'load' is the stream loading normally; any
+    //    subsequent 'load' means the iframe was navigated away by an ad.
+    if(streamIframe){
+      var _firstLoad=true;
+      streamIframe.addEventListener('load',function(){
+        if(_firstLoad){_firstLoad=false;return;}
+        // Inner iframe reloaded → stream killed by ad redirect. Tell parent to auto-skip.
+        try{window.parent.postMessage({type:'Origin-stream-killed',url:_streamUrl},'*');}catch(e){}
+      });
+    }
+
+    // 10. Sandbox failure detection — only when _BG_SANDBOX flag is set.
     if(typeof _BG_SANDBOX!=='undefined'&&_BG_SANDBOX&&streamIframe){
       var _playerActive=false;
       window.addEventListener('message',function(e){
@@ -162,7 +176,7 @@ const WRAPPER_INJECT = `<script>
       streamIframe.addEventListener('load',function(){
         setTimeout(function(){
           if(!_playerActive){
-            try{window.parent.postMessage({type:'Origin-sandbox-fail',url:typeof _BG_URL!=='undefined'?_BG_URL:''},'*');}catch(e){}
+            try{window.parent.postMessage({type:'Origin-sandbox-fail',url:_streamUrl},'*');}catch(e){}
           }
         },3000);
       });
@@ -210,11 +224,10 @@ export async function GET(request: NextRequest) {
     ? `sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-orientation-lock allow-modals" `
     : "";
 
-  // On mobile: sandbox is forced for popup blocking but disable the 3s auto-skip
-  // (_BG_SANDBOX) — streams take longer to initialise on mobile.
-  const bgVars = useSandbox && !mobile
-    ? `<script>var _BG_SANDBOX=1,_BG_URL=${JSON.stringify(safeUrl)};</script>`
-    : "";
+  // _BG_URL: always injected so stream-killed detection works on all platforms.
+  // _BG_SANDBOX: only on desktop+sandbox so the 3s auto-skip doesn't fire on mobile.
+  const bgSandboxVar = useSandbox && !mobile ? "var _BG_SANDBOX=1;" : "";
+  const bgVars = `<script>${bgSandboxVar}var _BG_URL=${JSON.stringify(safeUrl)};</script>`;
 
   const html = `<!DOCTYPE html>
 <html><head>
