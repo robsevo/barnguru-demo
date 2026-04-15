@@ -7106,8 +7106,6 @@ _BARNCENTRE_CHANNEL_NAMES = [
     # Canadian — Sportsnet
     "Sportsnet East", "Sportsnet Ontario", "Sportsnet West", "Sportsnet Pacific",
     "Sportsnet 360", "Sportsnet One",
-    # Canadian — French (RDS / TVA Sports)
-    "RDS", "RDS2", "TVA Sports",
     # US national
     "ESPN", "ESPN2", "ESPN+",
     "NHL Network",
