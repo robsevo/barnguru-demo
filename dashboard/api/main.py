@@ -6853,8 +6853,10 @@ async def iptv_channel_status():
 
 # Channels shown in BarnCentre — all-day sports / highlights content
 _BARNCENTRE_CHANNEL_NAMES = [
-    # Canadian
+    # Canadian — TSN
     "TSN1", "TSN2", "TSN3", "TSN4", "TSN5",
+    # Canadian — Sportsnet
+    "Sportsnet East", "Sportsnet Ontario", "Sportsnet West", "Sportsnet Pacific",
     # US national
     "ESPN", "ESPN2", "ESPN+",
     "NHL Network",
