@@ -127,17 +127,15 @@ export async function GET(request: NextRequest) {
   const priorityParam = request.nextUrl.searchParams.get("priority");
   const priority = priorityParam != null ? parseInt(priorityParam, 10) : 3;
 
-  // Sandbox policy (same on mobile and desktop):
-  //   priority 0-1 (direct m3u8, known-clean embeds): sandbox — these providers
-  //     don't check for sandbox, and they're the ones most worth protecting
-  //   priority 2-3 (aggregators, iframe-only): no sandbox — these providers
-  //     actively detect and refuse to load under sandbox
-  //
-  // Note: window.open is overridden to a no-op in WRAPPER_INJECT, so popups are
-  // blocked even without the sandbox attribute. Applying sandbox to priority 2-3
-  // streams on mobile was causing them to silently fail with no fallback.
+  // Sandbox policy:
+  //   Mobile: always sandbox — blocks popup ads. If the provider detects sandbox
+  //     and refuses to load, the user can tap "Open / Cast ↗" in native browser.
+  //     Mobile has no fallback anyway (no yt-dlp), so popups are the main problem.
+  //   Desktop priority 0-1: sandbox — these providers don't check for it.
+  //   Desktop priority 2-3: no sandbox — these providers detect and reject it,
+  //     and on desktop we can try yt-dlp extraction as a fallback.
   const mobile = isMobile(ua);
-  const useSandbox = priority <= 1;
+  const useSandbox = mobile || priority <= 1;
   const sandboxAttr = useSandbox
     ? `sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-orientation-lock allow-modals" `
     : "";
