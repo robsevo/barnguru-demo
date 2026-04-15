@@ -6968,9 +6968,9 @@ _M3U_SOURCES = _build_m3u_sources()
 
 
 @app.get("/iptv-channels")
-async def iptv_channels():
+async def iptv_channels(force: bool = False):
     now = _time_iptv.time()
-    if now - _IPTV_CACHE["ts"] < _IPTV_TTL and _IPTV_CACHE["data"]:
+    if not force and now - _IPTV_CACHE["ts"] < _IPTV_TTL and _IPTV_CACHE["data"]:
         return {"channels": _IPTV_CACHE["data"], "count": len(_IPTV_CACHE["data"]), "cached": True}
 
     channels = []
@@ -7106,6 +7106,8 @@ _BARNCENTRE_CHANNEL_NAMES = [
     # Canadian — Sportsnet
     "Sportsnet East", "Sportsnet Ontario", "Sportsnet West", "Sportsnet Pacific",
     "Sportsnet 360", "Sportsnet One",
+    # Canadian — French (RDS / TVA Sports)
+    "RDS", "RDS2", "TVA Sports",
     # US national
     "ESPN", "ESPN2", "ESPN+",
     "NHL Network",
@@ -7119,9 +7121,27 @@ _BARNCENTRE_CHANNEL_NAMES = [
 import re as _re_bc
 
 def _normalize_ch(title: str) -> str:
-    """Strip source suffix and HD/SD qualifier for channel name matching."""
-    t = _re_bc.sub(r"\s*\(thetvapp\)|\s*\(playlist\)", "", title, flags=_re_bc.I)
-    t = _re_bc.sub(r"\s+(hd|sd)\s*$", "", t, flags=_re_bc.I)
+    """Strip source suffix and HD/SD qualifier for channel name matching.
+
+    Handles three naming styles:
+    - tvpass/thetvapp: "Sportsnet East HD"   → "sportsnet east"
+    - upstream-style:   "CA (FR) RDS HD (B)"  → "rds"
+                      "CA-FR | TVA SPORTS 1" → "tva sports 1"
+                      "CA: RDS (FR)"         → "rds"
+    - upstream label:   "RDS HD (tv14s)"       → "rds"
+    """
+    t = title.strip()
+    # Strip upstream source labels we append: "(tv14s)", "(an upstream host)", etc.
+    t = _re_bc.sub(r"\s*\([a-z0-9._-]{3,30}\)\s*$", "", t, flags=_re_bc.I)
+    # Strip playlist/thetvapp suffixes
+    t = _re_bc.sub(r"\s*\(thetvapp\)|\s*\(playlist\)", "", t, flags=_re_bc.I)
+    # Strip trailing quality flags: HD, SD, FHD, UHD, (B), (R), (E), (D)
+    t = _re_bc.sub(r"\s+(?:fhd|uhd|hd|sd)\s*$", "", t, flags=_re_bc.I)
+    t = _re_bc.sub(r"\s*\([a-z]\)\s*$", "", t, flags=_re_bc.I)
+    # Strip upstream country/language prefixes: "CA (FR)", "CA:", "CA-FR |", "CA "
+    t = _re_bc.sub(r"^(?:CA|US|UK)\s*(?:\([A-Z]{2}\))?\s*[\|:\-]?\s*", "", t, flags=_re_bc.I)
+    # Strip remaining leading/trailing punctuation
+    t = t.strip(" |:-")
     return t.strip().lower()
 
 
