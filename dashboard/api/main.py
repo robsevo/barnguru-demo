@@ -4877,8 +4877,6 @@ async def game_iptv_streams(game_id: int) -> dict:
         matched = [
             ch for ch in all_channels
             if ch.get("title", "").lower().startswith(prefix)
-            and ch.get("source") != "paid_iptv"
-            and ch.get("url", "").startswith("https://")
         ]
         if matched:
             result.append({
@@ -4890,15 +4888,6 @@ async def game_iptv_streams(game_id: int) -> dict:
 
     _game_iptv_cache[game_id] = (result, _t_iptv.monotonic())
     return {"broadcasts": result}
-
-
-@app.post("/admin/clear-iptv-cache")
-async def clear_iptv_cache() -> dict:
-    """Clear in-memory IPTV caches. Useful after a deploy that changes channel filtering."""
-    _game_iptv_cache.clear()
-    _IPTV_CACHE["data"] = []
-    _IPTV_CACHE["ts"] = 0.0
-    return {"cleared": True}
 
 
 # ---------------------------------------------------------------------------
@@ -6739,28 +6728,11 @@ _NHL_KEYWORDS = [
 ]
 
 def _build_m3u_sources() -> list[str]:
-    # Load IPTV credentials from iptv.env sidecar (written by nightly deploy, gitignored)
-    _env_file = Path(__file__).parent / "iptv.env"
-    if _env_file.exists():
-        for _line in _env_file.read_text().splitlines():
-            _line = _line.strip()
-            if "=" in _line and not _line.startswith("#"):
-                _k, _, _v = _line.partition("=")
-                os.environ.setdefault(_k.strip(), _v.strip())
-
-    public = [
+    return [
         "https://raw.githubusercontent.com/phosani/tvpass/refs/heads/main/tvpasshd.m3u",
         "https://raw.githubusercontent.com/musicmashupstv-hue/tvpassplaylist/main/tvpassplaylist.m3u8",
         "https://raw.githubusercontent.com/jburg229/iptv-playlist/main/playlist.m3u",
     ]
-    paid: list[str] = []
-    for _i in range(1, 7):
-        _url  = os.environ.get(f"IPTV{_i}_URL", "").rstrip("/")
-        _user = os.environ.get(f"IPTV{_i}_USER", "")
-        _pw   = os.environ.get(f"IPTV{_i}_PASS", "")
-        if _url and _user and _pw:
-            paid.append(f"{_url}/get.php?username={_user}&password={_pw}&type=m3u_plus&output=hls")
-    return public + paid
 
 _M3U_SOURCES = _build_m3u_sources()
 
@@ -6772,17 +6744,6 @@ async def iptv_channels():
         return {"channels": _IPTV_CACHE["data"], "count": len(_IPTV_CACHE["data"]), "cached": True}
 
     channels = []
-
-    # Source 0: saved paid IPTV channels (extracted via extract-iptv, committed to git)
-    # Always available even when env vars are unset or accounts are unreachable.
-    _saved_path = Path(__file__).parent / "iptv_paid_channels.json"
-    if _saved_path.exists():
-        try:
-            import json as _json_iptv
-            for _ch in _json_iptv.loads(_saved_path.read_text()):
-                channels.append(_ch)
-        except Exception:
-            pass
 
     # Source 1: static tvpass.org slugs (always available)
     for name, slug, quality in _TVPASS_CHANNELS:
