@@ -143,7 +143,10 @@ export async function GET(request: NextRequest) {
   // Inject sandbox flag + stream URL so WRAPPER_INJECT can detect sandbox failures
   // and remove the stream. Enabled on all platforms — on mobile the parent's
   // onSandboxFail removes the stream from the list rather than auto-switching.
-  const bgVars = useSandbox
+  // On mobile: sandbox is forced for popup blocking but we disable the 3s auto-skip
+  // (_BG_SANDBOX) — streams take longer to initialise on mobile and we don't want to
+  // auto-switch away from a valid stream. User switches manually via "try next".
+  const bgVars = useSandbox && !mobile
     ? `<script>var _BG_SANDBOX=1,_BG_URL=${JSON.stringify(safeUrl)};</script>`
     : "";
 
