@@ -4878,6 +4878,7 @@ async def game_iptv_streams(game_id: int) -> dict:
             ch for ch in all_channels
             if ch.get("title", "").lower().startswith(prefix)
             and ch.get("source") != "paid_iptv"
+            and ch.get("url", "").startswith("https://")
         ]
         if matched:
             result.append({
@@ -4889,6 +4890,15 @@ async def game_iptv_streams(game_id: int) -> dict:
 
     _game_iptv_cache[game_id] = (result, _t_iptv.monotonic())
     return {"broadcasts": result}
+
+
+@app.post("/admin/clear-iptv-cache")
+async def clear_iptv_cache() -> dict:
+    """Clear in-memory IPTV caches. Useful after a deploy that changes channel filtering."""
+    _game_iptv_cache.clear()
+    _IPTV_CACHE["data"] = []
+    _IPTV_CACHE["ts"] = 0.0
+    return {"cleared": True}
 
 
 # ---------------------------------------------------------------------------
