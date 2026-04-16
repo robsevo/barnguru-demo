@@ -81,11 +81,11 @@ export const TEAM_COLORS: Record<string, string> = {
   FLA: "#C8102E", LAK: "#A2AAAD", MIN: "#154734", MTL: "#AF1E2D",
   NSH: "#FFB81C", NJD: "#CE1126", NYI: "#00539B", NYR: "#0038A8",
   OTT: "#C52032", PHI: "#F74902", PIT: "#FCB514", SEA: "#99D9D9",
-  SJS: "#006D75", STL: "#002F87", TBL: "#FFFFFF", TOR: "#003E7E",
+  SJS: "#006D75", STL: "#002F87", TBL: "#002868", TOR: "#003E7E",
   VAN: "#00843D", VGK: "#B4975A", WSH: "#C8102E", WPG: "#004C97",
   UTA: "#6CACE4", UTH: "#6CACE4",
   // short-code aliases
-  LA: "#A2AAAD", NJ: "#CE1126", SJ: "#006D75", TB: "#FFFFFF",
+  LA: "#A2AAAD", NJ: "#CE1126", SJ: "#006D75", TB: "#002868",
 };
 
 export const TEAM_SECONDARY: Record<string, string> = {
@@ -95,9 +95,9 @@ export const TEAM_SECONDARY: Record<string, string> = {
   FLA: "#041E42", LAK: "#111111", MIN: "#DDAF38", MTL: "#192168",
   NSH: "#041E42", NJD: "#000000", NYI: "#F47D20", NYR: "#CE1126",
   OTT: "#C2912C", PHI: "#000000", PIT: "#000000", SEA: "#001628",
-  SJS: "#EA7200", STL: "#FCB514", TBL: "#002868", TOR: "#FFFFFF",
+  SJS: "#EA7200", STL: "#FCB514", TBL: "#FFFFFF", TOR: "#FFFFFF",
   VAN: "#001F5B", VGK: "#333F42", WSH: "#041E42", WPG: "#AC162C",
   UTA: "#010101", UTH: "#010101",
   // short-code aliases
-  LA: "#111111", NJ: "#000000", SJ: "#EA7200", TB: "#002868",
+  LA: "#111111", NJ: "#000000", SJ: "#EA7200", TB: "#FFFFFF",
 };
