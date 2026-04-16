@@ -31,6 +31,7 @@ export function fmtPos(pos: string | null | undefined): string {
 
 // TBL _light is the blue logo; _dark is the white one — use dark on our dark UI
 // UTA _dark is the black logo — use light (colored) on our dark UI
+// Note: TEAM_COLORS.TBL uses #0065B3 (medium blue, visible on dark bg) not #002868 (navy, too dark)
 const DARK_VARIANT = new Set(["TBL", "TB"]);
 
 export function logoUrl(abbrev: string): string {
@@ -81,11 +82,11 @@ export const TEAM_COLORS: Record<string, string> = {
   FLA: "#C8102E", LAK: "#A2AAAD", MIN: "#154734", MTL: "#AF1E2D",
   NSH: "#FFB81C", NJD: "#CE1126", NYI: "#00539B", NYR: "#0038A8",
   OTT: "#C52032", PHI: "#F74902", PIT: "#FCB514", SEA: "#99D9D9",
-  SJS: "#006D75", STL: "#002F87", TBL: "#002868", TOR: "#003E7E",
+  SJS: "#006D75", STL: "#002F87", TBL: "#0065B3", TOR: "#003E7E",
   VAN: "#00843D", VGK: "#B4975A", WSH: "#C8102E", WPG: "#004C97",
   UTA: "#6CACE4", UTH: "#6CACE4",
   // short-code aliases
-  LA: "#A2AAAD", NJ: "#CE1126", SJ: "#006D75", TB: "#002868",
+  LA: "#A2AAAD", NJ: "#CE1126", SJ: "#006D75", TB: "#0065B3",
 };
 
 export const TEAM_SECONDARY: Record<string, string> = {
