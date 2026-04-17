@@ -4518,12 +4518,6 @@ async def game_highlights(game_id: int) -> dict:
 # /clip/resolve/{clip_id} — Brightcove → direct HLS (ad-free)
 # ===========================================================================
 
-_BC_ACCOUNT   = "6415718365001"
-_BC_PLAYER    = "EXtG1xJ7H_default"
-_clip_resolve_cache: dict[str, tuple[float, str | None]] = {}
-_CLIP_CACHE_TTL = 3600.0   # 1 hour — Brightcove signed URLs last ~4 h
-
-
 @app.get("/clip/resolve/{clip_id}")
 async def resolve_clip(clip_id: str) -> dict:
     """Return the best direct HLS URL for a Brightcove clip.
@@ -4534,65 +4528,10 @@ async def resolve_clip(clip_id: str) -> dict:
     Returns ``{"url": "<m3u8>"}`` on success, ``{"url": null, "error": "..."}``
     on failure.
     """
-    import time as _t
-
-    cached = _clip_resolve_cache.get(clip_id)
-    if cached and (_t.monotonic() - cached[0]) < _CLIP_CACHE_TTL:
-        return {"url": cached[1]}
-
-    bc_url = (
-        f"https://players.brightcove.net/{_BC_ACCOUNT}/"
-        f"{_BC_PLAYER}/index.html?videoId={clip_id}"
-    )
-
+    from dashboard.api.clip_resolver import resolve_brightcove_hls
     try:
-        import yt_dlp as _yt_dlp
-
-        ydl_opts = {
-            "quiet":        True,
-            "no_warnings":  True,
-            "skip_download": True,
-            # Prefer HLS video+audio combo; avoid audio-only streams
-            "format": "best[ext=mp4][vcodec!=none]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best",
-        }
-
-        loop = asyncio.get_event_loop()
-
-        def _extract() -> str | None:
-            with _yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(bc_url, download=False)
-            fmts = info.get("formats") or []
-
-            # Use the master HLS manifest_url from any video+audio HLS format.
-            # The master playlist contains both video and audio renditions; HLS.js
-            # selects them automatically.  Using a specific variant URL loses the
-            # audio track (Brightcove separates them in the manifest).
-            hls_fmts = [
-                f for f in fmts
-                if (f.get("protocol") or "").startswith("m3u8")
-                and f.get("vcodec") not in (None, "none")
-                and f.get("manifest_url")
-            ]
-            if hls_fmts:
-                hls_fmts.sort(key=lambda f: f.get("tbr") or f.get("vbr") or 0, reverse=True)
-                return hls_fmts[0]["manifest_url"]   # master playlist → audio included
-
-            # Fallback: any HLS format with a manifest_url
-            any_hls = [f for f in fmts if f.get("manifest_url")]
-            if any_hls:
-                return any_hls[0]["manifest_url"]
-
-            # Fallback: direct mp4
-            mp4_fmts = [f for f in fmts if f.get("ext") == "mp4" and f.get("vcodec") not in (None, "none")]
-            if mp4_fmts:
-                mp4_fmts.sort(key=lambda f: f.get("tbr") or 0, reverse=True)
-                return mp4_fmts[0].get("url")
-            return info.get("url")
-
-        url = await loop.run_in_executor(None, _extract)
-        _clip_resolve_cache[clip_id] = (_t.monotonic(), url)
+        url = await resolve_brightcove_hls(clip_id)
         return {"url": url}
-
     except Exception as exc:
         return {"url": None, "error": str(exc)}
 
@@ -5943,6 +5882,169 @@ async def cv_positions(game_id: int):
         }
     except Exception as exc:
         return {"game_id": game_id, "tracks": [], "error": str(exc)}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# One-shot clip CV — post-game highlight processing
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Endpoints:
+#   POST /api/cv/clip/{clip_id}         — kick off background processing
+#   GET  /api/cv/clip/{clip_id}         — job status (processing | ready | error)
+#   GET  /api/cv/clip/{clip_id}/frames  — paginated per-frame detections
+#
+# Jobs run in a FastAPI BackgroundTask thread and persist results as JSON under
+# data/cv_clip_cache/<clip_id>.json.  Subsequent POSTs for a ready clip return
+# immediately without re-processing.  Status is tracked in a module-level dict
+# guarded by a lock.
+
+import threading as _threading_clip
+import logging as _logging_clip
+
+_clip_log = _logging_clip.getLogger("cv_clip_api")
+_clip_jobs: "dict[str, object]" = {}
+_clip_jobs_lock = _threading_clip.Lock()
+
+
+def _clip_job_get(clip_id: str):
+    with _clip_jobs_lock:
+        return _clip_jobs.get(clip_id)
+
+
+def _clip_job_set(clip_id: str, status_obj) -> None:
+    with _clip_jobs_lock:
+        _clip_jobs[clip_id] = status_obj
+
+
+async def _run_clip_job(clip_id: str, hls_url: str, game_id: int | None):
+    """Background task — resolve HLS (if needed) and run the clip pipeline."""
+    from dashboard.api.cv_clip import process_clip
+    status = _clip_job_get(clip_id)
+    if status is None:
+        return
+    try:
+        # process_clip is synchronous + CPU-heavy — run in a thread so we don't
+        # block the event loop.
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: process_clip(clip_id=clip_id, hls_url=hls_url, status=status, game_id=game_id),
+        )
+    except Exception as exc:
+        import traceback
+        status.update(
+            status="error",
+            message=f"{type(exc).__name__}: {exc}",
+            finished_at=_time.time(),
+        )
+        _clip_log.error("[cv-clip:%s] job failed: %s\n%s", clip_id, exc, traceback.format_exc())
+
+
+@app.post("/api/cv/clip/{clip_id}")
+async def cv_clip_start(clip_id: str, game_id: int | None = None):
+    """Kick off CV processing for a Brightcove highlight clip.
+
+    Resolves the clip's HLS URL via the shared resolver, then launches a
+    background task that runs detect → track → homography end-to-end and writes
+    ``data/cv_clip_cache/<clip_id>.json``.
+
+    Response values for ``status``:
+      ``ready``       — cache already exists, no work to do
+      ``processing``  — job is running (just started, or already in flight)
+      ``error``       — resolution failed; see ``message``
+    """
+    from dashboard.api.cv_clip import ClipJobStatus, load_cache
+    from dashboard.api.clip_resolver import resolve_brightcove_hls
+
+    # Fast path — cache already present
+    cached = load_cache(clip_id)
+    if cached is not None:
+        return {
+            "clip_id":      clip_id,
+            "status":       "ready",
+            "total_frames": cached.get("total_frames", 0),
+            "duration_s":   cached.get("duration_s", 0.0),
+        }
+
+    # Already running?
+    existing = _clip_job_get(clip_id)
+    if existing is not None and existing.status == "processing":
+        return {"clip_id": clip_id, **existing.to_dict()}
+
+    hls_url = await resolve_brightcove_hls(clip_id)
+    if not hls_url:
+        return {
+            "clip_id": clip_id,
+            "status":  "error",
+            "message": "failed to resolve HLS URL for clip",
+        }
+
+    status = ClipJobStatus()
+    _clip_job_set(clip_id, status)
+
+    # Launch in background — do not await
+    asyncio.create_task(_run_clip_job(clip_id, hls_url, game_id))
+
+    return {"clip_id": clip_id, **status.to_dict()}
+
+
+@app.get("/api/cv/clip/{clip_id}")
+async def cv_clip_status(clip_id: str):
+    """Return the current processing status for *clip_id*.
+
+    ``ready`` indicates the cache file exists and ``GET .../frames`` will work.
+    """
+    from dashboard.api.cv_clip import load_cache
+
+    cached = load_cache(clip_id)
+    if cached is not None:
+        return {
+            "clip_id":      clip_id,
+            "status":       "ready",
+            "frames_done":  cached.get("total_frames", 0),
+            "total_frames": cached.get("total_frames", 0),
+            "duration_s":   cached.get("duration_s", 0.0),
+        }
+
+    existing = _clip_job_get(clip_id)
+    if existing is None:
+        return {"clip_id": clip_id, "status": "unknown"}
+    return {"clip_id": clip_id, **existing.to_dict()}
+
+
+@app.get("/api/cv/clip/{clip_id}/frames")
+async def cv_clip_frames(
+    clip_id: str,
+    from_seq: int = 0,
+    limit:    int = 500,
+):
+    """Return a paginated slice of per-frame detections from the cache.
+
+    ``frames`` contains up to *limit* entries starting at ``frame_seq >= from_seq``.
+    ``next_from_seq`` is the seq to use for the next page, or ``null`` when done.
+    Returns 404 if the cache is not yet ready.
+    """
+    from fastapi import HTTPException
+    from dashboard.api.cv_clip import load_cache
+
+    cached = load_cache(clip_id)
+    if cached is None:
+        raise HTTPException(status_code=404, detail="clip not ready")
+
+    all_frames = cached.get("frames", [])
+    limit = max(1, min(int(limit), 2000))
+    slc = [f for f in all_frames if int(f.get("frame_seq", -1)) >= int(from_seq)][:limit]
+    last_seq = slc[-1]["frame_seq"] if slc else None
+    next_from = (int(last_seq) + 1) if (last_seq is not None and
+                                         int(last_seq) + 1 < cached.get("total_frames", 0)) else None
+    return {
+        "clip_id":       clip_id,
+        "fps":           cached.get("fps"),
+        "total_frames":  cached.get("total_frames", 0),
+        "duration_s":    cached.get("duration_s", 0.0),
+        "frames":        slc,
+        "next_from_seq": next_from,
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
