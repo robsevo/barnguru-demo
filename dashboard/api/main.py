@@ -6331,6 +6331,71 @@ async def cv_shot_event(game_id: int, body: CvShotEventRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# ── Feature 16.6 bridge — in-browser CV observations ingestion ───────────
+#
+# Desktop clients run the YOLO player detector in-browser (useCvLiveReplay)
+# and batch ~5s windows of tracked positions + derived events. They POST the
+# batch here. We append to NDJSON per-game-per-day for offline aggregation
+# into per-player action counts that feed player_behavior_net (Feature 2.22).
+#
+# This is an append-only ingestion log. No reads from here in real time —
+# a nightly aggregator reduces raw observations into training features.
+
+
+class CvLiveObservationsRequest(_BaseModel):
+    """Batch of CV observation bundles from one in-browser client session."""
+    game_id:   int
+    client_id: str
+    bundles:   list[dict]   # flexible shape; frontend CvObservationBundle
+
+
+@app.post("/api/cv/live/observations")
+async def cv_live_observations(body: CvLiveObservationsRequest):
+    """Append a batch of in-browser CV observations to NDJSON for offline aggregation.
+
+    Each bundle captures ~1 s of tracked state: scene kind, player count,
+    per-track positions + velocities, and detected events (pass/shot, scene
+    change). We persist raw — aggregation happens nightly in a separate
+    pipeline so the ingestion endpoint stays fast and non-blocking.
+    """
+    from fastapi import HTTPException
+    n = len(body.bundles)
+    if n == 0:
+        return {"accepted": 0, "game_id": body.game_id}
+    if n > 120:
+        raise HTTPException(status_code=413, detail="too many bundles in batch")
+    if not body.client_id or len(body.client_id) > 128:
+        raise HTTPException(status_code=400, detail="invalid client_id")
+
+    import json
+    obs_dir = _GRETZKY_DATA_DIR / "cv_live_observations" / str(body.game_id)
+    obs_dir.mkdir(parents=True, exist_ok=True)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    path = obs_dir / f"{today}.ndjson"
+
+    t_wall = datetime.now(timezone.utc).isoformat()
+    lines = [
+        json.dumps({
+            "t_wall":    t_wall,
+            "game_id":   body.game_id,
+            "client_id": body.client_id,
+            **b,
+        }, separators=(",", ":"))
+        for b in body.bundles
+    ]
+
+    def _append():
+        with path.open("a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+
+    await asyncio.to_thread(_append)
+
+    return {
+        "accepted": n,
+        "game_id":  body.game_id,
+    }
+
+
 @app.get("/api/cv/tracking-games")
 async def cv_tracking_games():
     """List all game_ids that have tracking data in the accumulator."""
