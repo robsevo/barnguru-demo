@@ -147,6 +147,9 @@ COMMANDS: list[Cmd] = [
     Cmd("retrain-xg-tracking", "phase16",
         "Retrain xG model with CV tracking features (screen_count, defender_dist, goalie_displacement); gate AUC (Feature 16.10)",
         "scripts.retrain_xg_tracking"),
+    Cmd("aggregate-cv-obs",  "phase16",
+        "Reduce in-browser CV observation NDJSON into per-track summaries (Feature 16 bridge)",
+        "scripts.aggregate_cv_observations"),
 ]
 
 
