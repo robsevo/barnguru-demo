@@ -38,6 +38,15 @@ dev = [
     "respx>=0.21",
 ]
 
+[tool.uv]
+# ultralytics hard-depends on opencv-python, which needs libGL.so.1 at
+# runtime. On the headless VPS we only want opencv-python-headless (same
+# cv2 module, no GUI deps). The impossible marker prunes opencv-python
+# from the resolution without removing the cv2 import path.
+override-dependencies = [
+    "opencv-python ; sys_platform == 'Origin-never'",
+]
+
 [tool.uv.sources]
 torch = { index = "pytorch-cpu" }
 torchvision = { index = "pytorch-cpu" }
