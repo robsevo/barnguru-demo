@@ -1073,12 +1073,20 @@ async def standings() -> dict:
     """
     from data.nhl_client import NHLClient, NHLApiError
 
-    from datetime import date as _d
-    today = _d.today().isoformat()
+    from datetime import date as _d, timedelta as _td
+    today = _d.today()
 
+    # During playoffs / offseason /v1/standings/<today> returns {"standings":[]}.
+    # Walk back up to 14 days until we find a date with real records so the
+    # frontend keeps rendering end-of-regular-season standings.
+    raw: dict = {"standings": []}
     try:
         async with NHLClient() as client:
-            raw = await client._get(client._web, f"/v1/standings/{today}")
+            for back in range(15):
+                date_str = (today - _td(days=back)).isoformat()
+                raw = await client._get(client._web, f"/v1/standings/{date_str}")
+                if raw.get("standings"):
+                    break
     except NHLApiError as exc:
         return {"standings": [], "error": str(exc)}
     except Exception as exc:  # noqa: BLE001
