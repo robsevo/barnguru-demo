@@ -7702,7 +7702,22 @@ async def iptv_debug():
         return_exceptions=True,
     )
     accounts = [r if isinstance(r, dict) else {"error": str(r)} for r in results]
-    return {"accounts": accounts}
+
+    # Expose the relay config so we can verify IPTV_LOCAL_PROXY_URL matches the
+    # laptop's current ngrok tunnel without leaking the raw token value.
+    tunnel = (os.environ.get("IPTV_LOCAL_PROXY_URL") or "").rstrip("/")
+    sample_in  = "http://an upstream host.ddns.net:80/live/foo/bar/123.m3u8"
+    sample_out = _rewrite_iptv_url(sample_in)
+    return {
+        "accounts": accounts,
+        "tunnel": {
+            "url":        tunnel or None,
+            "token_set":  bool(os.environ.get("IPTV_RELAY_TOKEN")),
+            "rewrite_in":  sample_in,
+            "rewrite_out": sample_out,
+            "is_rewritten": sample_out != sample_in,
+        },
+    }
 
 
 # ===========================================================================
