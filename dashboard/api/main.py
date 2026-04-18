@@ -7190,6 +7190,30 @@ _upstream_ACCOUNTS: list[tuple[str, str, int, str, str]] = [
     ("lunar",       "lunar.pm",            8080, "JeffOglesby",           "Marriage101"),
 ]
 
+# Residential relay — scripts/iptv_relay.py run on a laptop/Pi and exposed via
+# ngrok. When IPTV_LOCAL_PROXY_URL is set, every stream URL we hand to the
+# browser is rewritten to go through that tunnel (upstream providers block VPS
+# IPs; the relay punches through from a residential address). Empty ⇒
+# direct-to-provider fallback, same as before this release.
+_upstream_HOSTS: frozenset[str] = frozenset(h for _, h, *_ in _upstream_ACCOUNTS)
+
+
+def _rewrite_iptv_url(url: str) -> str:
+    """Route an upstream stream URL through the local residential relay, if configured."""
+    tunnel = (os.environ.get("IPTV_LOCAL_PROXY_URL") or "").rstrip("/")
+    if not tunnel or not url.startswith("http"):
+        return url
+    try:
+        host = urlparse(url).hostname or ""
+    except Exception:
+        return url
+    if host.lower() not in _upstream_HOSTS:
+        return url
+    endpoint = "m3u8" if ".m3u8" in url.lower().split("?", 1)[0] else "ts"
+    token    = os.environ.get("IPTV_RELAY_TOKEN") or ""
+    tq       = f"&t={quote(token, safe='')}" if token else ""
+    return f"{tunnel}/{endpoint}?u={quote(url, safe='')}{tq}"
+
 
 async def _fetch_upstream_channels(
     label: str, host: str, port: int, username: str, password: str,
@@ -7230,7 +7254,7 @@ async def _fetch_upstream_channels(
             ):
                 results.append({
                     "title":      f"{ch_name} ({label})",
-                    "url":        stream_url,
+                    "url":        _rewrite_iptv_url(stream_url),
                     "source":     "upstream",
                     "feed":       "iptv",
                     "priority":   1,
