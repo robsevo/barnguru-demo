@@ -5944,7 +5944,7 @@ async def _run_clip_job(clip_id: str, hls_url: str, game_id: int | None):
         _clip_log.error("[cv-clip:%s] job failed: %s\n%s", clip_id, exc, tb)
 
 
-@app.post("/api/cv/clip/{clip_id}")
+@app.post("/cv/clip/{clip_id}")
 async def cv_clip_start(clip_id: str, game_id: int | None = None):
     """Kick off CV processing for a Brightcove highlight clip.
 
@@ -5992,7 +5992,7 @@ async def cv_clip_start(clip_id: str, game_id: int | None = None):
     return {"clip_id": clip_id, **status.to_dict()}
 
 
-@app.get("/api/cv/clip/{clip_id}")
+@app.get("/cv/clip/{clip_id}")
 async def cv_clip_status(clip_id: str):
     """Return the current processing status for *clip_id*.
 
@@ -6016,7 +6016,7 @@ async def cv_clip_status(clip_id: str):
     return {"clip_id": clip_id, **existing.to_dict()}
 
 
-@app.get("/api/cv/clip/{clip_id}/frames")
+@app.get("/cv/clip/{clip_id}/frames")
 async def cv_clip_frames(
     clip_id: str,
     from_seq: int = 0,
