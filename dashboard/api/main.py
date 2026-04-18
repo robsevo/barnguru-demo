@@ -5932,12 +5932,16 @@ async def _run_clip_job(clip_id: str, hls_url: str, game_id: int | None):
         )
     except Exception as exc:
         import traceback
+        tb = traceback.format_exc()
+        # Trim the traceback to the last ~4 frames so it fits in the JSON
+        # status payload without flooding the response.
+        tb_short = "\n".join(tb.strip().splitlines()[-8:])
         status.update(
             status="error",
-            message=f"{type(exc).__name__}: {exc}",
+            message=f"{type(exc).__name__}: {exc}\n---\n{tb_short}",
             finished_at=_time.time(),
         )
-        _clip_log.error("[cv-clip:%s] job failed: %s\n%s", clip_id, exc, traceback.format_exc())
+        _clip_log.error("[cv-clip:%s] job failed: %s\n%s", clip_id, exc, tb)
 
 
 @app.post("/api/cv/clip/{clip_id}")
