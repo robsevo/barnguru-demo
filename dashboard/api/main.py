@@ -906,6 +906,8 @@ async def schedule(date: str = "now") -> dict:
                 "home_on_pp":      home_on_pp,
                 "away_skaters":    away_skaters,
                 "home_skaters":    home_skaters,
+                "game_type":       g.get("gameType"),
+                "series_status":   g.get("seriesStatus"),
             })
 
     return {"games": normalised}
@@ -941,6 +943,9 @@ async def goal_feed() -> dict:
             landing = await client.get_landing(game_id)
         except Exception:
             return []
+
+        series_status = landing.get("seriesStatus")
+        game_type     = landing.get("gameType")
 
         out: list[dict] = []
         scoring = (landing.get("summary") or {}).get("scoring") or []
@@ -998,6 +1003,8 @@ async def goal_feed() -> dict:
                     "strength":    strength,
                     "scored_at":   sort_key,  # UTC epoch approx: game_start + period_offset + time_in_period
                     "_sort":       sort_key,
+                    "game_type":    game_type,
+                    "series_status": series_status,
                 })
         return out
 
@@ -1526,6 +1533,212 @@ async def goalie_stats() -> dict:
 
     payload = {"categories": dict(pairs)}
     _cache_set("goalie-stats", payload)
+    return payload
+
+
+@app.get("/skater-stats-playoffs")
+async def skater_stats_playoffs() -> dict:
+    """NHL skater stats leaders for the current playoffs (gameTypeId=3)."""
+    cached = _cache_get("skater-stats-playoffs")
+    if cached is not None:
+        return cached  # type: ignore[return-value]
+
+    CAT_MAP: list[tuple[str, str, str]] = [
+        ("goals",            "goals",            "goals"),
+        ("assists",          "assists",           "assists"),
+        ("points",           "points",            "points"),
+        ("plusMinus",        "plusMinus",         "plusMinus"),
+        ("penaltyMinutes",   "penaltyMinutes",    "penaltyMinutes"),
+        ("powerPlayGoals",   "ppGoals",           "ppGoals"),
+        ("gameWinningGoals", "gameWinningGoals",  "gameWinningGoals"),
+        ("toi",              "timeOnIcePerGame",  "timeOnIcePerGame"),
+        ("shots",            "shots",             "shots"),
+        ("shootingPctg",     "shootingPct",       "shootingPct"),
+    ]
+    BASE = "https://api.nhle.com/stats/rest/en/skater/summary"
+    _UA  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+    # Playoff shot / TOI floors are lower — small series samples.
+    EXTRA: dict[str, str] = {
+        "shootingPctg": " and shots >= 10",
+        "toi":          " and gamesPlayed >= 3",
+    }
+
+    async def _fetch_cat(client: httpx.AsyncClient, result_key: str, sort_field: str, value_field: str) -> tuple[str, list]:
+        try:
+            extra = EXTRA.get(result_key, "")
+            r = await client.get(
+                BASE,
+                params={
+                    "cayenneExp": f"seasonId=20252026 and gameTypeId=3{extra}",
+                    "sort":       sort_field,
+                    "dir":        "DESC",
+                    "limit":      50,
+                },
+            )
+            if r.status_code != 200:
+                return result_key, []
+            rows = r.json().get("data", [])
+            leaders = []
+            for rank, p in enumerate(rows, 1):
+                pid  = p.get("playerId", 0)
+                team = (p.get("teamAbbrevs") or "").split(",")[0].strip()
+                headshot = f"https://assets.nhle.com/mugs/nhl/20252026/{team}/{pid}.png" if team and pid else ""
+                full = p.get("skaterFullName", "")
+                parts = full.split(" ", 1)
+                leaders.append({
+                    "rank":       rank,
+                    "id":         pid,
+                    "name":       full,
+                    "first_name": parts[0] if parts else "",
+                    "last_name":  parts[1] if len(parts) > 1 else "",
+                    "team":       team,
+                    "position":   p.get("positionCode", ""),
+                    "number":     None,
+                    "headshot":   headshot,
+                    "value":      p.get(value_field),
+                })
+            return result_key, leaders
+        except Exception:  # noqa: BLE001
+            return result_key, []
+
+    async with httpx.AsyncClient(follow_redirects=True, timeout=15.0, headers={"User-Agent": _UA}) as client:
+        pairs = await asyncio.gather(*[_fetch_cat(client, rk, sf, vf) for rk, sf, vf in CAT_MAP])
+
+    payload = {"categories": dict(pairs)}
+    _cache_set("skater-stats-playoffs", payload)
+    return payload
+
+
+@app.get("/goalie-stats-playoffs")
+async def goalie_stats_playoffs() -> dict:
+    """NHL goalie stats leaders for the current playoffs (gameTypeId=3)."""
+    cached = _cache_get("goalie-stats-playoffs")
+    if cached is not None:
+        return cached  # type: ignore[return-value]
+
+    # (result_key, sort_field, value_field)
+    CAT_MAP: list[tuple[str, str, str]] = [
+        ("wins",                "wins",             "wins"),
+        ("savePctg",            "savePct",          "savePct"),
+        ("goalsAgainstAverage", "goalsAgainstAverage", "goalsAgainstAverage"),
+        ("shutouts",            "shutouts",         "shutouts"),
+    ]
+    BASE = "https://api.nhle.com/stats/rest/en/goalie/summary"
+    _UA  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+    EXTRA: dict[str, str] = {
+        "savePctg":            " and gamesPlayed >= 2",
+        "goalsAgainstAverage": " and gamesPlayed >= 2",
+    }
+
+    async def _fetch_cat(client: httpx.AsyncClient, rk: str, sf: str, vf: str) -> tuple[str, list]:
+        try:
+            extra = EXTRA.get(rk, "")
+            direction = "ASC" if rk == "goalsAgainstAverage" else "DESC"
+            r = await client.get(
+                BASE,
+                params={
+                    "cayenneExp": f"seasonId=20252026 and gameTypeId=3{extra}",
+                    "sort":       sf,
+                    "dir":        direction,
+                    "limit":      40,
+                },
+            )
+            if r.status_code != 200:
+                return rk, []
+            rows = r.json().get("data", [])
+            leaders = []
+            for rank, p in enumerate(rows, 1):
+                pid  = p.get("playerId", 0)
+                team = (p.get("teamAbbrevs") or "").split(",")[0].strip()
+                headshot = f"https://assets.nhle.com/mugs/nhl/20252026/{team}/{pid}.png" if team and pid else ""
+                full = p.get("goalieFullName", "")
+                parts = full.split(" ", 1)
+                leaders.append({
+                    "rank":       rank,
+                    "id":         pid,
+                    "name":       full,
+                    "first_name": parts[0] if parts else "",
+                    "last_name":  parts[1] if len(parts) > 1 else "",
+                    "team":       team,
+                    "position":   "G",
+                    "number":     None,
+                    "headshot":   headshot,
+                    "value":      p.get(vf),
+                })
+            return rk, leaders
+        except Exception:  # noqa: BLE001
+            return rk, []
+
+    async with httpx.AsyncClient(follow_redirects=True, timeout=15.0, headers={"User-Agent": _UA}) as client:
+        pairs = await asyncio.gather(*[_fetch_cat(client, rk, sf, vf) for rk, sf, vf in CAT_MAP])
+
+    payload = {"categories": dict(pairs)}
+    _cache_set("goalie-stats-playoffs", payload)
+    return payload
+
+
+@app.get("/playoff-bracket")
+async def playoff_bracket(season: str = "20252026") -> dict:
+    """NHL playoff bracket (carousel) for a given season.
+
+    Returns normalized rounds → series with {letter, round, topSeed, bottomSeed,
+    wins, neededToWin, winningTeamId, losingTeamId}. Always includes teams when
+    NHL API has set the matchup; wins default to 0 before round 1 starts.
+    """
+    cache_key = f"playoff-bracket:{season}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached  # type: ignore[return-value]
+
+    _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15.0, headers={"User-Agent": _UA}) as client:
+            r = await client.get(f"https://api-web.nhle.com/v1/playoff-series/carousel/{season}")
+            if r.status_code != 200:
+                return {"rounds": [], "currentRound": 0, "error": f"status={r.status_code}"}
+            raw = r.json()
+    except Exception as exc:  # noqa: BLE001
+        return {"rounds": [], "currentRound": 0, "error": str(exc)}
+
+    rounds_out: list[dict] = []
+    for rnd in raw.get("rounds") or []:
+        series_out: list[dict] = []
+        for s in rnd.get("series") or []:
+            top = s.get("topSeed")    or {}
+            bot = s.get("bottomSeed") or {}
+            series_out.append({
+                "letter":         s.get("seriesLetter"),
+                "round":          s.get("roundNumber"),
+                "label":          s.get("seriesLabel"),
+                "neededToWin":    s.get("neededToWin", 4),
+                "topSeed": {
+                    "team":    top.get("abbrev"),
+                    "team_id": top.get("id"),
+                    "wins":    top.get("wins", 0),
+                },
+                "bottomSeed": {
+                    "team":    bot.get("abbrev"),
+                    "team_id": bot.get("id"),
+                    "wins":    bot.get("wins", 0),
+                },
+                "winningTeamId":  s.get("winningTeamId"),
+                "losingTeamId":   s.get("losingTeamId"),
+            })
+        rounds_out.append({
+            "round":  rnd.get("roundNumber"),
+            "label":  rnd.get("roundLabel"),
+            "abbrev": rnd.get("roundAbbrev"),
+            "series": series_out,
+        })
+
+    payload = {
+        "season":       raw.get("seasonId", season),
+        "currentRound": raw.get("currentRound", 0),
+        "rounds":       rounds_out,
+    }
+    _cache_set(cache_key, payload)
     return payload
 
 
@@ -4462,6 +4675,8 @@ async def game_centre(game_id: int) -> dict:
         "venue":           (landing.get("venue") or {}).get("default", ""),
         "game_date":       landing.get("gameDate", ""),
         "start_time_utc":  landing.get("startTimeUTC", ""),
+        "game_type":       landing.get("gameType"),
+        "series_status":   landing.get("seriesStatus"),
         "away": {
             "team":   away_abbrev,
             "score":  away_raw.get("score", 0),

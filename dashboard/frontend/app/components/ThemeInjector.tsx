@@ -115,8 +115,8 @@ export default function ThemeInjector() {
     const [cbr, cbg, cbb] = darkBlend(tintBase, 0.78);
     const [cmr, cmg, cmb] = darkBlend(tintBase, 0.92);
 
-    // Header strip: very dark tint of secondary (cooler/deeper)
-    const [hr, hg, hb] = darkBlend(theme.secondaryColor, 0.88);
+    // Header strip: darker team colour at body-background shade
+    const [hr, hg, hb] = darkBlend(tintBase ?? theme.primaryColor, 0.84);
 
     root.setAttribute("data-team-theme", theme.abbrev);
 

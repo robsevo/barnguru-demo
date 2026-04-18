@@ -3,7 +3,8 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { TEAM_COLORS, TEAM_SECONDARY, logoUrl, fmtPos, normalizePlayerName } from "@/utils/nhl";
+import { TEAM_COLORS, TEAM_SECONDARY, fmtPos, normalizePlayerName } from "@/utils/nhl";
+import TeamLogoLink from "@/components/TeamLogoLink";
 
 interface Leader {
   rank: number;
@@ -44,10 +45,11 @@ interface CalderCategories {
   assists?: Leader[];
 }
 
-type PlayerTab = "skaters" | "goalies" | "calder";
-type SkaterCat = keyof SkaterCategories;
-type GoalieCat = keyof GoalieCategories;
-type CalderCat = keyof CalderCategories;
+type PlayerTab  = "skaters" | "goalies" | "calder";
+type SeasonType = "regular" | "playoffs";
+type SkaterCat  = keyof SkaterCategories;
+type GoalieCat  = keyof GoalieCategories;
+type CalderCat  = keyof CalderCategories;
 
 function fmtValue(value: number | string, cat: string): string {
   if (value === null || value === undefined) return "—";
@@ -114,15 +116,7 @@ function PlayerHeadshot({ src, name, team, size = 32 }: { src: string | null; na
 }
 
 function TeamLogo({ abbrev }: { abbrev: string }) {
-  const [err, setErr] = useState(false);
-  const url = logoUrl(abbrev);
-  if (err) return <span className="text-[9px] font-black text-white/20">{abbrev}</span>;
-  return (
-    <img src={url} alt={abbrev} width={28} height={28}
-      style={{ width: 28, height: 28, filter: "drop-shadow(0 0 3px rgba(255,255,255,0.15))" }}
-      className="shrink-0 object-contain"
-      onError={() => setErr(true)} />
-  );
+  return <TeamLogoLink abbrev={abbrev} size={28} />;
 }
 
 function LeaderRow({ leader, cat, maxValue, onPlayerClick }: { leader: Leader; cat: string; maxValue: number; onPlayerClick: (name: string) => void }) {
@@ -206,6 +200,7 @@ export default function StatsPage() {
     router.push(`/players/${encodeURIComponent(normalizePlayerName(name))}`);
   }, [router]);
 
+  const [seasonType, setSeasonType]   = useState<SeasonType>("regular");
   const [playerTab, setPlayerTab]     = useState<PlayerTab>("skaters");
   const [skaterCat, setSkaterCat]     = useState<SkaterCat>("points");
   const [goalieCat, setGoalieCat]     = useState<GoalieCat>("wins");
@@ -241,38 +236,44 @@ export default function StatsPage() {
   }
 
   const fetchSkaters = useCallback(async () => {
-    const stale = swr<SkaterCategories>("gretzky_skater_stats", setSkaterData, setLoadingSkaters);
+    const url = seasonType === "playoffs" ? "/api/skater-stats-playoffs" : "/api/skater-stats";
+    const key = seasonType === "playoffs" ? "gretzky_skater_stats_playoffs" : "gretzky_skater_stats";
+    const stale = swr<SkaterCategories>(key, setSkaterData, setLoadingSkaters);
     if (stale) return; // fresh cache — skip network
     setLoadingSkaters(true); setErrorSkaters(null);
     try {
-      const res = await fetch("/api/skater-stats");
+      const res = await fetch(url);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       const cats = data.categories ?? {};
       setSkaterData(cats);
-      swrSet("gretzky_skater_stats", cats);
+      swrSet(key, cats);
     } catch (e: unknown) {
       setErrorSkaters(e instanceof Error ? e.message : "Failed to load skater stats");
     } finally { setLoadingSkaters(false); }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [seasonType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchGoalies = useCallback(async () => {
-    const stale = swr<GoalieCategories>("gretzky_goalie_stats", setGoalieData, setLoadingGoalies);
+    const url = seasonType === "playoffs" ? "/api/goalie-stats-playoffs" : "/api/goalie-stats";
+    const key = seasonType === "playoffs" ? "gretzky_goalie_stats_playoffs" : "gretzky_goalie_stats";
+    const stale = swr<GoalieCategories>(key, setGoalieData, setLoadingGoalies);
     if (stale) return;
     setLoadingGoalies(true); setErrorGoalies(null);
     try {
-      const res = await fetch("/api/goalie-stats");
+      const res = await fetch(url);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       const cats = data.categories ?? {};
       setGoalieData(cats);
-      swrSet("gretzky_goalie_stats", cats);
+      swrSet(key, cats);
     } catch (e: unknown) {
       setErrorGoalies(e instanceof Error ? e.message : "Failed to load goalie stats");
     } finally { setLoadingGoalies(false); }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [seasonType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchCalder = useCallback(async () => {
+    // Calder is regular-season only — no playoff counterpart
+    if (seasonType === "playoffs") return;
     const stale = swr<CalderCategories>("gretzky_calder_race", setCalderData, setLoadingCalder);
     if (stale) return;
     setLoadingCalder(true); setErrorCalder(null);
@@ -286,11 +287,16 @@ export default function StatsPage() {
     } catch (e: unknown) {
       setErrorCalder(e instanceof Error ? e.message : "Failed to load Calder race data");
     } finally { setLoadingCalder(false); }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [seasonType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { fetchSkaters(); }, [fetchSkaters]);
   useEffect(() => { fetchGoalies(); }, [fetchGoalies]);
   useEffect(() => { fetchCalder();  }, [fetchCalder]);
+
+  // If user is on Calder tab and switches to playoffs, bounce back to skaters
+  useEffect(() => {
+    if (seasonType === "playoffs" && playerTab === "calder") setPlayerTab("skaters");
+  }, [seasonType, playerTab]);
 
   useEffect(() => {
     const el = catScrollRef.current;
@@ -343,7 +349,6 @@ export default function StatsPage() {
             ← GRTZKY
           </Link>
           <h1 className="text-[34px] font-black tracking-[0.08em] uppercase text-white leading-none">Stats Leaders</h1>
-          <p className="text-[10px] text-white/38 mt-1">2025–26 NHL Season</p>
         </div>
         <button onClick={() => playerTab === "skaters" ? fetchSkaters() : playerTab === "goalies" ? fetchGoalies() : fetchCalder()}
           className="text-[14px] font-bold text-white/38 hover:text-white/50 transition-colors px-1.5 py-1">
@@ -351,7 +356,19 @@ export default function StatsPage() {
         </button>
       </div>
 
-      {/* Tab toggle */}
+      {/* Season-type toggle (regular ↔ playoffs) — right under header, before player-type tabs */}
+      <div className="flex gap-1 mb-3 flex-wrap">
+        <button onClick={() => { setSeasonType("playoffs"); setPosFilter(new Set()); }}
+          className={`px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wide transition-all ${
+            seasonType === "playoffs" ? "bg-[#fbbf24]/10 text-[#fbbf24] border border-[#fbbf24]/30" : "text-white/30 hover:text-white/50 border border-transparent"
+          }`}>Playoffs</button>
+        <button onClick={() => { setSeasonType("regular"); setPosFilter(new Set()); }}
+          className={`px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wide transition-all ${
+            seasonType === "regular" ? "bg-white/[0.08] text-white/80 border border-white/[0.20]" : "text-white/30 hover:text-white/50 border border-transparent"
+          }`}>2025–26 NHL Season</button>
+      </div>
+
+      {/* Player-type tabs (Skaters / Goalies / Calder) */}
       <div className="flex gap-1 mb-4 flex-wrap">
         <button onClick={() => { setPlayerTab("skaters"); setPosFilter(new Set()); }}
           className={`px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wide transition-all ${
@@ -361,10 +378,12 @@ export default function StatsPage() {
           className={`px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wide transition-all ${
             playerTab === "goalies" ? "bg-[#C9A84C]/10 text-[#C9A84C] border border-[#C9A84C]/25" : "text-white/30 hover:text-white/50 border border-transparent"
           }`}>Goalies</button>
-        <button onClick={() => { setPlayerTab("calder"); setPosFilter(new Set()); }}
-          className={`px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wide transition-all ${
-            playerTab === "calder" ? "bg-[#fbbf24]/10 text-[#fbbf24] border border-[#fbbf24]/30" : "text-white/30 hover:text-white/50 border border-transparent"
-          }`}>🏆 Calder Race</button>
+        {seasonType === "regular" && (
+          <button onClick={() => { setPlayerTab("calder"); setPosFilter(new Set()); }}
+            className={`px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wide transition-all ${
+              playerTab === "calder" ? "bg-[#fbbf24]/10 text-[#fbbf24] border border-[#fbbf24]/30" : "text-white/30 hover:text-white/50 border border-transparent"
+            }`}>Calder Race</button>
+        )}
       </div>
 
       {/* Category tabs */}

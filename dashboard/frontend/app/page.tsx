@@ -108,19 +108,19 @@ export default function LandingPage() {
           </div>
         </Link>
 
-        {/* Standings card */}
-        <Link href="/standings" className="group">
+        {/* Playoff Tree card — opens standings /tree view with live bracket */}
+        <Link href="/standings?view=tree" className="group">
           <div className="relative h-44 rounded-2xl border border-[#fbbf24]/15 bg-[#fbbf24]/[0.02] hover:bg-[#fbbf24]/[0.05] hover:border-[#fbbf24]/30 transition-all duration-200 p-6 flex flex-col justify-between overflow-hidden shadow-[0_4px_24px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(220,225,230,0.08)]">
             <div className="absolute -top-8 -right-8 w-40 h-40 rounded-full bg-[#fbbf24]/8 blur-2xl pointer-events-none group-hover:bg-[#fbbf24]/15 transition-all duration-300" />
             <div>
-              <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#fbbf24]/40 block mb-3">Playoff Race</span>
+              <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#fbbf24]/40 block mb-3">Live Playoff Bracket</span>
               <h2 className="text-[28px] font-black tracking-[0.08em] uppercase text-white/80 leading-none">
-                Standings
+                Playoff<br />Tree
               </h2>
             </div>
             <div className="flex items-end justify-between">
               <p className="text-[11px] text-white/30 leading-relaxed max-w-[160px]">
-                Division standings, playoff picture, and in-the-hunt tracker.
+                Live playoff bracket with series scores, plus race and standings.
               </p>
               <span className="text-[#fbbf24]/30 group-hover:text-[#fbbf24]/70 text-xl transition-all duration-200 group-hover:translate-x-1">→</span>
             </div>

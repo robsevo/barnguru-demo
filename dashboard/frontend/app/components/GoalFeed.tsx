@@ -2,12 +2,27 @@
 
 import { useEffect, useRef, useState } from "react";
 import { NHL_CODE, TEAM_COLORS, TEAM_SECONDARY, STRENGTH_STYLE } from "@/utils/nhl";
+import TeamLogoLink from "@/components/TeamLogoLink";
+
+interface SeriesStatus {
+  round?: number;
+  seriesAbbrev?: string;
+  seriesLetter?: string;
+  neededToWin?: number;
+  topSeedTeamAbbrev?: string;
+  topSeedWins?: number;
+  bottomSeedTeamAbbrev?: string;
+  bottomSeedWins?: number;
+  gameNumberOfSeries?: number;
+}
 
 interface Goal {
   game_id: number;
   away_team: string;
   home_team: string;
   game_state: string;
+  game_type?: number | null;
+  series_status?: SeriesStatus | null;
   period: number;
   period_label: string;
   time: string;
@@ -20,6 +35,17 @@ interface Goal {
   home_score: number | null;
   strength: string;
   scored_at: number | null;
+}
+
+// Render "FLA 2–1 MTL · Game 3" on a single line; returns null for non-playoff games
+function formatSeriesChip(s: SeriesStatus | null | undefined): string | null {
+  if (!s) return null;
+  const top = s.topSeedTeamAbbrev, bot = s.bottomSeedTeamAbbrev;
+  const tw = s.topSeedWins ?? 0, bw = s.bottomSeedWins ?? 0;
+  if (!top || !bot) return null;
+  const score = `${top} ${tw}–${bw} ${bot}`;
+  const game  = s.gameNumberOfSeries ? ` · G${s.gameNumberOfSeries}` : "";
+  return score + game;
 }
 
 function GoalLight({ state }: { state: "off" | "standby" | "on" }) {
@@ -58,13 +84,7 @@ function seasonYear() {
 }
 
 function TeamLogo({ abbrev, size = 22 }: { abbrev: string; size?: number }) {
-  const [err, setErr] = useState(false);
-  if (err) return <span style={{ width: size, height: size }} className="text-[9px] font-semibold text-white/20 flex items-center">{abbrev.slice(0, 3)}</span>;
-  return (
-    <img src={teamLogoUrl(abbrev)} alt={abbrev} width={size} height={size}
-      style={{ width: size, height: size }} className="shrink-0 object-contain"
-      onError={() => setErr(true)} />
-  );
+  return <TeamLogoLink abbrev={abbrev} size={size} />;
 }
 
 function ScorerHeadshot({ playerId, headshotUrl, team, name, size = 48 }: {
@@ -403,15 +423,22 @@ export default function GoalFeed() {
                             </span>
                             <TeamLogo abbrev={g.home_team} size={22} />
                           </div>
-                          <div className="flex items-center gap-1 text-center">
-                            <p className="text-[13px] font-semibold font-mono text-[#94a3b8] tabular-nums leading-tight">
-                              {g.time}
-                            </p>
-                            <span className="text-white/20 text-[10px]">·</span>
-                            <p className="text-[10px] font-semibold tracking-wider text-white/25 leading-tight">
-                              {g.period_label}
-                            </p>
-                            <span className="text-[8px] text-white/10 group-hover/gc:text-white/30 transition-colors duration-150 ml-0.5">↗</span>
+                          <div className="flex flex-col items-center gap-0.5">
+                            <div className="flex items-center gap-1 text-center">
+                              <p className="text-[13px] font-semibold font-mono text-[#94a3b8] tabular-nums leading-tight">
+                                {g.time}
+                              </p>
+                              <span className="text-white/20 text-[10px]">·</span>
+                              <p className="text-[10px] font-semibold tracking-wider text-white/25 leading-tight">
+                                {g.period_label}
+                              </p>
+                              <span className="text-[8px] text-white/10 group-hover/gc:text-white/30 transition-colors duration-150 ml-0.5">↗</span>
+                            </div>
+                            {formatSeriesChip(g.series_status) && (
+                              <span className="text-[9px] font-black uppercase tracking-[0.14em] px-1.5 py-0.5 rounded border border-[#C9A84C]/25 bg-[#C9A84C]/10 text-[#C9A84C]/80 whitespace-nowrap">
+                                {formatSeriesChip(g.series_status)}
+                              </span>
+                            )}
                           </div>
                         </a>
                       </div>

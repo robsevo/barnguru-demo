@@ -225,3 +225,17 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 [data-team-theme] .shadow-\[0_0_8px_rgba\(201\,168\,76\,0\.15\)\] {
   box-shadow: 0 0 8px rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.15) !important;
 }
+
+/* ─── Team logo link — hover scale-up glow, press scale-down ────────────────
+   Applied via .team-logo-link on TeamLogoLink component                       */
+.team-logo-link {
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+.team-logo-link:hover {
+  transform: scale(1.15);
+  filter: drop-shadow(0 0 7px rgba(255,255,255,0.45)) drop-shadow(0 0 16px rgba(255,255,255,0.18));
+}
+.team-logo-link:active {
+  transform: scale(0.88);
+  transition-duration: 0.07s;
+}

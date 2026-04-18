@@ -1009,7 +1009,7 @@ export default function TeamPage() {
                                   )}
                                 </div>
                               </td>
-                              <td className="px-3 py-2.5 text-[12px] text-white/40 text-center hidden sm:table-cell">{p.position || "—"}</td>
+                              <td className="px-3 py-2.5 text-[12px] text-white/70 text-center hidden sm:table-cell">{p.position || "—"}</td>
                               <td className="px-3 py-2.5 text-[12px] tabular-nums text-white/40 text-center hidden sm:table-cell">{p.age ?? "—"}</td>
                               {/* Mobile: years remaining */}
                               <td className="px-3 py-2.5 text-[12px] tabular-nums text-white/50 text-center sm:hidden">
@@ -1084,7 +1084,7 @@ export default function TeamPage() {
                               <td className="px-3 py-2.5">
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-[13px] font-semibold text-white/70">{d.name}</span>
-                                  {d.position && <span className="text-[9px] text-white/25">{d.position}</span>}
+                                  {d.position && <span className="text-[9px] text-white/60">{d.position}</span>}
                                 </div>
                               </td>
                               <td className="px-3 py-2.5 text-center">
@@ -1260,7 +1260,7 @@ export default function TeamPage() {
                         )}
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-[9px] font-semibold" style={{ color: `${teamColor}99` }}>{normPos(p.position)}</span>
+                        <span className="text-[9px] font-semibold text-white/70">{normPos(p.position)}</span>
                         {p.cap_hit && <span className="text-[9px] tabular-nums text-white/35">{fmtMoney(p.cap_hit)}</span>}
                       </div>
                     </div>
@@ -1301,7 +1301,7 @@ export default function TeamPage() {
                         {p.name.split(" ").slice(-1)[0]}
                       </span>
                       <div className="flex items-center justify-between gap-1">
-                        <span className="text-[9px]" style={{ color: `${accent}80` }}>
+                        <span className="text-[9px] text-white/65">
                           {normPos(p.position)}
                           {statusStr && !isIR(statusStr) ? <> · <span className="text-white/25">{statusStr}</span></> : null}
                         </span>

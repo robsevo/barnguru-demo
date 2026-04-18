@@ -1,8 +1,10 @@
 "use client";
 
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import Link from "next/link";
-import { logoUrl, TEAM_COLORS } from "@/utils/nhl";
+import { useSearchParams } from "next/navigation";
+import { TEAM_COLORS } from "@/utils/nhl";
+import TeamLogoLink from "@/components/TeamLogoLink";
 
 interface StandingRow {
   team: string;
@@ -41,7 +43,28 @@ interface StandingRow {
 
 type SortKey = "pts" | "gp" | "w" | "l" | "otl" | "pts_pct" | "gf" | "ga" | "goal_diff" | "regulation_wins";
 type TabFilter = "League" | "East" | "West" | "Atlantic" | "Metropolitan" | "Central" | "Pacific";
-type ViewMode = "table" | "hunt" | "tree";
+type ViewMode = "tree" | "hunt" | "table";
+
+interface SeriesSeed {
+  team: string;
+  team_id: number;
+  wins: number;
+}
+interface SeriesEntry {
+  letter: string;
+  round: number;
+  label: string;
+  neededToWin: number;
+  topSeed:     SeriesSeed;
+  bottomSeed:  SeriesSeed;
+  winningTeamId?: number | null;
+  losingTeamId?:  number | null;
+}
+interface BracketData {
+  season: number;
+  currentRound: number;
+  rounds: { round: number; label: string; abbrev: string; series: SeriesEntry[] }[];
+}
 
 const DIVISIONS = ["Atlantic", "Metropolitan", "Central", "Pacific"];
 const EAST_DIVS = ["Atlantic", "Metropolitan"];
@@ -54,31 +77,8 @@ function playoffStatus(row: StandingRow): "division" | "wildcard" | "bubble" | "
   return "out";
 }
 
-function TeamLogoImg({ abbrev, size = 20, smSize, linkToTeam = false }: { abbrev: string; size?: number; smSize?: number; linkToTeam?: boolean }) {
-  const [err, setErr] = useState(false);
-  if (err) return <span className="text-[10px] font-black text-white/30" style={{ width: smSize ?? size }}>{abbrev}</span>;
-  const makeImg = (imgSize: number) => (
-    <img src={logoUrl(abbrev)} alt={abbrev} width={imgSize} height={imgSize}
-      style={{ width: imgSize, height: imgSize, filter: "drop-shadow(0 0 4px rgba(255,255,255,0.22))" }}
-      className="object-contain shrink-0"
-      onError={() => setErr(true)} />
-  );
-  const img = smSize ? (
-    <><span className="sm:hidden inline-flex">{makeImg(size)}</span><span className="hidden sm:inline-flex">{makeImg(smSize)}</span></>
-  ) : makeImg(size);
-  if (linkToTeam) {
-    return (
-      <Link
-        href={`/teams/${abbrev}`}
-        onClick={e => e.stopPropagation()}
-        className="shrink-0 hover:opacity-80 transition-opacity"
-        title={`View ${abbrev} team page`}
-      >
-        {img}
-      </Link>
-    );
-  }
-  return img;
+function TeamLogoImg({ abbrev, size = 20, smSize }: { abbrev: string; size?: number; smSize?: number; linkToTeam?: boolean }) {
+  return <TeamLogoLink abbrev={abbrev} size={size} smSize={smSize} />;
 }
 
 function ClinchBadge({ indicator }: { indicator: string }) {
@@ -271,7 +271,27 @@ function PlayoffRaceConference({ name, rows }: { name: string; rows: StandingRow
 
 // ── Playoff Tree / Bracket ─────────────────────────────────────────────────────
 
-function PlayoffBracket({ rows }: { rows: StandingRow[] }) {
+function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: BracketData | null }) {
+
+  // Build a lookup keyed on unordered team-pair so any matchup can find its series record
+  const seriesByPair = new Map<string, SeriesEntry>();
+  (bracket?.rounds ?? []).forEach(round => {
+    round.series.forEach(s => {
+      const a = s.topSeed.team, b = s.bottomSeed.team;
+      const key = [a, b].sort().join("|");
+      seriesByPair.set(key, s);
+    });
+  });
+  function lookupSeries(a?: string, b?: string): SeriesEntry | null {
+    if (!a || !b) return null;
+    return seriesByPair.get([a, b].sort().join("|")) ?? null;
+  }
+  function winsFor(team: string, s: SeriesEntry | null): number | null {
+    if (!s) return null;
+    if (s.topSeed.team    === team) return s.topSeed.wins;
+    if (s.bottomSeed.team === team) return s.bottomSeed.wins;
+    return null;
+  }
 
   function SeedBadge({ seed }: { seed: number | string }) {
     return (
@@ -291,7 +311,15 @@ function PlayoffBracket({ rows }: { rows: StandingRow[] }) {
     );
   }
 
-  function BracketTeamRow({ row, seed, divider }: { row: StandingRow | undefined; seed: number | string; divider?: boolean }) {
+  function BracketTeamRow({ row, seed, divider, wins, neededToWin, eliminated, clinched }: {
+    row: StandingRow | undefined;
+    seed: number | string;
+    divider?: boolean;
+    wins?: number | null;
+    neededToWin?: number;
+    eliminated?: boolean;
+    clinched?: boolean;
+  }) {
     if (!row) return (
       <div className={`flex items-center gap-2 px-3 py-3 min-h-[52px] ${divider ? "border-b border-[#C9A84C]/[0.15]" : ""}`}>
         <SeedBadge seed={seed} />
@@ -301,18 +329,32 @@ function PlayoffBracket({ rows }: { rows: StandingRow[] }) {
       </div>
     );
     const color = TEAM_COLORS[row.team] ?? "#666";
+    const hasSeries = typeof wins === "number";
     return (
-      <div className={`flex items-center gap-2.5 px-3 py-2.5 min-h-[52px] ${divider ? "border-b border-[#C9A84C]/[0.15]" : ""}`}>
+      <div className={`flex items-center gap-2.5 px-3 py-2.5 min-h-[52px] ${divider ? "border-b border-[#C9A84C]/[0.15]" : ""} ${eliminated ? "opacity-50" : ""}`}>
         <SeedBadge seed={seed} />
         <div className="w-0.5 h-7 rounded-full shrink-0" style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}bb` }} />
         <TeamLogoImg abbrev={row.team} size={32} smSize={42} linkToTeam />
         <div className="flex-1 min-w-0">
-          <div className="text-[13px] font-bold text-white/90 leading-none">{row.team}</div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[13px] font-bold text-white/90 leading-none">{row.team}</span>
+            {clinched && <span className="text-[7px] font-black uppercase px-1 py-0.5 rounded border border-[#4ade80]/30 bg-[#4ade80]/10 text-[#4ade80]">Won</span>}
+            {eliminated && <span className="text-[7px] font-black uppercase px-1 py-0.5 rounded border border-white/15 bg-white/[0.04] text-white/35">Out</span>}
+          </div>
           <div className="text-[9px] text-white/30 font-mono mt-0.5">{row.w}-{row.l}-{row.otl}</div>
         </div>
         <div className="text-right shrink-0">
-          <div className="text-[14px] font-black text-white tabular-nums">{row.pts}</div>
-          <div className="text-[7px] text-white/15 font-mono">pts</div>
+          {hasSeries ? (
+            <>
+              <div className={`text-[22px] font-black tabular-nums leading-none ${clinched ? "text-[#fbbf24]" : "text-white"}`}>{wins}</div>
+              <div className="text-[7px] text-white/25 font-mono mt-0.5">of {neededToWin ?? 4}</div>
+            </>
+          ) : (
+            <>
+              <div className="text-[14px] font-black text-white tabular-nums">{row.pts}</div>
+              <div className="text-[7px] text-white/15 font-mono">pts</div>
+            </>
+          )}
         </div>
       </div>
     );
@@ -322,15 +364,42 @@ function PlayoffBracket({ rows }: { rows: StandingRow[] }) {
     top: StandingRow | undefined; topSeed: number | string;
     bottom: StandingRow | undefined; bottomSeed: number | string;
   }) {
+    const series      = lookupSeries(top?.team, bottom?.team);
+    const topWins     = winsFor(top?.team ?? "", series);
+    const bottomWins  = winsFor(bottom?.team ?? "", series);
+    const needed      = series?.neededToWin;
+    const topClinched = series?.winningTeamId != null && top?.team    === series.topSeed.team    && series.winningTeamId === series.topSeed.team_id;
+    const botClinched = series?.winningTeamId != null && bottom?.team === series.bottomSeed.team && series.winningTeamId === series.bottomSeed.team_id;
+    const topOut      = series?.losingTeamId  != null && top?.team    === series.topSeed.team    && series.losingTeamId  === series.topSeed.team_id;
+    const botOut      = series?.losingTeamId  != null && bottom?.team === series.bottomSeed.team && series.losingTeamId  === series.bottomSeed.team_id;
+
+    // Status line for middle divider — "2-1 FLA leads" or "TIED 2-2" or "FLA wins 4-2"
+    let statusText: string | null = null;
+    if (series && top && bottom && typeof topWins === "number" && typeof bottomWins === "number") {
+      if (series.winningTeamId != null) {
+        const winner = series.winningTeamId === series.topSeed.team_id ? top.team : bottom.team;
+        statusText = `${winner} wins ${Math.max(topWins, bottomWins)}–${Math.min(topWins, bottomWins)}`;
+      } else if (topWins === bottomWins) {
+        statusText = topWins === 0 ? "Series tied" : `Tied ${topWins}–${bottomWins}`;
+      } else {
+        const leader = topWins > bottomWins ? top.team : bottom.team;
+        statusText = `${leader} leads ${Math.max(topWins, bottomWins)}–${Math.min(topWins, bottomWins)}`;
+      }
+    }
+
     return (
       <div className="rounded-xl border border-[#C9A84C]/[0.18] bg-gradient-to-b from-white/[0.018] via-white/[0.006] to-transparent overflow-hidden shadow-[0_8px_28px_rgba(0,0,0,0.72),inset_0_1px_0_rgba(220,228,240,0.07)]">
-        <BracketTeamRow row={top} seed={topSeed} divider />
-        <div className="flex items-center gap-2 px-3 py-0.5">
+        <BracketTeamRow row={top} seed={topSeed} divider wins={topWins} neededToWin={needed} clinched={topClinched} eliminated={topOut} />
+        <div className="flex items-center gap-2 px-3 py-1">
           <div className="flex-1 h-px bg-white/[0.04]" />
-          <span className="text-[7px] font-black tracking-[0.3em] text-white/10 uppercase">vs</span>
+          {statusText ? (
+            <span className="text-[9px] font-black tracking-[0.18em] text-[#C9A84C]/70 uppercase whitespace-nowrap">{statusText}</span>
+          ) : (
+            <span className="text-[7px] font-black tracking-[0.3em] text-white/10 uppercase">vs</span>
+          )}
           <div className="flex-1 h-px bg-white/[0.04]" />
         </div>
-        <BracketTeamRow row={bottom} seed={bottomSeed} />
+        <BracketTeamRow row={bottom} seed={bottomSeed} wins={bottomWins} neededToWin={needed} clinched={botClinched} eliminated={botOut} />
       </div>
     );
   }
@@ -587,12 +656,18 @@ function LeagueSection({ rows }: { rows: StandingRow[] }) {
 
 // ── Main Page ──────────────────────────────────────────────────────────────────
 
-export default function StandingsPage() {
+function StandingsPageInner() {
+  const searchParams = useSearchParams();
+  const queryView    = searchParams?.get("view");
+  const initialView: ViewMode =
+    queryView === "table" || queryView === "hunt" ? queryView : "tree";
+
   const [standings, setStandings] = useState<StandingRow[]>([]);
+  const [bracket,   setBracket]   = useState<BracketData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabFilter>("League");
-  const [view, setView] = useState<ViewMode>("table");
+  const [view, setView] = useState<ViewMode>(initialView);
   const [sortKey, setSortKey] = useState<SortKey>("pts");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const tabScrollRef = useRef<HTMLDivElement>(null);
@@ -602,10 +677,17 @@ export default function StandingsPage() {
   const fetchStandings = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const res = await fetch("/api/standings");
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setStandings(data.standings ?? []);
+      const [sRes, bRes] = await Promise.all([
+        fetch("/api/standings"),
+        fetch("/api/playoff-bracket?season=20252026"),
+      ]);
+      const sData = await sRes.json();
+      if (sData.error) throw new Error(sData.error);
+      setStandings(sData.standings ?? []);
+      if (bRes.ok) {
+        const bData = await bRes.json();
+        if (!bData.error) setBracket(bData as BracketData);
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load standings");
     } finally { setLoading(false); }
@@ -674,9 +756,9 @@ export default function StandingsPage() {
         </div>
         <div className="flex items-center gap-2">
           <div className="flex rounded-lg border border-white/[0.07] overflow-hidden">
-            <button onClick={() => setView("table")} className={`px-2 py-1 text-[9px] font-bold uppercase tracking-wide transition-colors ${view === "table" ? "bg-white/[0.08] text-white/80" : "text-white/30 hover:text-white/50"}`}>Table</button>
-            <button onClick={() => setView("hunt")}  className={`px-2 py-1 text-[9px] font-bold uppercase tracking-wide transition-colors border-l border-white/[0.07] ${view === "hunt"  ? "bg-white/[0.08] text-white/80" : "text-white/30 hover:text-white/50"}`}>Race</button>
-            <button onClick={() => setView("tree")}  className={`px-2 py-1 text-[9px] font-bold uppercase tracking-wide transition-colors border-l border-white/[0.07] ${view === "tree"  ? "bg-[#C9A84C]/10 text-[#C9A84C]/80" : "text-white/30 hover:text-white/50"}`}>Bracket</button>
+            <button onClick={() => setView("tree")}  className={`px-2 py-1 text-[9px] font-bold uppercase tracking-wide transition-colors ${view === "tree"  ? "bg-[#C9A84C]/10 text-[#C9A84C]/80" : "text-white/30 hover:text-white/50"}`}>Bracket</button>
+            <button onClick={() => setView("hunt")}  className={`px-2 py-1 text-[9px] font-bold uppercase tracking-wide transition-colors border-l border-white/[0.07] ${view === "hunt"  ? "bg-white/[0.08] text-white/80"    : "text-white/30 hover:text-white/50"}`}>Race</button>
+            <button onClick={() => setView("table")} className={`px-2 py-1 text-[9px] font-bold uppercase tracking-wide transition-colors border-l border-white/[0.07] ${view === "table" ? "bg-white/[0.08] text-white/80"    : "text-white/30 hover:text-white/50"}`}>Table</button>
           </div>
           <button onClick={fetchStandings} className="text-[13px] font-bold text-white/38 hover:text-white/50 transition-colors px-1.5 py-1">↻</button>
         </div>
@@ -761,7 +843,7 @@ export default function StandingsPage() {
           {loading ? (
             <div className="h-[500px] rounded-xl border border-white/[0.10] bg-white/[0.02] animate-pulse" />
           ) : (
-            <PlayoffBracket rows={standings} />
+            <PlayoffBracket rows={standings} bracket={bracket} />
           )}
         </div>
       ) : (
@@ -828,5 +910,13 @@ export default function StandingsPage() {
         </>
       )}
     </main>
+  );
+}
+
+export default function StandingsPage() {
+  return (
+    <Suspense fallback={null}>
+      <StandingsPageInner />
+    </Suspense>
   );
 }
