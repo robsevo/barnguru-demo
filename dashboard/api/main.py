@@ -193,6 +193,59 @@ async def set_dev_banner(payload: dict) -> dict:
     return _dev_banner
 
 
+# ---------------------------------------------------------------------------
+# CV-to-player-NN feed gate — rob-only switch (Feature 16.26)
+# ---------------------------------------------------------------------------
+# Passive CV capture runs for all 7 localhost:3000 users silently. Only when rob
+# flips this gate ON does train_behavior_net.py start folding aggregated CV
+# observations into the player behavioral net (Feature 2.22). Detector and
+# per-arena training happen regardless — they don't touch player identities.
+#
+# No server-side auth enforced here; Next.js middleware restricts POST to
+# rob, mirroring the dev-banner pattern. Training script reads the JSON
+# file directly, not via HTTP.
+
+
+def _cv_gate_path() -> Path:
+    return _GRETZKY_DATA_DIR / "cv_gate.json"
+
+
+def _read_cv_gate() -> dict:
+    import json
+    p = _cv_gate_path()
+    if not p.exists():
+        return {"enabled": False, "updated_at": None, "updated_by": None}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {"enabled": False, "updated_at": None, "updated_by": None}
+
+
+@app.get("/cv/gate")
+async def get_cv_gate() -> dict:
+    """Current state of the CV → player-NN feed gate."""
+    return _read_cv_gate()
+
+
+@app.post("/cv/gate")
+async def set_cv_gate(payload: dict) -> dict:
+    """Flip the gate. Middleware restricts this path to rob."""
+    import json
+    enabled = bool(payload.get("enabled", False))
+    updated_by = str(payload.get("updated_by") or "rob")[:64]
+    state = {
+        "enabled":    enabled,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_by": updated_by,
+    }
+    p = _cv_gate_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(state), encoding="utf-8")
+    os.replace(tmp, p)
+    return state
+
+
 # ── Phase 1 endpoints ──────────────────────────────────────────────────────────
 
 
@@ -4459,6 +4512,7 @@ async def game_highlights(game_id: int) -> dict:
     away_abbrev = (story.get("awayTeam") or {}).get("abbrev", "")
     home_abbrev = (story.get("homeTeam") or {}).get("abbrev", "")
     game_state  = story.get("gameState", "")
+    venue       = (story.get("venue") or {}).get("default", "") if isinstance(story.get("venue"), dict) else str(story.get("venue") or "")
 
     # ── Featured clips (recap + condensed) from D3 ────────────────────────────
     recap_id: str | None     = None
@@ -4502,6 +4556,7 @@ async def game_highlights(game_id: int) -> dict:
         "away_team":    away_abbrev,
         "home_team":    home_abbrev,
         "game_state":   game_state,
+        "venue":        venue,
         "recap_id":     recap_id,
         "condensed_id": condensed_id,
         "goals":        goals,
@@ -4762,6 +4817,16 @@ _BROADCAST_CODE_MAP: dict[str, str] = {
     "FDSNSCA": "Fanduel Sports Network Socal",     # Anaheim Ducks / LA Kings
     "FDSNW":   "Fanduel Sports Network West",      # Utah Hockey Club / others
     "FDSNOK":  "Fanduel Sports Network Oklahoma",
+    # Canadian French — RDS / TVA Sports
+    "RDS":   "RDS",
+    "RDS2":  "RDS2",
+    "RDSI":  "RDS Info",
+    "TVAS":  "TVA Sports",
+    "TVAS2": "TVA Sports 2",
+    # Canadian English national (OTA + extra Sportsnet channels)
+    "CBC":   "CBC",
+    "SN1":   "Sportsnet One",
+    "SN360": "Sportsnet 360",
 }
 
 _game_iptv_cache: dict[int, tuple[list, float]] = {}
@@ -4798,11 +4863,20 @@ async def game_iptv_streams(game_id: int) -> dict:
     except Exception:
         all_channels = []
 
-    # 3. Match each broadcast network to IPTV channels by title prefix.
+    # 3. Match each broadcast network to IPTV channels by title tokens.
     # Only match against curated tvpass/upstream channels — NOT raw M3U playlist dumps
     # which contain regional channels like "NBC Sports California" that would show up
     # on games they never broadcast.
     curated_channels = [ch for ch in all_channels if ch.get("source") in ("tvpass", "upstream")]
+
+    # Contains-all-tokens matcher: a channel matches a network when every alpha
+    # token of the network's display name appears in the channel title's tokens.
+    # "RDS" matches "Canal RDS HD"; "Sportsnet East" still excludes "Sportsnet West"
+    # because "east" is missing. Stricter than prior startswith in one direction
+    # (requires every token), looser in another (doesn't care about position).
+    import re as _re_match
+    def _tokens(s: str) -> list[str]:
+        return [t for t in _re_match.findall(r"[a-z0-9]+", s.lower()) if len(t) >= 2]
 
     result: list[dict] = []
     seen_codes: set[str] = set()
@@ -4814,18 +4888,19 @@ async def game_iptv_streams(game_id: int) -> dict:
         seen_codes.add(code)
 
         display = _BROADCAST_CODE_MAP.get(code, code)
-        prefix = display.lower()
+        needed = _tokens(display)
         matched = [
             ch for ch in curated_channels
-            if ch.get("title", "").lower().startswith(prefix)
+            if needed and all(tok in _tokens(ch.get("title", "")) for tok in needed)
         ]
-        if matched:
-            result.append({
-                "network": display,
-                "code": code,
-                "market": market,
-                "channels": matched,
-            })
+        # Always emit a row — the frontend renders unmatched rows as disabled
+        # chips so Bob sees the full broadcast slate, not just what we resolved.
+        result.append({
+            "network":  display,
+            "code":     code,
+            "market":   market,
+            "channels": matched,
+        })
 
     _game_iptv_cache[game_id] = (result, _t_iptv.monotonic())
     return {"broadcasts": result}
@@ -6347,6 +6422,10 @@ class CvLiveObservationsRequest(_BaseModel):
     game_id:   int
     client_id: str
     bundles:   list[dict]   # flexible shape; frontend CvObservationBundle
+    # Arena name from NHL API (venue.default). Optional so older clients keep
+    # working; newer ones include it so downstream aggregators can bucket
+    # training data by arena without joining to game metadata.
+    arena:     str | None = None
 
 
 @app.post("/api/cv/live/observations")
@@ -6374,11 +6453,13 @@ async def cv_live_observations(body: CvLiveObservationsRequest):
     path = obs_dir / f"{today}.ndjson"
 
     t_wall = datetime.now(timezone.utc).isoformat()
+    arena = (body.arena or "").strip()[:128] or None
     lines = [
         json.dumps({
             "t_wall":    t_wall,
             "game_id":   body.game_id,
             "client_id": body.client_id,
+            "arena":     arena,
             **b,
         }, separators=(",", ":"))
         for b in body.bundles
@@ -7296,6 +7377,49 @@ async def iptv_channel_status():
         return _json_status.loads(_status_path.read_text())
     except Exception:
         return {"checked_at": None, "summary": {}, "channels": []}
+
+
+@app.get("/iptv-debug")
+async def iptv_debug():
+    """Dump every channel name each upstream account emits, split by NHL-keyword match.
+
+    Rob-only (Next.js middleware gates /api/iptv-debug). No caching — always
+    re-fetches so the matcher can be iterated live. Use to tune the
+    game-iptv-streams token matcher when a known broadcast isn't lighting up.
+    """
+    import asyncio as _aio_dbg
+
+    async def _raw(label: str, host: str, port: int, user: str, pw: str) -> dict:
+        import httpx as _hx
+        base = f"http://{host}:{port}"
+        url = f"{base}/get.php?username={user}&password={pw}&type=m3u_plus&output=m3u8"
+        try:
+            async with _hx.AsyncClient(timeout=20.0, follow_redirects=True) as hx:
+                r = await hx.get(url, headers={"User-Agent": _BROWSER_HEADERS["User-Agent"]})
+            if r.status_code != 200:
+                return {"label": label, "error": f"HTTP {r.status_code}", "titles": [], "nhl_titles": []}
+            text = r.text
+        except Exception as e:
+            return {"label": label, "error": str(e), "titles": [], "nhl_titles": []}
+
+        titles: list[str] = []
+        lines = text.splitlines()
+        for line in lines:
+            if line.startswith("#EXTINF"):
+                m = _re_iptv.search(r'tvg-name="([^"]+)"', line)
+                name = m.group(1) if m else line.split(",")[-1].strip()
+                if name:
+                    titles.append(name)
+        nhl = [t for t in titles if any(k in t.lower() for k in _NHL_KEYWORDS)]
+        return {"label": label, "host": host, "count": len(titles), "nhl_count": len(nhl),
+                "nhl_titles": sorted(set(nhl)), "titles": sorted(set(titles))}
+
+    results = await _aio_dbg.gather(
+        *[_raw(lbl, h, p, u, pw) for lbl, h, p, u, pw in _upstream_ACCOUNTS],
+        return_exceptions=True,
+    )
+    accounts = [r if isinstance(r, dict) else {"error": str(r)} for r in results]
+    return {"accounts": accounts}
 
 
 # ===========================================================================

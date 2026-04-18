@@ -355,16 +355,23 @@ class PlayerBehaviorNet:
         player_stats_df: pl.DataFrame,
         positional_df: pl.DataFrame | None = None,
         skating_baseline_df: pl.DataFrame | None = None,
+        cv_observations_df: pl.DataFrame | None = None,
     ) -> "PlayerBehaviorNet":
         """Fit the behavioral network from player season stats.
 
         Args:
-            player_stats_df:    Player stats DataFrame with at least
-                                ``player_id`` and ``carry_entry_pct``.
-                                Optional: ``battle_score``, ``player_name``,
-                                ``team``.
-            positional_df:      Feature 2.21 output (positional heatmap).
+            player_stats_df:     Player stats DataFrame with at least
+                                 ``player_id`` and ``carry_entry_pct``.
+                                 Optional: ``battle_score``, ``player_name``,
+                                 ``team``.
+            positional_df:       Feature 2.21 output (positional heatmap).
             skating_baseline_df: Feature 2.20 output (skating baselines).
+            cv_observations_df:  Feature 16.26 — aggregated in-browser CV
+                                 observations. Only passed when the
+                                 ``cv_gate.json`` flag is ON; otherwise the
+                                 caller leaves this as None. Currently
+                                 logged-only — per-player CV features land
+                                 once track_id→player_id mapping is trusted.
 
         Returns:
             self (for chaining).
@@ -372,6 +379,16 @@ class PlayerBehaviorNet:
         Raises:
             ValueError: If ``player_id`` column is missing.
         """
+        if cv_observations_df is not None and len(cv_observations_df) > 0:
+            # We intentionally don't join into the MLP yet: track_id → NHL
+            # player_id mapping requires jersey OCR confidence we haven't
+            # validated. Logging only. When the mapping is trusted, this
+            # block turns into a lookup built into the feature vector.
+            self._cv_feed_seen = int(len(cv_observations_df))
+        else:
+            self._cv_feed_seen = 0
+
+
         if "player_id" not in (player_stats_df.columns
                                 if hasattr(player_stats_df, "columns") else []):
             raise ValueError("player_stats_df must contain 'player_id' column.")

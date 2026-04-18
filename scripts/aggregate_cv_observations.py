@@ -79,6 +79,8 @@ def _reduce_game(game_dir: Path) -> list[dict]:
     # (client_id, track_id) → running summary
     tracks: dict[tuple[str, int], dict] = {}
     scene_counts: dict[str, int] = {"game": 0, "break": 0, "unknown": 0}
+    arena_counts: dict[str, int] = {}
+    arena_first: str | None = None
     events_total = 0
     pass_shot_total = 0
     bundles_total = 0
@@ -88,7 +90,12 @@ def _reduce_game(game_dir: Path) -> list[dict]:
             bundles_total += 1
             client_id = rec.get("client_id", "unknown")
             scene     = rec.get("scene", "unknown")
+            arena     = rec.get("arena") or None
             scene_counts[scene] = scene_counts.get(scene, 0) + 1
+            if arena:
+                arena_counts[arena] = arena_counts.get(arena, 0) + 1
+                if arena_first is None:
+                    arena_first = arena
 
             for ev in rec.get("events_recent", []) or []:
                 events_total += 1
@@ -164,6 +171,9 @@ def _reduce_game(game_dir: Path) -> list[dict]:
             "last_video_time":   e["last_time"],
         })
 
+    # Most-frequent arena wins, since a single game is always in one building.
+    dominant_arena = max(arena_counts.items(), key=lambda kv: kv[1])[0] if arena_counts else arena_first
+
     # Header row captures game-level counts so consumers don't need to re-scan.
     # We emit it as a special row with track_id = -999.
     rows.append({
@@ -171,6 +181,7 @@ def _reduce_game(game_dir: Path) -> list[dict]:
         "client_id":         "__summary__",
         "track_id":          -999,
         "stable_class":      "summary",
+        "arena":             dominant_arena,
         "frames":            bundles_total,
         "seconds_observed":  None,
         "mean_speed_kmh":    None,
@@ -185,6 +196,12 @@ def _reduce_game(game_dir: Path) -> list[dict]:
         "_events":           events_total,
         "_pass_or_shot":     pass_shot_total,
     })
+
+    # Also stamp every track row with the arena so downstream per-arena joins
+    # don't need the summary row.
+    for r in rows:
+        if r["track_id"] != -999 and "arena" not in r:
+            r["arena"] = dominant_arena
 
     return rows
 
@@ -229,14 +246,36 @@ def main(argv: list[str] | None = None) -> int:
 
     total_games  = 0
     total_tracks = 0
+    # Per-arena aggregate accumulator; keys are arena names, values are
+    # {games, tracks, bundles, scene_game, scene_break, events, pass_or_shot}.
+    per_arena: dict[str, dict] = {}
+
     for gd in game_dirs:
         rows = _reduce_game(gd)
         # Exclude the game-level summary row from the "tracks" count.
-        track_rows = [r for r in rows if r["track_id"] != -999]
+        track_rows   = [r for r in rows if r["track_id"] != -999]
+        summary_rows = [r for r in rows if r["track_id"] == -999]
         if not track_rows:
             continue
         total_games  += 1
         total_tracks += len(track_rows)
+
+        # Accumulate per-arena totals from the summary row (one per game).
+        if summary_rows:
+            s = summary_rows[0]
+            arena = s.get("arena") or "__unknown__"
+            entry = per_arena.setdefault(arena, {
+                "arena": arena, "games": 0, "tracks": 0, "bundles": 0,
+                "scene_game": 0, "scene_break": 0, "events": 0, "pass_or_shot": 0,
+            })
+            entry["games"]        += 1
+            entry["tracks"]       += len(track_rows)
+            entry["bundles"]      += s.get("frames", 0) or 0
+            entry["scene_game"]   += s.get("_scene_game", 0) or 0
+            entry["scene_break"]  += s.get("_scene_break", 0) or 0
+            entry["events"]       += s.get("_events", 0) or 0
+            entry["pass_or_shot"] += s.get("_pass_or_shot", 0) or 0
+
         if args.dry_run:
             print(f"\n── game {gd.name} — {len(track_rows)} tracks ──")
             for r in track_rows[:5]:
@@ -248,6 +287,27 @@ def main(argv: list[str] | None = None) -> int:
             print(f"wrote {out} — {len(track_rows)} tracks")
 
     print(f"\n{total_games} games, {total_tracks} tracks total.")
+
+    # Global per-arena roll-up — answers "how much training signal do we have
+    # per building?" Written once at the root, not per-game.
+    if per_arena and not args.dry_run:
+        arena_rows = sorted(per_arena.values(), key=lambda e: -e["bundles"])
+        arena_out  = root / "cv_live_observations" / "summary_by_arena.parquet"
+        try:
+            import polars as pl
+            pl.DataFrame(arena_rows).write_parquet(arena_out)
+            print(f"wrote {arena_out} — {len(arena_rows)} arenas")
+        except ImportError:
+            import csv
+            arena_out = arena_out.with_suffix(".csv")
+            keys = sorted({k for r in arena_rows for k in r.keys()})
+            with arena_out.open("w", encoding="utf-8", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=keys)
+                w.writeheader()
+                for r in arena_rows:
+                    w.writerow(r)
+            print(f"wrote {arena_out} — {len(arena_rows)} arenas")
+
     return 0
 
 
