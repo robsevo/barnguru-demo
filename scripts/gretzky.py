@@ -150,6 +150,9 @@ COMMANDS: list[Cmd] = [
     Cmd("aggregate-cv-obs",  "phase16",
         "Reduce in-browser CV observation NDJSON into per-track summaries (Feature 16 bridge)",
         "scripts.aggregate_cv_observations"),
+    Cmd("bootstrap-pseudo",  "phase16",
+        "Bootstrap YOLO pseudo-labels from recorded broadcast video for the retrain loop",
+        "scripts.bootstrap_pseudo_labels"),
 ]
 
 
