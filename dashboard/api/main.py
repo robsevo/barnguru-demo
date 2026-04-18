@@ -15,6 +15,24 @@ if str(_REPO_ROOT) not in sys.path:
 
 app = FastAPI(title="GRTZKY API", version="0.1.0")
 
+# Load IPTV env-var sidecar (nightly workflow writes this from the GH secret
+# IPTV_ENV_BLOCK so credentials & relay URLs live outside the systemd unit).
+# Parse key=value lines and seed os.environ — shell/systemd vars win over file.
+def _load_iptv_env_file() -> None:
+    p = Path(__file__).parent / "iptv.env"
+    if not p.exists():
+        return
+    try:
+        for line in p.read_text(encoding="utf-8").splitlines():
+            s = line.strip()
+            if not s or s.startswith("#") or "=" not in s:
+                continue
+            k, _, v = s.partition("=")
+            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+    except Exception:
+        pass
+_load_iptv_env_file()
+
 # ---------------------------------------------------------------------------
 # Simple in-memory TTL cache for expensive NHL API endpoints
 # ---------------------------------------------------------------------------
