@@ -73,6 +73,13 @@ _HOMOGRAPHY_EVERY = 30
 # Jump-cut reset heuristic
 _CUT_RESET_THRESHOLD = 0.30
 
+# Minimum confidence for a puck detection to be fed into the Kalman tracker.
+# A 5-px puck is the hardest class for the detector, so the top-1 detection
+# can be a logo edge, a linesman's arm signal, or a stick blade. Requiring
+# at least 0.35 confidence kills most of the garbage before it gets the
+# chance to yank the tracker across the ice.
+_PUCK_MIN_CONF = 0.35
+
 
 class ClipJobStatus:
     """Thread-safe status object read by the status endpoint.
@@ -216,7 +223,8 @@ def process_clip(
                 frame_n += 1
                 continue
 
-            puck_dets   = [d for d in all_dets if d.class_name == "puck"]
+            puck_dets   = [d for d in all_dets
+                           if d.class_name == "puck" and d.confidence >= _PUCK_MIN_CONF]
             player_dets = [d for d in all_dets if d.class_name != "puck"]
 
             tracker_input = [
