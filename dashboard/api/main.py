@@ -4894,6 +4894,13 @@ async def game_iptv_streams(game_id: int) -> dict:
     # contain the word ("DEP | ESPN FHD", "ESPN Deportes", "ESPN 2 HD" are all
     # rejected). Uses the same _normalize_ch() that /barncentre-channels uses
     # so both surfaces stay consistent.
+    # French-network titles often carry provider suffixes (e.g. "Canal RDS HD
+    # (tv14s)") that defeat strict equality. Whitelist a small set of known
+    # short French displays so we can apply a token-contains fallback only for
+    # them — never for ESPN/Sportsnet, which would drag in hundreds of
+    # regional/international variants.
+    _SHORT_FR_DISPLAYS = {"rds", "rds2", "rds info", "tva sports", "tva sports 2"}
+
     def _matches_broadcast(ch_title: str, display: str) -> bool:
         norm = _normalize_ch(ch_title)
         want = display.lower().strip()
@@ -4902,6 +4909,10 @@ async def game_iptv_streams(game_id: int) -> dict:
         # ESPN+ alternation — providers commonly list it as "espnplus"/"espn plus"
         if want == "espn+" and norm in ("espnplus", "espn plus"):
             return True
+        if want in _SHORT_FR_DISPLAYS:
+            needed = [t for t in want.split() if len(t) >= 2]
+            if needed and all(tok in norm for tok in needed):
+                return True
         return False
 
     result: list[dict] = []

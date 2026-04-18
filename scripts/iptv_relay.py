@@ -39,14 +39,17 @@ CACHE_TTL_S   = 30.0
 FETCH_TIMEOUT = 20.0
 
 # Defence-in-depth: tunnel is publicly reachable, so refuse any URL not
-# pointing at one of the five upstream hosts wired in dashboard/api/main.py.
-# Extend here if new providers are added server-side.
+# pointing at one of the upstream hosts wired in dashboard/api/main.py.
+# Some providers 302-redirect to sub-hosts for CDNs / VOD shards
+# (e.g. vod.tv14s.xyz, cdn.an upstream host.ddns.net), so we accept any host
+# that either equals the base domain or ends with a dotted suffix of it.
 ALLOWED_HOSTS = {
     "an upstream host.ddns.net",
     "tv14s.xyz",
     "ampztl.xyz",
     "lunar.pm",
 }
+ALLOWED_SUFFIXES = tuple(f".{h}" for h in ALLOWED_HOSTS)
 
 
 class _LRU:
@@ -92,8 +95,9 @@ def _check_token(request: Request) -> None:
 
 def _check_host(url: str) -> None:
     host = (urlparse(url).hostname or "").lower()
-    if host not in ALLOWED_HOSTS:
-        raise HTTPException(status_code=400, detail=f"host not allowed: {host}")
+    if host in ALLOWED_HOSTS or host.endswith(ALLOWED_SUFFIXES):
+        return
+    raise HTTPException(status_code=400, detail=f"host not allowed: {host}")
 
 
 def _tunnel_base(request: Request) -> str:
