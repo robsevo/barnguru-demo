@@ -4869,14 +4869,22 @@ async def game_iptv_streams(game_id: int) -> dict:
     # on games they never broadcast.
     curated_channels = [ch for ch in all_channels if ch.get("source") in ("tvpass", "upstream")]
 
-    # Contains-all-tokens matcher: a channel matches a network when every alpha
-    # token of the network's display name appears in the channel title's tokens.
-    # "RDS" matches "Canal RDS HD"; "Sportsnet East" still excludes "Sportsnet West"
-    # because "east" is missing. Stricter than prior startswith in one direction
-    # (requires every token), looser in another (doesn't care about position).
-    import re as _re_match
-    def _tokens(s: str) -> list[str]:
-        return [t for t in _re_match.findall(r"[a-z0-9]+", s.lower()) if len(t) >= 2]
+    # Strict exact-match filter. The channel title is normalized (strip HD/FHD,
+    # upstream source suffix, CA/US/UK country prefix, trailing region markers)
+    # and must equal the network's display name. Prevents a single network like
+    # ESPN from dragging in hundreds of Spanish/regional variants that merely
+    # contain the word ("DEP | ESPN FHD", "ESPN Deportes", "ESPN 2 HD" are all
+    # rejected). Uses the same _normalize_ch() that /barncentre-channels uses
+    # so both surfaces stay consistent.
+    def _matches_broadcast(ch_title: str, display: str) -> bool:
+        norm = _normalize_ch(ch_title)
+        want = display.lower().strip()
+        if norm == want:
+            return True
+        # ESPN+ alternation — providers commonly list it as "espnplus"/"espn plus"
+        if want == "espn+" and norm in ("espnplus", "espn plus"):
+            return True
+        return False
 
     result: list[dict] = []
     seen_codes: set[str] = set()
@@ -4888,10 +4896,9 @@ async def game_iptv_streams(game_id: int) -> dict:
         seen_codes.add(code)
 
         display = _BROADCAST_CODE_MAP.get(code, code)
-        needed = _tokens(display)
         matched = [
             ch for ch in curated_channels
-            if needed and all(tok in _tokens(ch.get("title", "")) for tok in needed)
+            if _matches_broadcast(ch.get("title", ""), display)
         ]
         # Always emit a row — the frontend renders unmatched rows as disabled
         # chips so Bob sees the full broadcast slate, not just what we resolved.
