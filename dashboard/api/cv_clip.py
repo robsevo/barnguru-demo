@@ -75,7 +75,12 @@ _CUT_RESET_THRESHOLD = 0.30
 
 
 class ClipJobStatus:
-    """Thread-safe status object read by the status endpoint."""
+    """Thread-safe status object read by the status endpoint.
+
+    Holds partial results while the detect loop runs so the frames endpoint
+    can serve overlays progressively — the frontend doesn't have to wait for
+    the full clip to finish before seeing bounding boxes.
+    """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -85,17 +90,31 @@ class ClipJobStatus:
         self.message: Optional[str] = None
         self.started_at: float = time.time()
         self.finished_at: Optional[float] = None
+        self.frames: list[dict] = []       # appended as each frame is processed
 
     def update(self, **kwargs) -> None:
         with self._lock:
             for k, v in kwargs.items():
                 setattr(self, k, v)
 
+    def append_frame(self, frame: dict) -> None:
+        with self._lock:
+            self.frames.append(frame)
+            self.frames_done = len(self.frames)
+
+    def get_frames_slice(self, from_seq: int, limit: int) -> list[dict]:
+        """Return frames with frame_seq >= from_seq, up to *limit* entries."""
+        with self._lock:
+            if from_seq >= len(self.frames):
+                return []
+            return list(self.frames[from_seq : from_seq + limit])
+
     def to_dict(self) -> dict:
         with self._lock:
             return {
                 "status":       self.status,
                 "frames_done":  self.frames_done,
+                "total_frames": self.total_frames_hint or self.frames_done,
                 "message":      self.message,
                 "started_at":   self.started_at,
                 "finished_at":  self.finished_at,
@@ -134,6 +153,24 @@ def process_clip(
     rink_rt    = AdaptiveRinkRuntime()
     tracker    = Tracker(fps=_FPS, n_init=3, max_lost=15, iou_threshold=0.25, reid_iou=0.30)
     puck_tr    = PuckTracker()
+
+    # Probe duration so the UI can show an ETA + progress denominator.
+    # Best-effort — if ffprobe fails we just leave the hint at 0.
+    try:
+        probe = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                hls_url,
+            ],
+            capture_output=True, timeout=20, text=True,
+        )
+        dur_s = float(probe.stdout.strip()) if probe.returncode == 0 else 0.0
+        if dur_s > 0:
+            status.update(total_frames_hint=int(dur_s * _FPS))
+    except Exception as exc:
+        log.debug("[cv-clip:%s] ffprobe failed: %s", clip_id, exc)
 
     proc = subprocess.Popen(
         [
@@ -264,15 +301,17 @@ def process_clip(
                     "y":             round(rink_y, 2) if rink_y is not None else None,
                 })
 
-            frames_out.append({
+            one_frame = {
                 "frame_seq":    frame_n,
                 "timestamp_ms": int(frame_n * 1000 / _FPS),
                 "players":      players_out,
-            })
+            }
+            frames_out.append(one_frame)
+            # Publish progressively so the frames endpoint can stream
+            # partial results to the overlay as detection runs.
+            status.append_frame(one_frame)
 
             frame_n += 1
-            if frame_n % 30 == 0:
-                status.update(frames_done=frame_n)
     finally:
         try:
             proc.terminate()

@@ -6022,32 +6022,64 @@ async def cv_clip_frames(
     from_seq: int = 0,
     limit:    int = 500,
 ):
-    """Return a paginated slice of per-frame detections from the cache.
+    """Return a paginated slice of per-frame detections.
 
-    ``frames`` contains up to *limit* entries starting at ``frame_seq >= from_seq``.
-    ``next_from_seq`` is the seq to use for the next page, or ``null`` when done.
-    Returns 404 if the cache is not yet ready.
+    Serves from the on-disk cache once processing is done, or from the
+    live in-memory buffer while processing is still running — so the UI
+    can stream overlays progressively. ``next_from_seq`` is the seq for
+    the next page, or ``null`` when done (job is ready *and* the caller
+    has drained every frame).
     """
     from fastapi import HTTPException
-    from dashboard.api.cv_clip import load_cache
+    from dashboard.api.cv_clip import load_cache, _FPS as CV_FPS
 
-    cached = load_cache(clip_id)
-    if cached is None:
-        raise HTTPException(status_code=404, detail="clip not ready")
-
-    all_frames = cached.get("frames", [])
     limit = max(1, min(int(limit), 2000))
-    slc = [f for f in all_frames if int(f.get("frame_seq", -1)) >= int(from_seq)][:limit]
-    last_seq = slc[-1]["frame_seq"] if slc else None
-    next_from = (int(last_seq) + 1) if (last_seq is not None and
-                                         int(last_seq) + 1 < cached.get("total_frames", 0)) else None
+
+    # Completed clips — serve from disk
+    cached = load_cache(clip_id)
+    if cached is not None:
+        all_frames = cached.get("frames", [])
+        slc = [f for f in all_frames if int(f.get("frame_seq", -1)) >= int(from_seq)][:limit]
+        last_seq = slc[-1]["frame_seq"] if slc else None
+        next_from = (int(last_seq) + 1) if (last_seq is not None and
+                                             int(last_seq) + 1 < cached.get("total_frames", 0)) else None
+        return {
+            "clip_id":       clip_id,
+            "fps":           cached.get("fps"),
+            "total_frames":  cached.get("total_frames", 0),
+            "duration_s":    cached.get("duration_s", 0.0),
+            "frames":        slc,
+            "next_from_seq": next_from,
+        }
+
+    # Mid-flight — serve from the running job's in-memory buffer
+    existing = _clip_job_get(clip_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="clip not started")
+    if existing.status == "error":
+        raise HTTPException(status_code=500, detail=existing.message or "processing failed")
+
+    slc = existing.get_frames_slice(int(from_seq), limit)
+    d = existing.to_dict()
+    is_ready = d.get("status") == "ready"
+
+    # Advance cursor only if we received frames; otherwise let the client
+    # retry the same from_seq on the next poll. next_from_seq == null means
+    # "we're caught up AND the job is done" — safe to stop polling.
+    if slc:
+        nxt: int | None = int(slc[-1]["frame_seq"]) + 1
+    elif not is_ready:
+        nxt = int(from_seq)
+    else:
+        nxt = None
+
     return {
         "clip_id":       clip_id,
-        "fps":           cached.get("fps"),
-        "total_frames":  cached.get("total_frames", 0),
-        "duration_s":    cached.get("duration_s", 0.0),
+        "fps":           CV_FPS,
+        "total_frames":  d.get("total_frames") or 0,
+        "duration_s":    0.0,
         "frames":        slc,
-        "next_from_seq": next_from,
+        "next_from_seq": nxt,
     }
 
 
