@@ -7482,15 +7482,32 @@ async def _fetch_upstream_channels(
     channels as standardized channel dicts.
 
     Stream URLs use HLS (output=m3u8) so hls.js can play them directly.
+    Accounts that don't advertise m3u8 in allowed_output_formats are skipped —
+    their .m3u8 endpoint returns 405 (only ts is served), which hls.js can't play.
     """
     base = f"http://{host}:{port}"
-    url  = (
+    ua   = _BROWSER_HEADERS["User-Agent"]
+
+    try:
+        async with _httpx_backup.AsyncClient(timeout=10.0, follow_redirects=True) as hx:
+            probe = await hx.get(
+                f"{base}/player_api.php?username={username}&password={password}",
+                headers={"User-Agent": ua},
+            )
+        if probe.status_code == 200:
+            fmts = (probe.json().get("user_info") or {}).get("allowed_output_formats") or []
+            if "m3u8" not in [str(f).lower() for f in fmts]:
+                return []
+    except Exception:
+        pass  # probe failure is not fatal — fall through to M3U fetch
+
+    url = (
         f"{base}/get.php?username={username}&password={password}"
         f"&type=m3u_plus&output=m3u8"
     )
     try:
         async with _httpx_backup.AsyncClient(timeout=20.0, follow_redirects=True) as hx:
-            r = await hx.get(url, headers={"User-Agent": _BROWSER_HEADERS["User-Agent"]})
+            r = await hx.get(url, headers={"User-Agent": ua})
         if r.status_code != 200:
             return []
         text = r.text

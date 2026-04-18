@@ -151,7 +151,7 @@ async def proxy_m3u8(u: str, request: Request) -> Response:
 
     try:
         async with httpx.AsyncClient(timeout=FETCH_TIMEOUT, follow_redirects=True) as cl:
-            r = await cl.get(url, headers={"User-Agent": "VLC/3.0.20 LibVLC/3.0.20"})
+            r = await cl.get(url, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"})
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"upstream: {e}")
     if r.status_code != 200:
@@ -184,7 +184,7 @@ async def proxy_ts(u: str, request: Request) -> Response:
 
     try:
         async with httpx.AsyncClient(timeout=FETCH_TIMEOUT, follow_redirects=True) as cl:
-            r = await cl.get(url, headers={"User-Agent": "VLC/3.0.20 LibVLC/3.0.20"})
+            r = await cl.get(url, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"})
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"upstream: {e}")
     if r.status_code != 200:
