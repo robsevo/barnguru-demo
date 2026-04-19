@@ -301,25 +301,11 @@ async def _start_or_get_hls_session(url: str) -> _HLSSession:
             shutil.rmtree(workdir, ignore_errors=True)
         workdir.mkdir(parents=True, exist_ok=True)
 
-        # Extra browser-y headers — some providers (lunar) 403 without them.
-        extra_headers = (
-            "Accept: */*\r\n"
-            "Accept-Language: en-US,en;q=0.9\r\n"
-            "Origin: https://player.x-stream.tv\r\n"
-            "Referer: https://player.x-stream.tv/\r\n"
-        )
         args = [
             "ffmpeg", "-hide_banner", "-loglevel", "warning",
             "-user_agent", _BROWSER_UA,
-            "-headers", extra_headers,
-            "-multiple_requests", "1",
-            "-http_persistent", "1",
-            "-icy", "0",
             "-reconnect", "1",
-            "-reconnect_at_eof", "1",
             "-reconnect_streamed", "1",
-            "-reconnect_on_network_error", "1",
-            "-reconnect_on_http_error", "4xx,5xx",
             "-reconnect_delay_max", "5",
             "-i", url,
             "-c", "copy",
