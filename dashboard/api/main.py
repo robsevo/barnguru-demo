@@ -7496,10 +7496,13 @@ def _rewrite_iptv_url(url: str) -> str:
         pre, sep, _ = inner.partition("?")
         if pre.endswith("/m3u8"):
             inner = pre[:-len("/m3u8")] + "/ts" + (sep + _ if sep else "")
-    endpoint = "m3u8" if ".m3u8" in inner.lower().split("?", 1)[0] else "hls"
+    # Route ALL upstream feeds through /hls (ffmpeg transmux). The /m3u8
+    # passthrough (httpx fetch + URI rewrite) fails on tv14s/lunar because
+    # their CDNs reject our request pattern; ffmpeg is a more realistic HLS
+    # client and is worth a shot on every provider.
     token    = os.environ.get("IPTV_RELAY_TOKEN") or ""
     tq       = f"&t={quote(token, safe='')}" if token else ""
-    return f"{tunnel}/{endpoint}?u={quote(inner, safe='')}{tq}"
+    return f"{tunnel}/hls?u={quote(inner, safe='')}{tq}"
 
 
 async def _fetch_upstream_channels(
