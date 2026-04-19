@@ -7784,7 +7784,7 @@ _BARNCENTRE_CHANNEL_NAMES = [
     "Sportsnet East", "Sportsnet Ontario", "Sportsnet West", "Sportsnet Pacific",
     "Sportsnet 360", "Sportsnet One",
     # Canadian French
-    "RDS", "TVA Sports",
+    "RDS", "RDS 2", "RDS INFO", "TVA Sports", "TVA Sports 2",
     # US national
     "ESPN", "ESPN2", "ESPN+",
     "NHL Network",
@@ -8412,44 +8412,61 @@ async def barncentre_channels() -> dict:
     order  = {n: i for i, n in enumerate(_BARNCENTRE_CHANNEL_NAMES)}
     result.sort(key=lambda ch: order.get(ch["name"], 999))
 
-    # ── TEMP: per-account RDS/TVA test chips ─────────────────────────────────
-    # So Bob can click each variant and identify which upstream account actually
-    # plays. Removed once we know which path works. Skips liveness verification.
-    # Strict match: normalized title equals the channel name after stripping
-    # trailing decoration symbols (≋, ✪, ☆, ✦) — so "RDS 2" / "RDS INFO" / etc.
-    # are excluded.
-    _acct_re = _re_bc.compile(r"\(([a-z0-9._-]{3,30})\)\s*$", _re_bc.I)
+    # ── French-channel override ───────────────────────────────────────────────
+    # tv14s and lunar provider accounts actively block our relay IP (tv14s CDN
+    # tarpit / lunar 403 Forbidden), so they're excluded. Stream preference is
+    # hard-coded per channel from field testing; only the accounts that play
+    # are listed here. The first-seen URL per account wins.
+    _fr_priority: dict[str, list[str]] = {
+        "RDS":          ["an upstream host", "ampztl-a", "ampztl-b"],
+        "RDS 2":        ["an upstream host", "ampztl-a", "ampztl-b"],
+        "RDS INFO":     ["an upstream host"],
+        "TVA Sports":   ["an upstream host"],
+        "TVA Sports 2": ["ampztl-a", "ampztl-b"],
+    }
+    _acct_re  = _re_bc.compile(r"\(([a-z0-9._-]{3,30})\)\s*$", _re_bc.I)
     _decor_re = _re_bc.compile(r"(?:\s+[^\w\s]+)+\s*$")
-    def _is_exact(title: str, ch_name: str) -> bool:
+    def _is_fr_exact(title: str, ch_name: str) -> bool:
         norm = _normalize_ch(title)
         want = ch_name.lower()
         if norm == want:
             return True
         return _decor_re.sub("", norm).strip() == want
-    for _ch in ("RDS", "RDS 2", "RDS INFO", "TVA Sports", "TVA Sports 2"):
-        per_acct: dict[str, str] = {}   # acct → first matching url
+
+    def _build_fr_channel(ch_name: str, priority: list[str]) -> dict:
+        by_acct: dict[str, str] = {}
         for cand in all_channels:
             title = cand.get("title", "")
-            if not _is_exact(title, _ch):
+            if not _is_fr_exact(title, ch_name):
                 continue
             m = _acct_re.search(title)
             if not m:
                 continue
             acct = m.group(1).lower()
-            if acct in per_acct:
+            if acct not in priority or acct in by_acct:
                 continue
             url = cand.get("url", "")
             if url:
-                per_acct[acct] = url
-        for acct, url in per_acct.items():
-            result.append({
-                "name":         f"{_ch} [{acct}]",
-                "primary_url":  url,
-                "backup_urls":  [],
-                "programs":     [],
-                "online":       True,
-            })
-    # ────────────────────────────────────────────────────────────────────────
+                by_acct[acct] = url
+        ordered_urls = [by_acct[a] for a in priority if a in by_acct]
+        return {
+            "name":         ch_name,
+            "primary_url":  ordered_urls[0] if ordered_urls else "",
+            "backup_urls":  ordered_urls[1:],
+            "programs":     programs.get(ch_name, []),
+            "online":       bool(ordered_urls),
+        }
+
+    # Replace whatever the default match produced for the French channels.
+    result = [ch for ch in result if ch["name"] not in _fr_priority]
+    for ch_name, pri in _fr_priority.items():
+        built = _build_fr_channel(ch_name, pri)
+        if built["primary_url"]:
+            result.append(built)
+
+    # Re-apply the global ordering after the French rebuild.
+    result.sort(key=lambda ch: order.get(ch["name"], 999))
+    # ──────────────────────────────────────────────────────────────────────────
 
     _barncentre_cache["data"] = result
     _barncentre_cache["ts"]   = now_ts
