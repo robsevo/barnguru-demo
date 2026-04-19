@@ -7800,6 +7800,8 @@ _BARNCENTRE_CHANNEL_NAMES = [
     "NESN",
     # US sports betting / general sports
     "FanDuel",
+    # US — CBS Sports (placed right before the French block)
+    "CBS Sports", "CBS Sports Network",
     # Canadian French — at the back, grouped by network
     "RDS", "RDS 2", "RDS INFO",
     "TVA Sports", "TVA Sports 2",
@@ -8378,19 +8380,32 @@ async def barncentre_channels() -> dict:
         programs[ch_name].sort(key=lambda p: p.get("start_utc", ""))
 
     # ── 3. Match IPTV channels to our curated list ────────────────────────────
+    # Assign each title to exactly one channel. Longer/more-specific channel
+    # names claim first so "CBS Sports Network" and "RDS 2" don't leak into
+    # the bare "CBS Sports" / "RDS" candidate pools.
+    sorted_names = sorted(_BARNCENTRE_CHANNEL_NAMES, key=lambda n: -len(n))
+    assigned: dict[int, str] = {}
+    for ch_name in sorted_names:
+        for ch in all_channels:
+            if id(ch) in assigned:
+                continue
+            if _ch_matches(ch.get("title", ""), ch_name):
+                assigned[id(ch)] = ch_name
+
     channel_candidates: dict[str, list[dict]] = {}
-    for ch_name in _BARNCENTRE_CHANNEL_NAMES:
-        matched = [ch for ch in all_channels if _ch_matches(ch.get("title", ""), ch_name)]
-        if not matched:
+    for ch in all_channels:
+        name = assigned.get(id(ch))
+        if not name:
             continue
-        # De-duplicate by URL, then sort by priority
+        channel_candidates.setdefault(name, []).append(ch)
+    for name, cands in list(channel_candidates.items()):
         seen: set[str] = set()
         unique: list[dict] = []
-        for m in matched:
+        for m in cands:
             if m["url"] not in seen:
                 seen.add(m["url"])
                 unique.append(m)
-        channel_candidates[ch_name] = _sort_by_url_priority(unique)
+        channel_candidates[name] = _sort_by_url_priority(unique)
 
     # ── 4. Verify each channel's primary stream in parallel ───────────────────
     async def _build_channel(ch_name: str, candidates: list[dict]) -> dict:
