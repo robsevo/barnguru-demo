@@ -5114,10 +5114,10 @@ async def game_iptv_streams(game_id: int) -> dict:
     # plus alt/duplicate variants marked `✤`, `✪`, or `☆`. The alt feeds
     # consistently fail to stream even though they advertise as live. Drop
     # them here so the game page never offers a chip that can't play.
-    _AMPZTL_ALT_MARKERS = ("✤", "✪", "☆")
+    _AMPZTL_DEAD_MARKER = "ƒ"
     curated_channels = [
         ch for ch in curated_channels
-        if not any(m in (ch.get("title", "") or "") for m in _AMPZTL_ALT_MARKERS)
+        if _AMPZTL_DEAD_MARKER not in (ch.get("title", "") or "")
     ]
 
     # Strict exact-match filter. The channel title is normalized (strip HD/FHD,
