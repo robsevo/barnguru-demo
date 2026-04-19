@@ -709,11 +709,37 @@ async def scoreboard() -> dict:
 
     try:
         async with NHLClient() as client:
-            raw = await client.get_scoreboard()
+            raw, sched_raw = await asyncio.gather(
+                client.get_scoreboard(),
+                client.get_schedule("now"),
+                return_exceptions=True,
+            )
+            if isinstance(raw, Exception):
+                raise raw
     except NHLApiError as exc:
         return {"games": [], "error": str(exc)}
     except Exception as exc:  # noqa: BLE001
         return {"games": [], "error": f"Unexpected error: {exc}"}
+
+    # NHL's /score/now omits seriesStatus entirely. /schedule/now has it for every
+    # playoff game going forward — match by game_id first, then fall back to the
+    # team-pair (yesterday's FINAL won't be in schedule/now, but tomorrow's game 2
+    # in the same series carries the post-game-1 series score).
+    series_by_id: dict[int, dict] = {}
+    series_by_pair: dict[frozenset, dict] = {}
+    if isinstance(sched_raw, dict):
+        for bucket in sched_raw.get("gameWeek") or []:
+            for g in bucket.get("games") or []:
+                ss = g.get("seriesStatus")
+                if not ss:
+                    continue
+                gid = g.get("id")
+                if gid:
+                    series_by_id[gid] = ss
+                away_abbrev = (g.get("awayTeam") or {}).get("abbrev", "")
+                home_abbrev = (g.get("homeTeam") or {}).get("abbrev", "")
+                if away_abbrev and home_abbrev:
+                    series_by_pair.setdefault(frozenset({away_abbrev, home_abbrev}), ss)
 
     games_by_date = raw.get("gamesByDate") or []
     if not games_by_date:
@@ -773,12 +799,21 @@ async def scoreboard() -> dict:
             except (ValueError, IndexError):
                 pass
 
+        gid = g.get("id")
+        away_abbrev = away.get("abbrev", "")
+        home_abbrev = home.get("abbrev", "")
+        series_status = (
+            g.get("seriesStatus")
+            or series_by_id.get(gid)
+            or (series_by_pair.get(frozenset({away_abbrev, home_abbrev})) if away_abbrev and home_abbrev else None)
+        )
+
         normalised.append({
-            "game_id":         g.get("id"),
-            "date":            date_labels.get(g.get("id"), ""),
+            "game_id":         gid,
+            "date":            date_labels.get(gid, ""),
             "game_state":      game_state,
-            "away_team":       away.get("abbrev", ""),
-            "home_team":       home.get("abbrev", ""),
+            "away_team":       away_abbrev,
+            "home_team":       home_abbrev,
             "away_score":      away.get("score"),
             "home_score":      home.get("score"),
             "period":          period,
@@ -787,6 +822,8 @@ async def scoreboard() -> dict:
             "in_intermission": bool(clock.get("inIntermission", False)),
             "start_time_utc":  g.get("startTimeUTC"),
             "outcome_type":    outcome_type,
+            "game_type":       g.get("gameType"),
+            "series_status":   series_status,
             "away_on_pp":      away_on_pp,
             "home_on_pp":      home_on_pp,
             "away_skaters":    away_skaters,
