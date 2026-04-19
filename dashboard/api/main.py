@@ -5994,8 +5994,15 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
         proxy_base = f"{base}/stream-proxy?url="
 
     # Choose referer based on the upstream CDN to avoid hotlink blocks.
-    # thetvapp.to tokens are IP-locked; tvpass.org is the expected referrer for that CDN.
-    _referer = "https://tvpass.org/" if "thetvapp.to" in url else "https://onhockey.tv/"
+    # thetvapp.to tokens are IP-locked; tvpass.org is the expected referrer
+    # for that CDN. Brightcove's boltdns CDN validates against its own player
+    # origin — anything else risks a 403 on the manifest XHR.
+    if "thetvapp.to" in url:
+        _referer = "https://tvpass.org/"
+    elif "boltdns.net" in url or "brightcove" in url:
+        _referer = "https://players.brightcove.net/"
+    else:
+        _referer = "https://onhockey.tv/"
     _stream_headers = {
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
