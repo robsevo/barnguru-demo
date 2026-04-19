@@ -7816,7 +7816,12 @@ def _normalize_ch(title: str) -> str:
     t = _re_bc.sub(r"\s+(?:fhd|uhd|hd|sd)\s*$", "", t, flags=_re_bc.I)
     t = _re_bc.sub(r"\s*\([a-z]\)\s*$", "", t, flags=_re_bc.I)
     # Strip upstream country/language prefixes: "CA (FR)", "CA:", "CA-FR |", "CA "
-    t = _re_bc.sub(r"^(?:CA|US|UK)\s*(?:\([A-Z]{2}\))?\s*[\|:\-]?\s*", "", t, flags=_re_bc.I)
+    t = _re_bc.sub(r"^(?:CA|US|UK)(?:[-_\s]+[A-Z]{2})?\s*(?:\([A-Z]{2}\))?\s*[\|:\-]?\s*", "", t, flags=_re_bc.I)
+    # Strip trailing language flag "(FR)" / "(EN)" / "(ES)" / "(DE)" — lunar
+    # keeps this after "CA:" prefix consumption.
+    t = _re_bc.sub(r"\s*\((?:FR|EN|ES|DE)\)\s*$", "", t, flags=_re_bc.I)
+    # Normalize "TVA SPORTS 1" → "TVA SPORTS": tv14s numbers the primary feed.
+    t = _re_bc.sub(r"(?i)\btva\s+sports\s+1\s*$", "TVA Sports", t)
     # Strip remaining leading/trailing punctuation
     t = t.strip(" |:-")
     return t.strip().lower()
@@ -8410,20 +8415,33 @@ async def barncentre_channels() -> dict:
     # ── TEMP: per-account RDS/TVA test chips ─────────────────────────────────
     # So Bob can click each variant and identify which upstream account actually
     # plays. Removed once we know which path works. Skips liveness verification.
+    # Strict match: normalized title equals the channel name after stripping
+    # trailing decoration symbols (≋, ✪, ☆, ✦) — so "RDS 2" / "RDS INFO" / etc.
+    # are excluded.
     _acct_re = _re_bc.compile(r"\(([a-z0-9._-]{3,30})\)\s*$", _re_bc.I)
-    for _ch in ("RDS", "TVA Sports"):
-        seen_acct: set[tuple[str, str]] = set()
+    _decor_re = _re_bc.compile(r"(?:\s+[^\w\s]+)+\s*$")
+    def _is_exact(title: str, ch_name: str) -> bool:
+        norm = _normalize_ch(title)
+        want = ch_name.lower()
+        if norm == want:
+            return True
+        return _decor_re.sub("", norm).strip() == want
+    for _ch in ("RDS", "RDS 2", "RDS INFO", "TVA Sports", "TVA Sports 2"):
+        per_acct: dict[str, str] = {}   # acct → first matching url
         for cand in all_channels:
-            if not _ch_matches(cand.get("title", ""), _ch):
+            title = cand.get("title", "")
+            if not _is_exact(title, _ch):
                 continue
-            m = _acct_re.search(cand.get("title", ""))
+            m = _acct_re.search(title)
             if not m:
                 continue
             acct = m.group(1).lower()
-            url  = cand.get("url", "")
-            if not url or (acct, url) in seen_acct:
+            if acct in per_acct:
                 continue
-            seen_acct.add((acct, url))
+            url = cand.get("url", "")
+            if url:
+                per_acct[acct] = url
+        for acct, url in per_acct.items():
             result.append({
                 "name":         f"{_ch} [{acct}]",
                 "primary_url":  url,
