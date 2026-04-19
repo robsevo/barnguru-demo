@@ -7792,8 +7792,6 @@ _BARNCENTRE_CHANNEL_NAMES = [
     # Canadian — Sportsnet
     "Sportsnet East", "Sportsnet Ontario", "Sportsnet West", "Sportsnet Pacific",
     "Sportsnet 360", "Sportsnet One",
-    # Canadian French
-    "RDS", "RDS 2", "RDS INFO", "TVA Sports", "TVA Sports 2",
     # US national
     "ESPN", "ESPN2", "ESPN+",
     "NHL Network",
@@ -7802,6 +7800,9 @@ _BARNCENTRE_CHANNEL_NAMES = [
     "NESN",
     # US sports betting / general sports
     "FanDuel",
+    # Canadian French — at the back, grouped by network
+    "RDS", "RDS 2", "RDS INFO",
+    "TVA Sports", "TVA Sports 2",
 ]
 
 import re as _re_bc
