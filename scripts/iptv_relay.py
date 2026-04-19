@@ -168,12 +168,16 @@ async def proxy_m3u8(u: str, request: Request) -> Response:
 
 @app.get("/ts")
 async def proxy_ts(u: str, request: Request) -> Response:
+    # Segments are served from upstream-controlled CDN hosts (e.g. lb58.xxip9.top
+    # for tv14s). The host allowlist is only enforced on /m3u8 (where the URL is
+    # user-supplied); on /ts the token — or lack of a publicly-reachable tunnel —
+    # is the access control.
     _check_token(request)
     url = unquote(u)
-    _check_host(url)
 
     # Some providers chain .m3u8s through paths that this relay can't guess
-    # at rewrite time. If the URL is actually a playlist, re-route.
+    # at rewrite time. If the URL is actually a playlist, re-route (and restore
+    # host check — that path does fetch a manifest).
     if ".m3u8" in url.lower().split("?", 1)[0]:
         return await proxy_m3u8(u=u, request=request)
 
