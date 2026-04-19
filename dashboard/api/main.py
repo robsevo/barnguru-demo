@@ -5929,9 +5929,16 @@ async def _resolve_embed(embed_url: str) -> str | None:
 @app.get("/stream-resolve")
 async def stream_resolve(url: str) -> dict:
     """Resolve an embed page URL to a direct m3u8 URL (with caching)."""
-    # Fast path: already a direct m3u8
+    # Fast path: already a direct m3u8. Also catches our own relay endpoints
+    # (/hls, /m3u8) — they produce HLS manifests that hls.js can consume
+    # directly, so skip the yt-dlp / Playwright extraction layers.
     lower = url.split("?")[0].lower()
-    if lower.endswith(".m3u8") or lower.endswith("/m3u8") or lower.endswith(".mpd"):
+    if (
+        lower.endswith(".m3u8")
+        or lower.endswith("/m3u8")
+        or lower.endswith("/hls")
+        or lower.endswith(".mpd")
+    ):
         return {"type": "m3u8", "url": url}
 
     # Fast path: tvpass.org/live/* URLs redirect to thetvapp.to.
@@ -7458,10 +7465,12 @@ _NHL_KEYWORDS = [
 # ---------------------------------------------------------------------------
 _upstream_ACCOUNTS: list[tuple[str, str, int, str, str]] = [
     ("an upstream host",  "an upstream host.ddns.net", 8081, "PNbV7ywsHG",            "u7jmr3xvcM"),
-    ("tv14s",       "tv14s.xyz",           8080, "Serentiy2@ogbtv.com",   "0306@1954"),
     ("ampztl-a",    "ampztl.xyz",          8080, "arturo",                "YZcm6gw6Ukwt"),
     ("ampztl-b",    "ampztl.xyz",          8080, "webtv1847",             "YsAPRy6Jq8TJ"),
-    ("lunar",       "lunar.pm",            8080, "JeffOglesby",           "Marriage101"),
+    # Disabled: tv14s CDN tarpits our IP, lunar returns 403. Re-enable only
+    # if providers start accepting requests again.
+    # ("tv14s",       "tv14s.xyz",           8080, "Serentiy2@ogbtv.com",   "0306@1954"),
+    # ("lunar",       "lunar.pm",            8080, "JeffOglesby",           "Marriage101"),
 ]
 
 # Residential relay — scripts/iptv_relay.py run on a laptop/Pi and exposed via
