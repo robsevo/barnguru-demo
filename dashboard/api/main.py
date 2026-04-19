@@ -7467,6 +7467,8 @@ _NHL_KEYWORDS = [
     "fanduel","bally","victory",
     # Other regional US nets that carry NHL
     "nesn","nbcs","nbcsp","spectrum sportsnet","nhln",
+    # CBS Sports family — non-NHL carrier but surfaced in BarnCentre guide
+    "cbs",
 ]
 
 # ---------------------------------------------------------------------------
