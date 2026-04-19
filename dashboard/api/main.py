@@ -7787,6 +7787,9 @@ def _normalize_ch(title: str) -> str:
     return t.strip().lower()
 
 
+_SHORT_FR_DISPLAYS = {"rds", "rds2", "rds info", "tva sports", "tva sports 2"}
+
+
 def _ch_matches(raw_title: str, ch_name: str) -> bool:
     """Return True if an IPTV channel title matches our BarnCentre channel name."""
     norm  = _normalize_ch(raw_title)
@@ -7797,6 +7800,14 @@ def _ch_matches(raw_title: str, ch_name: str) -> bool:
     # Also handle "espn+" ↔ "espnplus" / "espn plus"
     if want == "espn+":
         return norm in ("espnplus", "espn plus", "espn+") or norm.startswith("espn+ ") or norm.startswith("espnplus ")
+    # French-network fallback: providers label RDS as "Canal RDS HD" etc. which
+    # normalises to "canal rds" ≠ "rds". Accept if every token of the display
+    # name appears in the normalised title. Narrow to French displays so ESPN /
+    # Sportsnet don't over-match.
+    if want in _SHORT_FR_DISPLAYS:
+        tokens = [t for t in want.split() if len(t) >= 2]
+        if tokens and all(tok in norm for tok in tokens):
+            return True
     return False
 
 
@@ -7806,6 +7817,10 @@ async def _verify_stream_alive(url: str, timeout: float = 6.0) -> bool:
     For tvpass.org/live/* URLs: follow 302 → check final URL is m3u8 + HTTP 200.
     For direct m3u8 URLs: do a lightweight HEAD/GET.
     Returns False on timeout, 404/403, or non-m3u8 destination.
+
+    Note on ngrok: a browser UA triggers ngrok's HTML interstitial (200 OK) even
+    when the upstream is 404. Send `ngrok-skip-browser-warning` so the relay
+    returns the true upstream status instead of lying.
     """
     import httpx as _hx_v
     try:
@@ -7813,8 +7828,8 @@ async def _verify_stream_alive(url: str, timeout: float = 6.0) -> bool:
             follow_redirects=True,
             timeout=timeout,
             headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                              "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "User-Agent": "Grtzky-StreamVerifier/1.0",
+                "ngrok-skip-browser-warning": "skip",
                 "Referer":  "https://tvpass.org/",
                 "Origin":   "https://tvpass.org",
             },
@@ -7836,13 +7851,20 @@ async def _verify_stream_alive(url: str, timeout: float = 6.0) -> bool:
 
 
 def _sort_by_url_priority(candidates: list[dict]) -> list[dict]:
-    """Sort channel candidates: tvpass.org redirect URLs first (fresh token), raw CDN second."""
+    """Sort channel candidates: tvpass.org redirect URLs first (fresh token), raw CDN second.
+
+    an upstream host is last — their /play/TOKEN/m3u8 endpoints 404 on real browsers
+    (ngrok warning page masks this as 200); the only working endpoint serves raw
+    MPEG-TS which hls.js cannot consume.
+    """
     def _prio(m: dict) -> int:
         u = m["url"]
         if "tvpass.org/live" in u:
             return 0
         if "thetvapp.to" in u:
             return 1
+        if "an upstream host" in u:
+            return 3
         return 2
     return sorted(candidates, key=_prio)
 

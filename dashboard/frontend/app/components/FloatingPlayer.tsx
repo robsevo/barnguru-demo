@@ -194,7 +194,11 @@ export default function FloatingPlayer() {
         // explicitly so browsers allow autoplay without user interaction.
         videoEl.muted = true;
 
-        hlsInstance = new Hls({ enableWorker: true, lowLatencyMode: true });
+        hlsInstance = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+          xhrSetup: (xhr) => { xhr.setRequestHeader("ngrok-skip-browser-warning", "skip"); },
+        });
         hlsInstance.loadSource(src);
         hlsInstance.attachMedia(videoEl);
         hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {

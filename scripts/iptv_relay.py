@@ -30,6 +30,7 @@ from urllib.parse import quote, unquote, urljoin, urlparse
 import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 PORT          = int(os.environ.get("IPTV_RELAY_PORT", "9000"))
@@ -82,6 +83,15 @@ class _LRU:
 
 
 app = FastAPI()
+# hls.js sends `ngrok-skip-browser-warning` on every segment request, which
+# triggers a CORS preflight against this cross-origin relay. Handle it here.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
 seg_cache = _LRU(CACHE_BYTES)
 
 
