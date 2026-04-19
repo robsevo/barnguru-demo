@@ -7812,6 +7812,9 @@ _BARNCENTRE_CHANNEL_NAMES = [
     "NESN",
     # US sports betting / general sports
     "FanDuel",
+    # US regional — Bally Sports (an upstream host carries 30 regional feeds;
+    # single card multiplexes them all as backups)
+    "Bally Sports",
     # US — CBS Sports (placed right before the French block)
     "CBS Sports", "CBS Sports Network",
     # Canadian French — at the back, grouped by network

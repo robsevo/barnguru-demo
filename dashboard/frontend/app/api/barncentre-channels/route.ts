@@ -16,7 +16,7 @@ const upstream_ACCOUNTS = [
 
 const NHL_KEYWORDS = [
   "espn","tnt","tbs","nhl","sportsnet","tsn","msg","fox sport","fs1","fs2",
-  "nesn","fanduel","bally","victory","nhln","rds","tva",
+  "nesn","fanduel","bally","victory","nhln","cbs","rds","tva",
 ];
 
 // Channel name aliases — maps normalized upstream names → our BarnCentre names
@@ -92,7 +92,10 @@ async function fetchupstreamChannels(): Promise<Map<string, string[]>> {
         const norm = normalizeupstreamName(rawName);
         if (!NHL_KEYWORDS.some(k => norm.includes(k) || rawName.toLowerCase().includes(k))) { i++; continue; }
 
-        const catalogName = NAME_MAP[norm];
+        // Bally Sports has 30 regional feeds ("bally sports detroit",
+        // "bally sports florida", …); collapse them all onto one BarnCentre card.
+        let catalogName = NAME_MAP[norm];
+        if (!catalogName && norm.startsWith("bally sports")) catalogName = "Bally Sports";
         if (catalogName) {
           const existing = channelMap.get(catalogName) ?? [];
           if (!existing.includes(streamUrl)) existing.push(streamUrl);
@@ -115,12 +118,15 @@ const ALL_CHANNEL_NAMES = [
   "TSN1","TSN2","TSN3","TSN4","TSN5",
   "Sportsnet East","Sportsnet Ontario","Sportsnet West","Sportsnet Pacific",
   "Sportsnet 360","Sportsnet One",
-  "RDS","TVA Sports",
-  "ESPN","ESPN2","ESPN+",
+  "ESPN","ESPN2",
   "NHL Network",
   "FS1","FS2",
   "NESN",
   "FanDuel",
+  "Bally Sports",
+  "CBS Sports","CBS Sports Network",
+  "RDS","RDS 2","RDS INFO",
+  "TVA Sports","TVA Sports 2",
 ];
 
 export async function GET() {

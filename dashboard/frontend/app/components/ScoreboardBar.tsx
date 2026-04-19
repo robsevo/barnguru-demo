@@ -7,6 +7,14 @@ import { logoUrl } from "@/utils/nhl";
 import { useScoreHidden, useHideAllScores } from "@/utils/scoreVisibility";
 import { useTheme } from "@/utils/themeContext";
 
+interface SeriesStatus {
+  topSeedTeamAbbrev?: string;
+  topSeedWins?: number;
+  bottomSeedTeamAbbrev?: string;
+  bottomSeedWins?: number;
+  gameNumberOfSeries?: number;
+}
+
 interface Game {
   game_id: number;
   date: string;
@@ -25,9 +33,23 @@ interface Game {
   home_on_pp?: boolean;
   away_skaters?: number;
   home_skaters?: number;
+  series_status?: SeriesStatus | null;
 }
 
 const NHL_INT_SECS = 18 * 60; // 18-minute intermission
+const PRE_GAME_COUNTDOWN_CAP_SECS = 3 * 3600;
+
+function formatSeriesScore(s: SeriesStatus | null | undefined): string | null {
+  if (!s) return null;
+  const tw = s.topSeedWins ?? 0;
+  const bw = s.bottomSeedWins ?? 0;
+  const top = s.topSeedTeamAbbrev;
+  const bot = s.bottomSeedTeamAbbrev;
+  if (!top || !bot) return null;
+  if (tw === 0 && bw === 0) return `G${s.gameNumberOfSeries ?? 1}`;
+  if (tw === bw) return `TIED ${tw}-${bw}`;
+  return tw > bw ? `${top} ${tw}-${bw}` : `${bot} ${bw}-${tw}`;
+}
 
 function formatTime(utc: string | null): string {
   if (!utc) return "--:--";
@@ -238,6 +260,17 @@ function GameCard({ g }: { g: Game }) {
   // Countdown colour — grey normally, red when ≤5 min (300s)
   const countdownSecs = countdown?.secs ?? Infinity;
   const countdownClr = countdownSecs <= 300 ? "text-[#f87171]" : "text-white/35";
+  // Playoff series chip — replaces the countdown outside the 3-hour window
+  // and appends to FINAL so the card carries series context at a glance.
+  const seriesText = formatSeriesScore(g.series_status);
+  const inFarPreWindow = isPre && countdown != null && countdown.secs > PRE_GAME_COUNTDOWN_CAP_SECS;
+  const rightText =
+    isFinal && seriesText     ? seriesText :
+    inFarPreWindow && seriesText ? seriesText :
+    (isPre && !countdown && seriesText) ? seriesText :
+    countdown?.text ?? null;
+  const rightIsSeries = rightText === seriesText && seriesText != null && (isFinal || inFarPreWindow || (isPre && !countdown));
+  const rightClr = rightIsSeries ? "text-[#C9A84C]/75" : countdownClr;
 
   return (
     <Link href={`/game/${g.game_id}`} className="block shrink-0 w-[132px]">
@@ -255,9 +288,9 @@ function GameCard({ g }: { g: Game }) {
         }`}>
           {hideScores && (isLive || isFinal) && !isInt ? "—" : label}
         </span>
-        {(isInt || !hideScores) && countdown && (
-          <span className={`text-[11px] font-black font-mono tabular-nums ml-auto shrink-0 ${countdownClr}`}>
-            {countdown.text}
+        {(isInt || !hideScores) && rightText && (
+          <span className={`text-[11px] font-black font-mono tabular-nums ml-auto shrink-0 ${rightClr}`}>
+            {rightText}
           </span>
         )}
       </div>
