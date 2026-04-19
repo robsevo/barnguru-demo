@@ -6008,6 +6008,10 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
                       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer": _referer,
         "Origin": _referer.rstrip("/"),
+        # Some upstream upstreams route through ngrok (IPTV_LOCAL_PROXY_URL). ngrok's
+        # interstitial swallows browser-UA requests with a 200-OK HTML warning
+        # page, which _rewrite_m3u8 then treats as a manifest and feeds to hls.js.
+        "ngrok-skip-browser-warning": "skip",
     }
 
     cors_headers = {
