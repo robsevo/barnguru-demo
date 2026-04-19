@@ -7473,7 +7473,13 @@ _upstream_HOSTS: frozenset[str] = frozenset(h for _, h, *_ in _upstream_ACCOUNTS
 
 
 def _rewrite_iptv_url(url: str) -> str:
-    """Route an upstream stream URL through the local residential relay, if configured."""
+    """Route an upstream stream URL through the local residential relay, if configured.
+
+    Playlist URLs (.m3u8) → /m3u8: fetch + rewrite segment URIs back through tunnel.
+    Non-playlist URLs     → /hls:  ffmpeg-transmux raw MPEG-TS into a rolling HLS
+                                   playlist (needed for ampztl and other TS-only
+                                   accounts that hls.js cannot consume directly).
+    """
     tunnel = (os.environ.get("IPTV_LOCAL_PROXY_URL") or "").rstrip("/")
     if not tunnel or not url.startswith("http"):
         return url
@@ -7483,10 +7489,17 @@ def _rewrite_iptv_url(url: str) -> str:
         return url
     if host.lower() not in _upstream_HOSTS:
         return url
-    endpoint = "m3u8" if ".m3u8" in url.lower().split("?", 1)[0] else "ts"
+    # an upstream host hard-codes `/play/<token>/m3u8` in its M3U, but that path
+    # returns 404 — only the `/ts` variant serves raw MPEG-TS. Rewrite to /ts.
+    inner = url
+    if host.lower() == "an upstream host.ddns.net":
+        pre, sep, _ = inner.partition("?")
+        if pre.endswith("/m3u8"):
+            inner = pre[:-len("/m3u8")] + "/ts" + (sep + _ if sep else "")
+    endpoint = "m3u8" if ".m3u8" in inner.lower().split("?", 1)[0] else "hls"
     token    = os.environ.get("IPTV_RELAY_TOKEN") or ""
     tq       = f"&t={quote(token, safe='')}" if token else ""
-    return f"{tunnel}/{endpoint}?u={quote(url, safe='')}{tq}"
+    return f"{tunnel}/{endpoint}?u={quote(inner, safe='')}{tq}"
 
 
 async def _fetch_upstream_channels(
@@ -7496,13 +7509,15 @@ async def _fetch_upstream_channels(
     Fetch the M3U playlist from an upstream Codes server and return NHL-relevant
     channels as standardized channel dicts.
 
-    Stream URLs use HLS (output=m3u8) so hls.js can play them directly.
-    Accounts that don't advertise m3u8 in allowed_output_formats are skipped —
-    their .m3u8 endpoint returns 405 (only ts is served), which hls.js can't play.
+    Prefers HLS (output=m3u8) so the /m3u8 relay can passthrough-rewrite the
+    playlist cheaply. Accounts that only advertise `ts` fall back to the raw
+    MPEG-TS path — the URL rewriter routes those through the relay's /hls
+    endpoint (ffmpeg transmux) so hls.js can still consume them.
     """
     base = f"http://{host}:{port}"
     ua   = _BROWSER_HEADERS["User-Agent"]
 
+    output_fmt = "m3u8"
     try:
         async with _httpx_backup.AsyncClient(timeout=10.0, follow_redirects=True) as hx:
             probe = await hx.get(
@@ -7510,15 +7525,20 @@ async def _fetch_upstream_channels(
                 headers={"User-Agent": ua},
             )
         if probe.status_code == 200:
-            fmts = (probe.json().get("user_info") or {}).get("allowed_output_formats") or []
-            if "m3u8" not in [str(f).lower() for f in fmts]:
+            fmts = [str(f).lower() for f in
+                    (probe.json().get("user_info") or {}).get("allowed_output_formats") or []]
+            if "m3u8" in fmts:
+                output_fmt = "m3u8"
+            elif "ts" in fmts:
+                output_fmt = "ts"
+            else:
                 return []
     except Exception:
-        pass  # probe failure is not fatal — fall through to M3U fetch
+        pass  # probe failure is not fatal — fall through to M3U fetch with m3u8 default
 
     url = (
         f"{base}/get.php?username={username}&password={password}"
-        f"&type=m3u_plus&output=m3u8"
+        f"&type=m3u_plus&output={output_fmt}"
     )
     try:
         async with _httpx_backup.AsyncClient(timeout=20.0, follow_redirects=True) as hx:
@@ -7833,11 +7853,37 @@ async def _verify_stream_alive(url: str, timeout: float = 6.0) -> bool:
     For direct m3u8 URLs: do a lightweight HEAD/GET.
     Returns False on timeout, 404/403, or non-m3u8 destination.
 
+    Relay /hls URLs: don't probe directly — that would spawn ffmpeg and stream
+    video just to health-check. Decode the inner upstream TS URL and range-probe
+    the first KB instead.
+
     Note on ngrok: a browser UA triggers ngrok's HTML interstitial (200 OK) even
     when the upstream is 404. Send `ngrok-skip-browser-warning` so the relay
     returns the true upstream status instead of lying.
     """
     import httpx as _hx_v
+    from urllib.parse import parse_qs as _parse_qs, urlparse as _urlparse
+
+    # /hls passthrough: probe the decoded TS URL, not the ffmpeg-backed endpoint.
+    if "/hls?" in url and "u=" in url:
+        try:
+            inner = _parse_qs(_urlparse(url).query).get("u", [""])[0]
+            if inner:
+                inner_url = unquote(inner)
+                async with _hx_v.AsyncClient(
+                    follow_redirects=True,
+                    timeout=timeout,
+                    headers={
+                        "User-Agent": _BROWSER_HEADERS["User-Agent"],
+                        "Range":      "bytes=0-1023",
+                    },
+                ) as cl:
+                    r = await cl.get(inner_url)
+                    return r.status_code in (200, 206) and len(r.content) > 0
+        except Exception:
+            return False
+        return False
+
     try:
         async with _hx_v.AsyncClient(
             follow_redirects=True,
@@ -8360,6 +8406,32 @@ async def barncentre_channels() -> dict:
     # Preserve the _BARNCENTRE_CHANNEL_NAMES ordering
     order  = {n: i for i, n in enumerate(_BARNCENTRE_CHANNEL_NAMES)}
     result.sort(key=lambda ch: order.get(ch["name"], 999))
+
+    # ── TEMP: per-account RDS/TVA test chips ─────────────────────────────────
+    # So Bob can click each variant and identify which upstream account actually
+    # plays. Removed once we know which path works. Skips liveness verification.
+    _acct_re = _re_bc.compile(r"\(([a-z0-9._-]{3,30})\)\s*$", _re_bc.I)
+    for _ch in ("RDS", "TVA Sports"):
+        seen_acct: set[tuple[str, str]] = set()
+        for cand in all_channels:
+            if not _ch_matches(cand.get("title", ""), _ch):
+                continue
+            m = _acct_re.search(cand.get("title", ""))
+            if not m:
+                continue
+            acct = m.group(1).lower()
+            url  = cand.get("url", "")
+            if not url or (acct, url) in seen_acct:
+                continue
+            seen_acct.add((acct, url))
+            result.append({
+                "name":         f"{_ch} [{acct}]",
+                "primary_url":  url,
+                "backup_urls":  [],
+                "programs":     [],
+                "online":       True,
+            })
+    # ────────────────────────────────────────────────────────────────────────
 
     _barncentre_cache["data"] = result
     _barncentre_cache["ts"]   = now_ts

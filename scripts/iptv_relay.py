@@ -21,10 +21,15 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import os
 import re
+import shutil
+import subprocess
 import time
 from collections import OrderedDict
+from pathlib import Path
 from urllib.parse import quote, unquote, urljoin, urlparse
 
 import httpx
@@ -38,6 +43,16 @@ TOKEN         = os.environ.get("IPTV_RELAY_TOKEN") or None
 CACHE_BYTES   = int(os.environ.get("IPTV_RELAY_CACHE_MB", "300")) * 1024 * 1024
 CACHE_TTL_S   = 30.0
 FETCH_TIMEOUT = 20.0
+
+# TS→HLS transmux: ampztl and other upstream accounts that only serve raw MPEG-TS
+# can't be played by hls.js directly. /hls spawns ffmpeg to repackage the TS
+# into a rolling HLS playlist on disk; the browser consumes the manifest and
+# segments from this relay.
+HLS_WORKDIR            = Path("/tmp/iptv_relay_hls")
+HLS_SEGMENT_SECONDS    = 4
+HLS_LIST_SIZE          = 6
+HLS_IDLE_TIMEOUT_S     = 30.0
+HLS_STARTUP_TIMEOUT_S  = 15.0
 
 # Defence-in-depth: tunnel is publicly reachable, so refuse any URL not
 # pointing at one of the upstream hosts wired in dashboard/api/main.py.
@@ -210,9 +225,203 @@ async def proxy_ts(u: str, request: Request) -> Response:
     return Response(content=data, media_type=ct, headers={**_CORS, "X-Cache": "MISS"})
 
 
+# ---------------------------------------------------------------------------
+# /hls — TS→HLS transmux for accounts that only serve raw MPEG-TS
+# ---------------------------------------------------------------------------
+
+class _HLSSession:
+    __slots__ = ("id", "url", "workdir", "proc", "last_access", "started_at")
+
+    def __init__(self, sid: str, url: str, workdir: Path) -> None:
+        self.id          = sid
+        self.url         = url
+        self.workdir     = workdir
+        self.proc: subprocess.Popen[bytes] | None = None
+        self.last_access = time.monotonic()
+        self.started_at  = time.monotonic()
+
+
+_HLS_SESSIONS:  dict[str, _HLSSession] = {}
+_HLS_LOCK       = asyncio.Lock()
+_HLS_REAPER: asyncio.Task[None] | None = None
+_SEG_NAME_RE    = re.compile(r"^seg\d{4,}\.ts$")
+_BROWSER_UA     = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+
+
+def _hls_session_id(url: str) -> str:
+    return hashlib.sha1(url.encode()).hexdigest()[:16]
+
+
+async def _ensure_hls_reaper() -> None:
+    global _HLS_REAPER
+    if _HLS_REAPER is None or _HLS_REAPER.done():
+        _HLS_REAPER = asyncio.create_task(_hls_reaper())
+
+
+async def _hls_reaper() -> None:
+    while True:
+        await asyncio.sleep(10)
+        try:
+            now = time.monotonic()
+            expired: list[_HLSSession] = []
+            async with _HLS_LOCK:
+                for sid, sess in list(_HLS_SESSIONS.items()):
+                    if now - sess.last_access > HLS_IDLE_TIMEOUT_S:
+                        expired.append(sess)
+                        del _HLS_SESSIONS[sid]
+            for sess in expired:
+                _kill_session(sess)
+        except Exception:
+            # Reaper must never die — keep looping
+            continue
+
+
+def _kill_session(sess: _HLSSession) -> None:
+    if sess.proc is not None and sess.proc.poll() is None:
+        sess.proc.terminate()
+        try:
+            sess.proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            sess.proc.kill()
+    shutil.rmtree(sess.workdir, ignore_errors=True)
+
+
+async def _start_or_get_hls_session(url: str) -> _HLSSession:
+    sid = _hls_session_id(url)
+
+    async with _HLS_LOCK:
+        existing = _HLS_SESSIONS.get(sid)
+        if existing is not None and existing.proc is not None and existing.proc.poll() is None:
+            existing.last_access = time.monotonic()
+            return existing
+
+        workdir = HLS_WORKDIR / sid
+        if workdir.exists():
+            shutil.rmtree(workdir, ignore_errors=True)
+        workdir.mkdir(parents=True, exist_ok=True)
+
+        args = [
+            "ffmpeg", "-hide_banner", "-loglevel", "warning",
+            "-user_agent", _BROWSER_UA,
+            "-reconnect", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "5",
+            "-i", url,
+            "-c", "copy",
+            "-f", "hls",
+            "-hls_time", str(HLS_SEGMENT_SECONDS),
+            "-hls_list_size", str(HLS_LIST_SIZE),
+            "-hls_flags", "delete_segments+omit_endlist+independent_segments",
+            "-hls_segment_filename", str(workdir / "seg%04d.ts"),
+            str(workdir / "live.m3u8"),
+        ]
+        proc = subprocess.Popen(
+            args,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        sess = _HLSSession(sid, url, workdir)
+        sess.proc = proc
+        _HLS_SESSIONS[sid] = sess
+
+    manifest = sess.workdir / "live.m3u8"
+    deadline = time.monotonic() + HLS_STARTUP_TIMEOUT_S
+    while time.monotonic() < deadline:
+        if manifest.exists() and manifest.stat().st_size > 0:
+            return sess
+        if sess.proc is not None and sess.proc.poll() is not None:
+            stderr_tail = b""
+            if sess.proc.stderr is not None:
+                try:
+                    stderr_tail = sess.proc.stderr.read() or b""
+                except Exception:
+                    pass
+            async with _HLS_LOCK:
+                _HLS_SESSIONS.pop(sid, None)
+            _kill_session(sess)
+            raise HTTPException(
+                status_code=502,
+                detail=f"ffmpeg exited early: {stderr_tail.decode(errors='replace')[:400]}",
+            )
+        await asyncio.sleep(0.25)
+
+    async with _HLS_LOCK:
+        _HLS_SESSIONS.pop(sid, None)
+    _kill_session(sess)
+    raise HTTPException(status_code=504, detail="ffmpeg did not produce manifest in time")
+
+
+@app.get("/hls")
+async def proxy_hls(u: str, request: Request) -> Response:
+    """Transmux a raw MPEG-TS upstream into a rolling HLS playlist.
+
+    Shared by session id = sha1(url)[:16], so N viewers on the same channel
+    cost one ffmpeg process, not N. Segments are served via /hls-seg/<sid>/<f>.
+    """
+    _check_token(request)
+    url = unquote(u)
+    _check_host(url)
+
+    await _ensure_hls_reaper()
+
+    sess = await _start_or_get_hls_session(url)
+    sess.last_access = time.monotonic()
+
+    try:
+        body = (sess.workdir / "live.m3u8").read_text()
+    except FileNotFoundError:
+        raise HTTPException(status_code=503, detail="manifest not yet available")
+
+    tunnel_base = _tunnel_base(request)
+    token_q     = f"&t={quote(TOKEN, safe='')}" if TOKEN else ""
+    out: list[str] = []
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            out.append(f"{tunnel_base}/hls-seg/{sess.id}/{stripped}?k=1{token_q}")
+        else:
+            out.append(line)
+    rewritten = "\n".join(out) + "\n"
+
+    return Response(
+        content=rewritten,
+        media_type="application/vnd.apple.mpegurl",
+        headers={**_CORS, "Cache-Control": "no-cache"},
+    )
+
+
+@app.get("/hls-seg/{session_id}/{segment}")
+async def proxy_hls_segment(session_id: str, segment: str, request: Request) -> Response:
+    _check_token(request)
+
+    if not _SEG_NAME_RE.match(segment):
+        raise HTTPException(status_code=400, detail="invalid segment name")
+
+    sess = _HLS_SESSIONS.get(session_id)
+    if sess is None:
+        raise HTTPException(status_code=410, detail="session expired")
+    sess.last_access = time.monotonic()
+
+    path = sess.workdir / segment
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="segment not ready")
+
+    data = path.read_bytes()
+    return Response(
+        content=data,
+        media_type="video/mp2t",
+        headers={**_CORS, "Cache-Control": "no-cache"},
+    )
+
+
 if __name__ == "__main__":
+    HLS_WORKDIR.mkdir(parents=True, exist_ok=True)
+    if not shutil.which("ffmpeg"):
+        print("[iptv-relay] WARNING: ffmpeg not found on PATH — /hls endpoint will 502")
     print(f"[iptv-relay] port {PORT} — token: {'SET' if TOKEN else 'none (set IPTV_RELAY_TOKEN for auth)'}")
     print(f"[iptv-relay] cache: {CACHE_BYTES // 1024 // 1024} MB / {CACHE_TTL_S}s TTL")
     print(f"[iptv-relay] allowed hosts: {sorted(ALLOWED_HOSTS)}")
+    print(f"[iptv-relay] hls workdir: {HLS_WORKDIR} (idle timeout {HLS_IDLE_TIMEOUT_S}s)")
     print(f"[iptv-relay] next step: `ngrok http {PORT}` (or `cloudflared tunnel …`)")
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
