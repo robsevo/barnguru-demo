@@ -5152,6 +5152,10 @@ async def game_iptv_streams(game_id: int) -> dict:
             ch for ch in curated_channels
             if _matches_broadcast(ch.get("title", ""), display)
         ]
+        # Sort so working URLs land first (tvpass redirect → thetvapp → generic
+        # upstream → an upstream host). Same ordering /barncentre-channels uses — keeps
+        # TVA Sports from picking an upstream host's dead /play/TOKEN/m3u8 as primary.
+        matched = _sort_by_url_priority(matched)
         # Always emit a row — the frontend renders unmatched rows as disabled
         # chips so Bob sees the full broadcast slate, not just what we resolved.
         result.append({
