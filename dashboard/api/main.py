@@ -7805,7 +7805,7 @@ _BARNCENTRE_CHANNEL_NAMES = [
     "Sportsnet East", "Sportsnet Ontario", "Sportsnet West", "Sportsnet Pacific",
     "Sportsnet 360", "Sportsnet One",
     # US national
-    "ESPN", "ESPN2", "ESPN+",
+    "ESPN", "ESPN2",
     "NHL Network",
     "FS1", "FS2",
     # US regional (big-market)
