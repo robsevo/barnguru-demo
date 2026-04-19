@@ -7812,9 +7812,10 @@ _BARNCENTRE_CHANNEL_NAMES = [
     "FanDuel",
     # US — CBS Sports (placed right before the French block)
     "CBS Sports", "CBS Sports Network",
-    # Canadian French — at the back, grouped by network
-    "RDS", "RDS 2", "RDS INFO",
-    "TVA Sports", "TVA Sports 2",
+    # Canadian French — at the back, primary feeds adjacent then the 2s, info last
+    "RDS", "TVA Sports",
+    "RDS 2", "TVA Sports 2",
+    "RDS INFO",
 ]
 
 import re as _re_bc
