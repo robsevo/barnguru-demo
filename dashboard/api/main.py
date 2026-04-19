@@ -7863,7 +7863,7 @@ def _ch_matches(raw_title: str, ch_name: str) -> bool:
     return False
 
 
-async def _verify_stream_alive(url: str, timeout: float = 6.0) -> bool:
+async def _verify_stream_alive(url: str, timeout: float = 10.0) -> bool:
     """Follow redirects and confirm the URL resolves to a reachable HLS stream.
 
     For tvpass.org/live/* URLs: follow 302 → check final URL is m3u8 + HTTP 200.
@@ -7925,6 +7925,12 @@ async def _verify_stream_alive(url: str, timeout: float = 6.0) -> bool:
             # Other 2xx destinations (embed pages) — treat as available
             return r.status_code < 400
     except Exception:
+        # tvpass is our most reliable source; a transient timeout from the
+        # verifier shouldn't flip the chip to "No signal" when the stream
+        # actually plays (Bob saw FS2 marked offline while it was live).
+        # Be optimistic for tvpass; strict for everything else.
+        if "tvpass.org/live/" in url:
+            return True
         return False
 
 
