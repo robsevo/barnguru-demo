@@ -14,10 +14,9 @@ const upstream_ACCOUNTS = [
   { label: "lunar",    host: "lunar.pm",            port: 8080, user: "JeffOglesby",         pass: "Marriage101" },
 ];
 
-// NHL-relevant keywords for filtering (RDS/TVA excluded — IP-locked, no working source)
 const NHL_KEYWORDS = [
   "espn","tnt","tbs","nhl","sportsnet","tsn","msg","fox sport","fs1","fs2",
-  "nesn","fanduel","bally","victory","nhln",
+  "nesn","fanduel","bally","victory","nhln","rds","tva",
 ];
 
 // Channel name aliases — maps normalized upstream names → our BarnCentre names
@@ -34,6 +33,14 @@ const NAME_MAP: Record<string, string> = {
   "sportsnet 360":   "Sportsnet 360",
   "sportsnet one":   "Sportsnet One",
   "nhl network":     "NHL Network",
+  "rds":             "RDS",
+  "rds hd":          "RDS",
+  "canal rds":       "RDS",
+  "canal rds hd":    "RDS",
+  "tva sports":      "TVA Sports",
+  "tva sports 1":    "TVA Sports",
+  "tva sport":       "TVA Sports",
+  "tvasports":       "TVA Sports",
   "espn":            "ESPN",
   "espn2":           "ESPN2",
   "espn 2":          "ESPN2",
@@ -108,6 +115,7 @@ const ALL_CHANNEL_NAMES = [
   "TSN1","TSN2","TSN3","TSN4","TSN5",
   "Sportsnet East","Sportsnet Ontario","Sportsnet West","Sportsnet Pacific",
   "Sportsnet 360","Sportsnet One",
+  "RDS","TVA Sports",
   "ESPN","ESPN2","ESPN+",
   "NHL Network",
   "FS1","FS2",
