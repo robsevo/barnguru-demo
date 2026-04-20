@@ -109,14 +109,82 @@ const NAME_CLASS: Record<PhaseStatus, string> = {
 
 // Nav items — Live Games dot is rendered dynamically based on live status
 const NAV_ITEMS = [
-  { href: "/",             label: "Home",          dot: "static", dotClass: "bg-white/20",                                                           active: (p: string) => p === "/" },
+  { href: "/",             label: "Home",          dot: "static", dotClass: "bg-[#22d3ee]/75 shadow-[0_0_5px_rgba(34,211,238,0.55)]",               active: (p: string) => p === "/" },
   { href: "/gamecentre",   label: "Games",         dot: "live",   dotClass: "",                                                                      active: (p: string) => p === "/gamecentre" || p.startsWith("/game/") },
-  { href: "/league/teams", label: "Teams",         dot: "static", dotClass: "bg-white/20",                                                           active: (p: string) => p.startsWith("/league") || p.startsWith("/teams/") },
-  { href: "/stats",        label: "Stats Leaders", dot: "static", dotClass: "bg-white/35 shadow-[0_0_5px_rgba(210,215,220,0.5)]",                   active: (p: string) => p === "/stats" },
+  { href: "/league/teams", label: "Teams",         dot: "static", dotClass: "bg-[#fb923c]/75 shadow-[0_0_5px_rgba(251,146,60,0.55)]",               active: (p: string) => p.startsWith("/league") || p.startsWith("/teams/") },
+  { href: "/stats",        label: "Stats Leaders", dot: "static", dotClass: "bg-[#f472b6]/70 shadow-[0_0_5px_rgba(244,114,182,0.55)]",              active: (p: string) => p === "/stats" },
   { href: "/standings",    label: "Standings",     dot: "static", dotClass: "bg-[#fbbf24]/70 shadow-[0_0_5px_rgba(251,191,36,0.6)]",                active: (p: string) => p === "/standings" },
   { href: "/players",      label: "Cortex",        dot: "static", dotClass: "bg-[#a78bfa] shadow-[0_0_6px_rgba(167,139,250,0.8)]",                  active: (p: string) => p === "/players" || p.startsWith("/players/") },
   { href: "/barncentre",   label: "BarnCentre",    dot: "static", dotClass: "bg-[#C9A84C]/70 shadow-[0_0_5px_rgba(201,168,76,0.6)]",                active: (p: string) => p === "/barncentre" },
 ];
+
+function NavIcon({ label }: { label: string }) {
+  const common = { width: 13, height: 13, fill: "none" as const };
+  if (label === "Home") {
+    return (
+      <svg {...common} viewBox="0 0 24 24" className="shrink-0" style={{ color: "#22d3ee" }}>
+        <path d="M3 11L12 3L21 11V21H14V14H10V21H3V11Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    );
+  }
+  if (label === "Games") {
+    return (
+      <svg {...common} viewBox="0 0 24 24" className="shrink-0" style={{ color: "#4ade80" }}>
+        <ellipse cx="12" cy="12" rx="8" ry="3.5" stroke="currentColor" strokeWidth="1.8" fill="rgba(74,222,128,0.12)"/>
+        <path d="M4 12C4 14.2 7.6 16 12 16C16.4 16 20 14.2 20 12" stroke="currentColor" strokeWidth="1.8"/>
+      </svg>
+    );
+  }
+  if (label === "Teams") {
+    return (
+      <svg {...common} viewBox="0 0 24 24" className="shrink-0" style={{ color: "#fb923c" }}>
+        <circle cx="9" cy="9" r="3" stroke="currentColor" strokeWidth="1.8"/>
+        <circle cx="17" cy="10" r="2.4" stroke="currentColor" strokeWidth="1.6"/>
+        <path d="M3 20C3 16.5 6 14.5 9 14.5C12 14.5 15 16.5 15 20" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+        <path d="M15.5 20C15.5 17.5 17 16 19 16C20.5 16 21.5 16.8 21.5 18.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      </svg>
+    );
+  }
+  if (label === "Stats Leaders") {
+    return (
+      <svg {...common} viewBox="0 0 24 24" className="shrink-0" style={{ color: "#f472b6" }}>
+        <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="1.8"/>
+        <path d="M8.5 11L7 21L12 18L17 21L15.5 11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    );
+  }
+  if (label === "Standings") {
+    return (
+      <svg {...common} viewBox="0 0 24 24" className="shrink-0" style={{ color: "#fbbf24" }}>
+        <rect x="1.5" y="14" width="4" height="7" rx="0.8" stroke="currentColor" strokeWidth="1.6" fill="rgba(251,191,36,0.10)"/>
+        <rect x="10" y="8" width="4" height="13" rx="0.8" stroke="currentColor" strokeWidth="1.6" fill="rgba(251,191,36,0.15)"/>
+        <rect x="18.5" y="2" width="4" height="19" rx="0.8" stroke="currentColor" strokeWidth="1.6" fill="rgba(251,191,36,0.20)"/>
+      </svg>
+    );
+  }
+  if (label === "Cortex") {
+    return (
+      <svg width="13" height="13" viewBox="0 0 48 48" fill="none" className="shrink-0">
+        <path d="M24 10 C18 10 11 14 9 20 C7 25 9 31 13 34 C17 37 21 37 24 37" stroke="#a78bfa" strokeWidth="2.5" strokeLinecap="round"/>
+        <path d="M24 10 C30 10 37 14 39 20 C41 25 39 31 35 34 C31 37 27 37 24 37" stroke="#a78bfa" strokeWidth="2.5" strokeLinecap="round"/>
+        <circle cx="24" cy="24" r="3.4" fill="#a78bfa" fillOpacity="0.95"/>
+      </svg>
+    );
+  }
+  if (label === "BarnCentre") {
+    return (
+      <svg width="13" height="12" viewBox="0 0 14 13" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0" style={{ color: "#C9A84C" }}>
+        <rect x="1" y="2" width="12" height="7.5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+        <line x1="4.5" y1="9.5" x2="3.5" y2="12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+        <line x1="9.5" y1="9.5" x2="10.5" y2="12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+        <line x1="3" y1="12" x2="11" y2="12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+        <line x1="4.5" y1="2" x2="2.5" y2="0.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+        <line x1="9.5" y1="2" x2="11.5" y2="0.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+      </svg>
+    );
+  }
+  return null;
+}
 
 function InnerLayout({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -254,12 +322,10 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
             </p>
             {NAV_ITEMS.map(({ href, label, active, dot, dotClass }) => {
               const isActive = active(pathname);
-              const isCortexItem = label === "Cortex";
-              const isBarnCentreItem = label === "BarnCentre";
               const liveDot = dot === "live"
                 ? hasLive
                   ? "bg-[#4ade80] shadow-[0_0_6px_rgba(74,222,128,0.9)] animate-pulse"
-                  : "bg-white/20"
+                  : "bg-[#4ade80]/40 shadow-[0_0_4px_rgba(74,222,128,0.30)]"
                 : dotClass;
               return (
                 <Link key={href} href={href} onClick={() => setOpen(false)} className="block">
@@ -267,23 +333,7 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                     <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${liveDot}`} />
                     <span className="text-[9px] font-semibold font-mono text-white/15 w-5 shrink-0">—</span>
                     <span className={`text-[11px] font-medium leading-tight flex items-center gap-1.5 ${isActive ? "text-white/90" : "text-white/60"}`}>
-                      {isCortexItem && (
-                        <svg width="12" height="12" viewBox="0 0 48 48" fill="none" aria-hidden="true" className="shrink-0">
-                          <path d="M24 10 C18 10 11 14 9 20 C7 25 9 31 13 34 C17 37 21 37 24 37" stroke="#a78bfa" strokeWidth="2.5" strokeLinecap="round" fill="none"/>
-                          <path d="M24 10 C30 10 37 14 39 20 C41 25 39 31 35 34 C31 37 27 37 24 37" stroke="#a78bfa" strokeWidth="2.5" strokeLinecap="round" fill="none"/>
-                          <circle cx="24" cy="24" r="3.2" fill="#a78bfa" fillOpacity="0.95"/>
-                        </svg>
-                      )}
-                      {isBarnCentreItem && (
-                        <svg width="12" height="11" viewBox="0 0 14 13" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0" style={{ color: "#C9A84C" }}>
-                          <rect x="1" y="2" width="12" height="7.5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
-                          <line x1="4.5" y1="9.5" x2="3.5" y2="12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                          <line x1="9.5" y1="9.5" x2="10.5" y2="12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                          <line x1="3" y1="12" x2="11" y2="12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                          <line x1="4.5" y1="2" x2="2.5" y2="0.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                          <line x1="9.5" y1="2" x2="11.5" y2="0.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                        </svg>
-                      )}
+                      <NavIcon label={label} />
                       {label}
                     </span>
                   </div>
@@ -460,9 +510,9 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
             <Link href="/" className="inline-flex items-center shrink-0 pr-1">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               {theme ? (
-                <img src={theme.logoUrl} alt={theme.abbrev} className="h-7 sm:h-8 w-auto object-contain block" />
+                <img src={theme.logoUrl} alt={theme.abbrev} className="h-9 sm:h-8 w-auto object-contain block" />
               ) : isCortexMode ? (
-                <svg width="36" height="36" viewBox="0 0 48 48" fill="none" aria-hidden="true" className="shrink-0 lg:!w-[42px] lg:!h-[42px]">
+                <svg width="40" height="40" viewBox="0 0 48 48" fill="none" aria-hidden="true" className="shrink-0 sm:!w-9 sm:!h-9 lg:!w-[42px] lg:!h-[42px]">
                   <path d="M24 2 L42 12 L42 36 L24 46 L6 36 L6 12 Z" stroke="#a78bfa" strokeWidth="0.9" strokeOpacity="0.28" fill="#a78bfa" fillOpacity="0.03"/>
                   <circle cx="24" cy="24" r="17" stroke="#a78bfa" strokeWidth="0.6" strokeOpacity="0.12" fill="none"/>
                   <path d="M24 10 C18 10 11 14 9 20 C7 25 9 31 13 34 C17 37 21 37 24 37" stroke="#a78bfa" strokeWidth="1.8" strokeLinecap="round" fill="rgba(167,139,250,0.07)"/>
@@ -485,14 +535,14 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                   <circle cx="24" cy="24" r="1.6" fill="white"   fillOpacity="0.72"/>
                 </svg>
               ) : (
-                <img src="/logo-circle.png" alt="GRTZKY" className="h-7 sm:h-8 w-auto block" />
+                <img src="/logo-circle.png" alt="GRTZKY" className="h-9 sm:h-8 w-auto block" />
               )}
               <span
-                className="h-5 w-px shrink-0 mx-2"
+                className="h-5 sm:h-5 w-px shrink-0 mx-2"
                 style={{ background: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.30)` }}
               />
               <span
-                className="font-black italic tracking-[0.06em] text-[11px] sm:text-[17px] lg:text-[20px] bg-clip-text text-transparent leading-none pr-1.5"
+                className="font-black italic tracking-[0.06em] text-[14px] sm:text-[17px] lg:text-[20px] bg-clip-text text-transparent leading-none pr-1.5"
                 style={{
                   fontFamily: "var(--font-condensed)",
                   backgroundImage: isCortexMode
