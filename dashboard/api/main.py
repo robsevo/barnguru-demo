@@ -8505,7 +8505,7 @@ async def barncentre_channels() -> dict:
         "RDS 2":        ["an upstream host", "ampztl-a", "ampztl-b"],
         "RDS INFO":     ["an upstream host"],
         "TVA Sports":   ["an upstream host"],
-        "TVA Sports 2": ["ampztl-a", "ampztl-b"],
+        "TVA Sports 2": ["an upstream host", "ampztl-a", "ampztl-b"],
     }
     _acct_re  = _re_bc.compile(r"\(([a-z0-9._-]{3,30})\)\s*$", _re_bc.I)
     _decor_re = _re_bc.compile(r"(?:\s+[^\w\s]+)+\s*$")
