@@ -7987,21 +7987,23 @@ async def _verify_stream_alive(url: str, timeout: float = 10.0) -> bool:
 
 
 def _sort_by_url_priority(candidates: list[dict]) -> list[dict]:
-    """Sort channel candidates: tvpass.org redirect URLs first (fresh token), raw CDN second.
+    """Sort channel candidates for initial game-page playback.
 
-    an upstream host is last — their /play/TOKEN/m3u8 endpoints 404 on real browsers
-    (ngrok warning page masks this as 200); the only working endpoint serves raw
-    MPEG-TS which hls.js cannot consume.
+    Field-tested order (most → least reliable): an upstream host, ampztl, tvpass,
+    thetvapp, other. The relay rewrites an upstream host's /play/TOKEN/m3u8 → /ts
+    and serves it via ffmpeg transmux, so hls.js consumes it fine.
     """
     def _prio(m: dict) -> int:
         u = m["url"]
-        if "tvpass.org/live" in u:
-            return 0
-        if "thetvapp.to" in u:
-            return 1
         if "an upstream host" in u:
+            return 0
+        if "ampztl" in u:
+            return 1
+        if "tvpass.org/live" in u:
+            return 2
+        if "thetvapp.to" in u:
             return 3
-        return 2
+        return 4
     return sorted(candidates, key=_prio)
 
 
