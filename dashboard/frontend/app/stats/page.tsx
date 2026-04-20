@@ -200,7 +200,7 @@ export default function StatsPage() {
     router.push(`/players/${encodeURIComponent(normalizePlayerName(name))}`);
   }, [router]);
 
-  const [seasonType, setSeasonType]   = useState<SeasonType>("regular");
+  const [seasonType, setSeasonType]   = useState<SeasonType>("playoffs");
   const [playerTab, setPlayerTab]     = useState<PlayerTab>("skaters");
   const [skaterCat, setSkaterCat]     = useState<SkaterCat>("points");
   const [goalieCat, setGoalieCat]     = useState<GoalieCat>("wins");
