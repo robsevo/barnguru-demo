@@ -174,13 +174,16 @@ export async function GET() {
 
   // Sort each channel's URL chain by the same priority Watch Live uses so the
   // most reliable feed plays first. Field-tested order:
-  //   an upstream host → ampztl → tvpass → thetvapp → other.
+  //   an upstream host → ampztl → tvpass → thetvapp → livetv → wtv → other.
   const urlPriority = (url: string): number => {
-    if (url.includes("an upstream host")) return 0;
-    if (url.includes("ampztl"))     return 1;
-    if (url.includes("tvpass.org/live")) return 2;
-    if (url.includes("thetvapp"))   return 3;
-    return 4;
+    const u = url.toLowerCase();
+    if (u.includes("an upstream host"))      return 0;
+    if (u.includes("ampztl"))          return 1;
+    if (u.includes("tvpass.org/live")) return 2;
+    if (u.includes("thetvapp"))        return 3;
+    if (u.includes("livetv"))          return 4;
+    if (u.includes("wtv"))             return 5;
+    return 6;
   };
   for (const ch of channels) {
     const all = [ch.primary_url as string, ...((ch.backup_urls as string[]) ?? [])]
