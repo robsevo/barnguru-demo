@@ -45,7 +45,7 @@ function AboutDisclaimer() {
   );
 }
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 // Mini neural-net icon for the mobile Cortex nav button
 function MiniCortex() {
@@ -125,7 +125,17 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
   const [statsDropOpen, setStatsDropOpen] = useState(false);
   const statsDropRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
+  const router = useRouter();
   const { theme, clearTheme, cortexPinned, setCortexPinned } = useTheme();
+
+  async function handleLogout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {}
+    setOpen(false);
+    router.push("/login");
+    router.refresh();
+  }
   const isCortexPage = pathname.startsWith("/players");
   const isCortexMode = !theme && (isCortexPage || cortexPinned);
   const brandHex = theme?.primaryColor ?? (isCortexMode ? "#a78bfa" : "#C9A84C");
@@ -280,6 +290,15 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                 </Link>
               );
             })}
+
+            {/* Logout */}
+            <button onClick={handleLogout} className="block w-full text-left">
+              <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all duration-150 hover:bg-white/[0.04]">
+                <span className="h-1.5 w-1.5 rounded-full shrink-0 bg-[#f87171]/70 shadow-[0_0_5px_rgba(248,113,113,0.6)]" />
+                <span className="text-[9px] font-semibold font-mono text-white/15 w-5 shrink-0">—</span>
+                <span className="text-[11px] font-medium leading-tight text-white/60">Logout</span>
+              </div>
+            </button>
 
             {/* Team theme section */}
             {theme && (

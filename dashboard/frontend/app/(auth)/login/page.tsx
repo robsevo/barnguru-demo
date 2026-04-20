@@ -155,25 +155,6 @@ export default function LoginPage() {
                 {loading ? "Authenticating…" : "Enter"}
               </button>
 
-              {/* Update notice */}
-              <div className="rounded-xl border border-[#C9A84C]/[0.12] bg-[#C9A84C]/[0.04] px-3.5 py-3">
-                <p className="text-[8px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/50 mb-2">Update — Apr 9</p>
-                <ul className="space-y-1.5">
-                  <li className="text-[10px] text-white/30 leading-relaxed flex gap-2">
-                    <span className="text-[#C9A84C]/40 shrink-0">·</span>
-                    <span>Security upgrade — you may need to sign in again.</span>
-                  </li>
-                  <li className="text-[10px] text-white/30 leading-relaxed flex gap-2">
-                    <span className="text-[#C9A84C]/40 shrink-0">·</span>
-                    <span>Stream ads are virtually eliminated on all devices.</span>
-                  </li>
-                  <li className="text-[10px] text-white/30 leading-relaxed flex gap-2">
-                    <span className="text-[#C9A84C]/40 shrink-0">·</span>
-                    <span>Streams that fail to load now auto-switch to the next source in 3 seconds (desktop only).</span>
-                  </li>
-                </ul>
-              </div>
-
               {/* Home screen tip */}
               <div className="rounded-xl border border-white/[0.05] bg-white/[0.02] px-3.5 py-3">
                 <p className="text-[8px] font-black uppercase tracking-[0.2em] text-white/20 mb-1.5">Pro tip</p>
