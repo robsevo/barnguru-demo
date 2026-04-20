@@ -346,7 +346,13 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
               <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all duration-150 hover:bg-white/[0.04]">
                 <span className="h-1.5 w-1.5 rounded-full shrink-0 bg-[#f87171]/70 shadow-[0_0_5px_rgba(248,113,113,0.6)]" />
                 <span className="text-[9px] font-semibold font-mono text-white/15 w-5 shrink-0">—</span>
-                <span className="text-[11px] font-medium leading-tight text-white/60">Logout</span>
+                <span className="text-[11px] font-medium leading-tight text-white/60 flex items-center gap-1.5">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" className="shrink-0" style={{ color: "#f87171" }}>
+                    <path d="M14 7V5.5C14 4.7 13.3 4 12.5 4H5.5C4.7 4 4 4.7 4 5.5V18.5C4 19.3 4.7 20 5.5 20H12.5C13.3 20 14 19.3 14 18.5V17" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M10 12H21M21 12L17.5 8.5M21 12L17.5 15.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                  Logout
+                </span>
               </div>
             </button>
 
@@ -697,23 +703,6 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                 );
               })()}
 
-              {/* Cortex button — after Stats */}
-              {(() => {
-                const cortexActive = pathname === "/players" || pathname.startsWith("/players/");
-                return (
-                  <Link
-                    href="/players"
-                    className={`px-1.5 sm:px-2 py-1.5 sm:py-2 rounded-md text-[8px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border flex items-center justify-center ${
-                      cortexActive
-                        ? "bg-[#a78bfa]/15 text-[#a78bfa] border-[#a78bfa]/50 shadow-[0_0_8px_rgba(167,139,250,0.20)]"
-                        : "text-[#a78bfa]/50 border-[#a78bfa]/20 bg-[#a78bfa]/[0.04] hover:text-[#a78bfa]/80 hover:border-[#a78bfa]/40 hover:bg-[#a78bfa]/10"
-                    }`}
-                  >
-                    <MiniCortex />
-                  </Link>
-                );
-              })()}
-
               {/* BarnCentre — TV icon */}
               <Link
                 href="/barncentre"
@@ -730,6 +719,23 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                   <line x1="9.5" y1="2" x2="11.5" y2="0.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
                 </svg>
               </Link>
+
+              {/* Cortex button — after BarnCentre */}
+              {(() => {
+                const cortexActive = pathname === "/players" || pathname.startsWith("/players/");
+                return (
+                  <Link
+                    href="/players"
+                    className={`px-1.5 sm:px-2 py-1.5 sm:py-2 rounded-md text-[8px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border flex items-center justify-center ${
+                      cortexActive
+                        ? "bg-[#a78bfa]/15 text-[#a78bfa] border-[#a78bfa]/50 shadow-[0_0_8px_rgba(167,139,250,0.20)]"
+                        : "text-[#a78bfa]/50 border-[#a78bfa]/20 bg-[#a78bfa]/[0.04] hover:text-[#a78bfa]/80 hover:border-[#a78bfa]/40 hover:bg-[#a78bfa]/10"
+                    }`}
+                  >
+                    <MiniCortex />
+                  </Link>
+                );
+              })()}
 
               {/* Logout button */}
               <button
