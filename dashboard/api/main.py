@@ -5147,14 +5147,14 @@ async def game_iptv_streams(game_id: int) -> dict:
     # on games they never broadcast.
     curated_channels = [ch for ch in all_channels if ch.get("source") in ("tvpass", "upstream")]
 
-    # ampztl publishes several feeds per channel: a primary marked with `ƒ`,
-    # plus alt/duplicate variants marked `✤`, `✪`, or `☆`. The alt feeds
-    # consistently fail to stream even though they advertise as live. Drop
-    # them here so the game page never offers a chip that can't play.
-    _AMPZTL_DEAD_MARKER = "ƒ"
+    # ampztl publishes several feeds per channel marked with different glyphs.
+    # Field-tested: `ƒ` and `≋` feeds don't play; `✪` plays fine (often the
+    # only working variant). Keep ✪/✤/☆ in the chip list; drop the known-dead
+    # markers so the game page never offers a chip that can't play.
+    _AMPZTL_DEAD_MARKERS = ("ƒ", "≋")
     curated_channels = [
         ch for ch in curated_channels
-        if _AMPZTL_DEAD_MARKER not in (ch.get("title", "") or "")
+        if not any(m in (ch.get("title", "") or "") for m in _AMPZTL_DEAD_MARKERS)
     ]
 
     # Strict exact-match filter. The channel title is normalized (strip HD/FHD,
@@ -8516,10 +8516,16 @@ async def barncentre_channels() -> dict:
             return True
         return _decor_re.sub("", norm).strip() == want
 
+    # Same dead-glyph filter as /game-iptv-streams — these ampztl variants
+    # don't play. Keep ✪/✤/☆.
+    _FR_DEAD_MARKERS = ("ƒ", "≋")
+
     def _build_fr_channel(ch_name: str, priority: list[str]) -> dict:
         by_acct: dict[str, str] = {}
         for cand in all_channels:
             title = cand.get("title", "")
+            if any(m in title for m in _FR_DEAD_MARKERS):
+                continue
             if not _is_fr_exact(title, ch_name):
                 continue
             m = _acct_re.search(title)
