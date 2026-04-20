@@ -517,7 +517,6 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
               {(
                 [
                   { href: "/gamecentre",   labelSm: "Games",  label: "Games",  active: pathname === "/gamecentre" || pathname.startsWith("/game/") },
-                  { href: "/league/teams", labelSm: "Teams", label: "Teams", active: pathname.startsWith("/league") || pathname.startsWith("/teams/") },
                 ] as const
               ).map(({ href, labelSm, label, active }) => {
                 return (
@@ -555,7 +554,8 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
               {(() => {
                 const statsActive  = pathname === "/stats";
                 const stndActive   = pathname === "/standings";
-                const anyActive    = statsActive || stndActive;
+                const teamsActive  = pathname.startsWith("/league") || pathname.startsWith("/teams/");
+                const anyActive    = statsActive || stndActive || teamsActive;
                 const activeStyle = anyActive ? (theme ? {
                   background: "rgba(255,255,255,0.18)", color: "#ffffff",
                   borderColor: "rgba(255,255,255,0.45)",
@@ -602,6 +602,20 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                           boxShadow: "0 8px 24px rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.4)",
                         }}
                       >
+                        <Link
+                          href="/league/teams"
+                          className="flex items-center gap-2 px-3 py-2 text-[9px] font-black uppercase tracking-[0.1em] transition-colors duration-100 hover:brightness-125"
+                          style={dropItemStyle(teamsActive)}
+                          onClick={() => setStatsDropOpen(false)}
+                        >
+                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="3" cy="4" r="1.5" stroke="currentColor" strokeWidth="1.1" fill="none"/>
+                            <circle cx="7" cy="4" r="1.5" stroke="currentColor" strokeWidth="1.1" fill="none"/>
+                            <path d="M0.8 9 C0.8 7.3 1.8 6.5 3 6.5 C4.2 6.5 5.2 7.3 5.2 9" stroke="currentColor" strokeWidth="1.1" fill="none" strokeLinecap="round"/>
+                            <path d="M4.8 9 C4.8 7.3 5.8 6.5 7 6.5 C8.2 6.5 9.2 7.3 9.2 9" stroke="currentColor" strokeWidth="1.1" fill="none" strokeLinecap="round"/>
+                          </svg>
+                          Teams
+                        </Link>
                         <Link
                           href="/standings"
                           className="flex items-center gap-2 px-3 py-2 text-[9px] font-black uppercase tracking-[0.1em] transition-colors duration-100 hover:brightness-125"
@@ -666,6 +680,17 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                   <line x1="9.5" y1="2" x2="11.5" y2="0.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
                 </svg>
               </Link>
+
+              {/* Logout button */}
+              <button
+                onClick={handleLogout}
+                title="Logout"
+                aria-label="Logout"
+                className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md text-[10px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border flex items-center justify-center text-[#f87171]/80 border-[#f87171]/30 bg-[#f87171]/[0.07] hover:text-[#f87171] hover:border-[#f87171]/55 hover:bg-[#f87171]/[0.13]"
+              >
+                <span className="sm:hidden leading-none">✕</span>
+                <span className="hidden sm:inline">Logout</span>
+              </button>
             </div>
           </header>
 
