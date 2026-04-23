@@ -38,21 +38,25 @@ import numpy as np
 # Paths
 # ---------------------------------------------------------------------------
 
-_REPO       = Path(__file__).parents[2]
-DEFAULT_PT  = _REPO / "models" / "cv" / "player_detector.pt"
-METRICS_JSON = _REPO / "models" / "cv" / "detector_metrics.json"
+_REPO            = Path(__file__).parents[2]
+DEFAULT_PT       = _REPO / "models" / "cv" / "player_detector.pt"
+DEFAULT_ONNX     = _REPO / "models" / "cv" / "player_detector.onnx"
+DEFAULT_ONNX_INT8 = _REPO / "models" / "cv" / "player_detector.int8.onnx"
+METRICS_JSON     = _REPO / "models" / "cv" / "detector_metrics.json"
+
+# Browser runtime loads at this size — keep ONNX export in sync with
+# `dashboard/frontend/app/game/[gameId]/cvWorker.ts` (IN_SIZE).
+RUNTIME_IMGSZ = 320
 
 # ---------------------------------------------------------------------------
 # Class registry — index must match training dataset.yaml
 # ---------------------------------------------------------------------------
 
 CLASS_NAMES: list[str] = [
-    "player_home",   # 0
-    "player_away",   # 1
-    "goalie_home",   # 2
-    "goalie_away",   # 3
-    "referee",       # 4
-    "puck",          # 5
+    "player",        # 0  — home/away decided post-detection by torso saturation
+    "goalie",        # 1  — home/away decided post-detection by torso saturation
+    "referee",       # 2
+    "puck",          # 3
 ]
 
 NUM_CLASSES = len(CLASS_NAMES)

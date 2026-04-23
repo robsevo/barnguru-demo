@@ -57,6 +57,10 @@ DEFAULT_EPOCHS    = 20
 DEFAULT_BATCH     = 64
 DEFAULT_LR        = 1e-3
 
+# Browser copy — kept in sync with the .pt so the in-browser overlay can run
+# jersey OCR in the main thread via onnxruntime-web.
+PUBLIC_ONNX_DIR   = _REPO / "dashboard" / "frontend" / "public" / "cv"
+
 
 # ---------------------------------------------------------------------------
 # Dataset
@@ -304,6 +308,46 @@ def main(argv: list[str] | None = None) -> None:
     model_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), str(model_path))
     print(f"[train-jersey-ocr] Saved model → {model_path}")
+
+    # ── Step 6b: Export to ONNX for onnxruntime-web (main-thread browser OCR).
+    # Must match the preprocessing pipeline mirrored in useCvLiveReplay.ts:
+    # 48×48 RGB float32, normalized with ImageNet mean/std.
+    onnx_path = DEFAULT_MODEL_DIR / "jersey_ocr.onnx"
+    model.eval()
+    dummy = torch.zeros(1, 3, INPUT_SIZE, INPUT_SIZE, dtype=torch.float32)
+    # dynamo=False keeps the exporter in legacy single-file mode. The new
+    # torch.export path splits weights into a .onnx.data sidecar that
+    # onnxruntime-web can't resolve from a relative URL.
+    torch.onnx.export(
+        model,
+        dummy,
+        str(onnx_path),
+        opset_version=17,
+        input_names=["crop"],
+        output_names=["logits"],
+        dynamic_axes={"crop": {0: "batch"}, "logits": {0: "batch"}},
+        dynamo=False,
+    )
+    print(f"[train-jersey-ocr] Exported ONNX → {onnx_path}")
+
+    # ── Step 6c: Dynamic INT8 quantization — deployed browser artifact.
+    # Same reasoning as the detector: ~4× smaller, minimal accuracy hit.
+    from onnxruntime.quantization import quantize_dynamic, QuantType
+    onnx_int8_path = DEFAULT_MODEL_DIR / "jersey_ocr.int8.onnx"
+    quantize_dynamic(
+        model_input=str(onnx_path),
+        model_output=str(onnx_int8_path),
+        weight_type=QuantType.QInt8,
+    )
+    print(f"[train-jersey-ocr] INT8 ONNX → {onnx_int8_path} "
+          f"({onnx_int8_path.stat().st_size / 1e6:.1f} MB)")
+
+    # Copy the INT8 variant to the frontend. The FP32 .onnx stays in models/
+    # as the training artifact but doesn't ship to browsers anymore.
+    PUBLIC_ONNX_DIR.mkdir(parents=True, exist_ok=True)
+    public_path = PUBLIC_ONNX_DIR / "jersey_ocr.int8.onnx"
+    public_path.write_bytes(onnx_int8_path.read_bytes())
+    print(f"[train-jersey-ocr] Published INT8 ONNX → {public_path}")
 
     # ── Step 7: Save metrics ──────────────────────────────────────────
     metrics = {

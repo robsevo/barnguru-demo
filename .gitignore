@@ -50,11 +50,28 @@ data/cv_training/aug_labels/
 data/cv_training/yolo_split/
 data/cv_training/jersey_crops/
 data/cv_training/labels/
+data/cv_training/external/
+data/cv_training/images/
+data/cv_training/pseudo_labels/
+data/cv_training/labelled/
+data/cv_training/.bak_full/
+data/cv_clip_cache/
 
 # Trained model weights (regeneratable via train-* commands)
 runs/
 yolov8n.pt
+yolov8s.pt
 models/cv/*.pt
+models/cv/*.onnx
+models/cv/*.onnx.data
+
+# Frontend CV bundles — hosted on Cloudflare Pages once deployed, not Vercel
+dashboard/frontend/public/cv/*.onnx
+dashboard/frontend/public/cv/*.onnx.data
+
+# Cloudflare Pages deploy staging — built locally, uploaded via dashboard.
+# Not versioned; the source of truth is models/cv/*.int8.onnx.
+cv-static/
 
 # Serena MCP (machine-local config)
 .serena/

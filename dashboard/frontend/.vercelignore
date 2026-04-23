@@ -1,2 +1,8 @@
 .next
 node_modules
+
+# CV binaries — ONNX + ORT WASM are hosted on Cloudflare Pages (cv.localhost:3000)
+# once NEXT_PUBLIC_CV_URL is set. Uploading to Vercel's CDN burns egress we
+# aren't paying for.
+public/cv
+public/ort

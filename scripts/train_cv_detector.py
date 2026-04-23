@@ -39,7 +39,10 @@ from typing import Optional
 _REPO = Path(__file__).parents[1]
 sys.path.insert(0, str(_REPO))
 
-from models.cv.player_detector import CLASS_NAMES, MAP50_GATE, NUM_CLASSES, METRICS_JSON, DEFAULT_PT
+from models.cv.player_detector import (
+    CLASS_NAMES, MAP50_GATE, NUM_CLASSES, METRICS_JSON,
+    DEFAULT_PT, DEFAULT_ONNX, DEFAULT_ONNX_INT8, RUNTIME_IMGSZ,
+)
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -72,20 +75,29 @@ def main(argv: list[str] | None = None) -> None:
 
     print(_banner())
 
-    # ── Step 1: Verify 16.1 data ──────────────────────────────────────────
-    img_root = AUG_IMG if not args.no_aug else FRAMES_DIR
-    lbl_root = AUG_LBL if not args.no_aug else LABELS_DIR
+    # ── Fast path: flat train/val layout from fetch_hockey_ai.py ─────────
+    flat_train_imgs = _CV / "images" / "train"
+    flat_val_imgs   = _CV / "images" / "val"
+    if DATASET_YAML.exists() and flat_train_imgs.is_dir() and flat_val_imgs.is_dir():
+        n_train = len(list(flat_train_imgs.glob("*.jpg")))
+        n_val   = len(list(flat_val_imgs.glob("*.jpg")))
+        print(f"[detector] Using existing dataset.yaml "
+              f"({n_train:,} train / {n_val:,} val images)")
+        split_yaml = DATASET_YAML
+    else:
+        # ── Legacy path: MOT-sequence layout from build_cv_dataset.py ────
+        img_root = AUG_IMG if not args.no_aug else FRAMES_DIR
+        lbl_root = AUG_LBL if not args.no_aug else LABELS_DIR
 
-    try:
-        _verify_data(img_root, lbl_root)
-    except FileNotFoundError as exc:
-        print(f"\n[detector] ✗ Pre-flight check failed:\n  {exc}\n")
-        sys.exit(0)  # graceful — not a crash, just missing prerequisite
-    print(f"[detector] Data source: {'augmented' if not args.no_aug else 'raw frames'}")
+        try:
+            _verify_data(img_root, lbl_root)
+        except FileNotFoundError as exc:
+            print(f"\n[detector] ✗ Pre-flight check failed:\n  {exc}\n")
+            sys.exit(0)
+        print(f"[detector] Data source: {'augmented' if not args.no_aug else 'raw frames'}")
 
-    # ── Step 2: Train/val split ───────────────────────────────────────────
-    split_yaml = _prepare_split(img_root, lbl_root, SPLIT_DIR, force=args.force)
-    print(f"[detector] Split YAML: {split_yaml}")
+        split_yaml = _prepare_split(img_root, lbl_root, SPLIT_DIR, force=args.force)
+        print(f"[detector] Split YAML: {split_yaml}")
 
     if args.dry_run:
         print("[detector] --dry-run: data layout OK. Exiting without training.")
@@ -111,12 +123,23 @@ def main(argv: list[str] | None = None) -> None:
         project_name=args.run_name,
         lr0=args.lr,
         patience=args.patience,
+        freeze=args.freeze,
+        mixup=args.mixup,
+        copy_paste=args.copy_paste,
+        mosaic=args.mosaic,
     )
 
     # ── Step 4: Copy best weights → models/cv/player_detector.pt ─────────
     best_pt = _find_best_weights(results)
     shutil.copy2(best_pt, DEFAULT_PT)
     print(f"\n[detector] ✓ Model saved → {DEFAULT_PT}")
+
+    # ── Step 4b: Export ONNX at RUNTIME_IMGSZ (matches browser cvWorker) ─
+    _export_onnx(best_pt, DEFAULT_ONNX, imgsz=RUNTIME_IMGSZ, half=args.onnx_half)
+
+    # ── Step 4c: Dynamic INT8 quantization — the deployed browser artifact.
+    # Cuts model size ~4× (12 MB → ~3 MB) so every cold device load is cheap.
+    _quantize_onnx_int8(DEFAULT_ONNX, DEFAULT_ONNX_INT8)
 
     # ── Step 5: Extract metrics + quality gate ────────────────────────────
     metrics = _extract_metrics(results)
@@ -304,6 +327,10 @@ def _train(
     project_name: str,
     lr0: float,
     patience: int,
+    freeze: int = 10,
+    mixup: float = 0.0,
+    copy_paste: float = 0.0,
+    mosaic: float = 1.0,
 ):
     """Fine-tune YOLO and return the Ultralytics Results object."""
     from ultralytics import YOLO
@@ -323,16 +350,17 @@ def _train(
         project=str(runs_dir),
         name=project_name,
         exist_ok=True,
-        # Freeze backbone layers, train detection head only
-        # freeze=10 freezes first 10 layers of the backbone
-        freeze=10,
+        # Backbone freeze (0 = fully fine-tune). First N layers frozen.
+        freeze=freeze,
         # Learning rate
         lr0=lr0,
         lrf=0.01,
         # Early stopping
         patience=patience,
-        # Augmentation (light — we already augmented in 16.1)
-        augment=False,
+        # Training-time augmentation
+        mosaic=mosaic,
+        mixup=mixup,
+        copy_paste=copy_paste,
         hsv_h=0.015,
         hsv_s=0.7,
         hsv_v=0.4,
@@ -342,6 +370,8 @@ def _train(
         plots=True,
         save=True,
         save_period=10,
+        # Dataloader workers — CPU training benefits from parallel image decode
+        workers=8,
         # Verbosity
         verbose=True,
     )
@@ -365,6 +395,46 @@ def _find_best_weights(results) -> Path:
         print("[detector] WARNING: best.pt not found, using last.pt")
         return last
     raise FileNotFoundError(f"No weights found in {save_dir / 'weights'}")
+
+
+def _export_onnx(pt_path: Path, dest: Path, imgsz: int, half: bool) -> None:
+    """Export .pt → .onnx at the same size the browser runtime uses."""
+    from ultralytics import YOLO
+
+    print(f"[detector] Exporting ONNX (imgsz={imgsz}, half={half})")
+    model = YOLO(str(pt_path))
+    exported = model.export(
+        format="onnx",
+        imgsz=imgsz,
+        half=half,
+        simplify=True,
+        opset=12,
+        dynamic=False,
+    )
+    src = Path(exported) if isinstance(exported, (str, Path)) else pt_path.with_suffix(".onnx")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if src.resolve() != dest.resolve():
+        shutil.copy2(src, dest)
+    print(f"[detector] ✓ ONNX saved → {dest}  ({dest.stat().st_size / 1e6:.1f} MB)")
+
+
+def _quantize_onnx_int8(src: Path, dest: Path) -> None:
+    """Dynamic INT8 quantize ``src`` → ``dest``.
+
+    Dynamic quant is chosen over static because it needs no calibration set
+    and the accuracy drop on detector-style nets is typically <1 mAP50 in
+    our size range — well inside the quality gate. If that ever stops being
+    true, switch to static quant with a calibration reader over val frames.
+    """
+    from onnxruntime.quantization import quantize_dynamic, QuantType
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    quantize_dynamic(
+        model_input=str(src),
+        model_output=str(dest),
+        weight_type=QuantType.QInt8,
+    )
+    print(f"[detector] ✓ INT8 ONNX → {dest}  ({dest.stat().st_size / 1e6:.1f} MB)")
 
 
 def _extract_metrics(results) -> dict:
@@ -438,6 +508,16 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
                    help="Re-create train/val split even if it exists")
     p.add_argument("--dry-run",   action="store_true",
                    help="Validate data layout only; skip training")
+    p.add_argument("--onnx-half", action="store_true",
+                   help="Export ONNX in FP16 (smaller + faster CPU WASM).")
+    p.add_argument("--freeze",    type=int,   default=10,
+                   help="Freeze first N backbone layers (0 = fully fine-tune).")
+    p.add_argument("--mixup",     type=float, default=0.0,
+                   help="Mixup augmentation probability (0–1).")
+    p.add_argument("--copy-paste", type=float, default=0.0,
+                   help="Copy-paste augmentation probability (0–1).")
+    p.add_argument("--mosaic",    type=float, default=1.0,
+                   help="Mosaic augmentation probability (default 1.0).")
     return p.parse_args(argv)
 
 
