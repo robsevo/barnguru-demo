@@ -5200,10 +5200,15 @@ async def game_iptv_streams(game_id: int) -> dict:
             needed = [t for t in want.split() if len(t) >= 2]
             if needed and all(tok in norm for tok in needed):
                 return True
-        # Playoffs: Sportsnet simulcasts on every regional feed (East, West,
-        # Ontario, Pacific, One, 360) — match any of them. Regular season the
-        # feeds carry different regional content so we need strict match.
-        if is_playoffs and want == "sportsnet" and norm.startswith("sportsnet"):
+        # Playoffs: Sportsnet simulcasts on every Canadian regional feed —
+        # match any of them. Whitelist is explicit because a naive
+        # startswith("sportsnet") drags in US NBA regionals ("Sportsnet NY",
+        # "SportsNet Lakers", "Sportsnet Pittsburgh") that have no NHL content.
+        if is_playoffs and want == "sportsnet" and norm in (
+            "sportsnet", "sportsnet one", "sportsnet 360",
+            "sportsnet east", "sportsnet west",
+            "sportsnet ontario", "sportsnet pacific", "sportsnet atlantic",
+        ):
             return True
         # US national playoff nets (TNT, TBS) ship as "TNT East HD" / "TNT West
         # HD" on our IPTV providers — timezone variants that simulcast the same
