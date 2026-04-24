@@ -46,7 +46,10 @@ METRICS_JSON     = _REPO / "models" / "cv" / "detector_metrics.json"
 
 # Browser runtime loads at this size — keep ONNX export in sync with
 # `dashboard/frontend/app/game/[gameId]/cvWorker.ts` (IN_SIZE).
-RUNTIME_IMGSZ = 320
+# 256 was chosen over 320: ~1.56× less compute per frame, negligible
+# accuracy loss on broadcast frames (players 12-32 px tall, well above
+# YOLO's 8 px floor). Critical for CPU-WASM devices without WebGPU.
+RUNTIME_IMGSZ = 256
 
 # ---------------------------------------------------------------------------
 # Class registry — index must match training dataset.yaml
