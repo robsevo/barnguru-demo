@@ -398,10 +398,22 @@ def _find_best_weights(results) -> Path:
 
 
 def _export_onnx(pt_path: Path, dest: Path, imgsz: int, half: bool) -> None:
-    """Export .pt → .onnx at the same size the browser runtime uses."""
+    """Export .pt → .onnx at the same size the browser runtime uses.
+
+    Never call this with half=True when the output feeds _quantize_onnx_int8.
+    FP16 casts in the source graph survive dynamic quantization and blow up
+    in onnxruntime-web with "Type 'tensor(float16)' ... is invalid" on
+    DynamicQuantizeLinear. FP32 source → INT8 quant is the only safe path
+    for the browser artifact.
+    """
     from ultralytics import YOLO
 
-    print(f"[detector] Exporting ONNX (imgsz={imgsz}, half={half})")
+    if half:
+        raise ValueError(
+            "Refusing to export FP16 ONNX — the INT8 quant step downstream "
+            "cannot consume FP16 inputs. Re-run without --onnx-half."
+        )
+    print(f"[detector] Exporting ONNX (imgsz={imgsz}, half=False)")
     model = YOLO(str(pt_path))
     exported = model.export(
         format="onnx",
