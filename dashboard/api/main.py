@@ -5205,6 +5205,14 @@ async def game_iptv_streams(game_id: int) -> dict:
         # feeds carry different regional content so we need strict match.
         if is_playoffs and want == "sportsnet" and norm.startswith("sportsnet"):
             return True
+        # US national playoff nets (TNT, TBS) ship as "TNT East HD" / "TNT West
+        # HD" on our IPTV providers — timezone variants that simulcast the same
+        # game. Allow those directional suffixes on TNT/TBS specifically, so we
+        # don't drag in unrelated networks ("TNT Sports" Argentina, "TBS Very
+        # Funny" Mexico, etc.). Regular season same behavior is fine — TNT/TBS
+        # only carry NHL on Wed/Thu national windows, no regional overlap.
+        if want in ("tnt", "tbs") and norm in (f"{want} east", f"{want} west"):
+            return True
         return False
 
     # NHL API casings: "TNT", "TBS", "SN", "CBC" (upper) but also "truTV"
