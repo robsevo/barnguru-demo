@@ -83,16 +83,25 @@ function TeamLogoImg({ abbrev, size = 20, smSize }: { abbrev: string; size?: num
 
 function ClinchBadge({ indicator }: { indicator: string }) {
   if (!indicator) return null;
-  // NHL API sends "p" for Presidents' Trophy — normalise to "z" (purple) to match glossary
-  const display = indicator === "p" ? "z" : indicator;
+  // NHL clinch codes — each distinct tier gets its own badge. Earlier code
+  // collapsed "p" → "z" which made two teams read as Presidents' Trophy
+  // winners; there's only ever one (best in league), while "z" is the
+  // separate best-in-conference tag that the other conference leader gets.
+  //   x = clinched playoff berth
+  //   y = clinched division
+  //   z = clinched home-ice / best in conference
+  //   p = Presidents' Trophy (best regular-season record in the NHL — unique)
+  //   e = eliminated
   const colors: Record<string, string> = {
     x: "bg-[#4ade80]/20 text-[#4ade80] border-[#4ade80]/30",
     y: "bg-[#f472b6]/15 text-[#f472b6]/90 border-[#f472b6]/25",
-    z: "bg-[#a78bfa]/20 text-[#a78bfa] border-[#a78bfa]/30",
+    z: "bg-[#38bdf8]/20 text-[#38bdf8] border-[#38bdf8]/30",
+    p: "bg-[#a78bfa]/20 text-[#a78bfa] border-[#a78bfa]/30",
+    e: "bg-white/10 text-white/40 border-white/15",
   };
   return (
-    <span className={`text-[8px] font-black uppercase px-1 py-0.5 rounded border ${colors[display] ?? "bg-white/10 text-white/40 border-white/10"}`}>
-      {display}
+    <span className={`text-[8px] font-black uppercase px-1 py-0.5 rounded border ${colors[indicator] ?? "bg-white/10 text-white/40 border-white/10"}`}>
+      {indicator}
     </span>
   );
 }
@@ -805,7 +814,8 @@ function StandingsPageInner() {
             { badge: "WC2", cls: "border-[#38bdf8]/25 bg-[#38bdf8]/10 text-[#38bdf8]/80",  label: "2nd wild card" },
             { badge: "x",   cls: "border-[#4ade80]/30 bg-[#4ade80]/10 text-[#4ade80]",      label: "clinched" },
             { badge: "y",   cls: "border-[#f472b6]/25 bg-[#f472b6]/15 text-[#f472b6]/90",   label: "div winner" },
-            { badge: "z",   cls: "border-[#a78bfa]/30 bg-[#a78bfa]/20 text-[#a78bfa]",      label: "Presidents'" },
+            { badge: "z",   cls: "border-[#38bdf8]/30 bg-[#38bdf8]/20 text-[#38bdf8]",      label: "conference" },
+            { badge: "p",   cls: "border-[#a78bfa]/30 bg-[#a78bfa]/20 text-[#a78bfa]",      label: "Presidents'" },
             { badge: "E",   cls: "border-white/15 bg-white/[0.04] text-white/35",            label: "eliminated" },
           ].map(({ badge, cls, label }) => (
             <div key={badge} className="flex items-center gap-1">
