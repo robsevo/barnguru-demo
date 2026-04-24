@@ -5197,9 +5197,19 @@ async def game_iptv_streams(game_id: int) -> dict:
         if want == "espn+" and norm in ("espnplus", "espn plus"):
             return True
         if want in _SHORT_FR_DISPLAYS:
-            needed = [t for t in want.split() if len(t) >= 2]
-            if needed and all(tok in norm for tok in needed):
-                return True
+            # French titles often have un-stripped prefixes like
+            # "Canal TVA Sports HD" → "canal tva sports". Token-contains
+            # matches, BUT the trailing digit suffix (if any) must match
+            # exactly so "TVA Sports" (primary) and "TVA Sports 2"
+            # (secondary) never cross over — during playoffs they carry
+            # concurrent but DIFFERENT games. Same applies to RDS / RDS2.
+            import re as _re_bc_match
+            want_m = _re_bc_match.match(r"^(.*?)\s*(\d*)$", want.strip())
+            norm_m = _re_bc_match.match(r"^(.*?)\s*(\d*)$", norm.strip())
+            if want_m and norm_m and want_m.group(2) == norm_m.group(2):
+                needed = [t for t in want_m.group(1).split() if len(t) >= 2]
+                if needed and all(tok in norm for tok in needed):
+                    return True
         # Playoffs: Sportsnet simulcasts on every Canadian regional feed —
         # match any of them. Whitelist is explicit because a naive
         # startswith("sportsnet") drags in US NBA regionals ("Sportsnet NY",
