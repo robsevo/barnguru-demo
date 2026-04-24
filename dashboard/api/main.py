@@ -5962,15 +5962,14 @@ async def stream_embed(url: str, request: Request) -> FastResponse:  # noqa: ARG
     q = request.query_params
     mobile = q.get("mobile") == "1"
 
-    # Canonical "safe" sandbox for video players: scripts + same-origin are
-    # both necessary (JWPlayer, Video.js, custom players all need them);
-    # everything else — popups, top-level nav, downloads, pointer-lock, modals,
-    # forms — stays blocked. Desktop additionally allows ``allow-presentation``
-    # so the native fullscreen API works; mobile strips it because Safari lets
-    # ads abuse presentation to force-fullscreen the top frame.
-    sandbox_attr = "allow-scripts allow-same-origin"
-    if not mobile:
-        sandbox_attr += " allow-presentation"
+    # Sandbox policy:
+    #   Mobile: sandboxed — blocks popup ads, force-fullscreen, and popunders
+    #     on iOS/Android where ad vectors are most hostile.
+    #   Desktop: no sandbox — many RSN / JWPlayer / Video.js / custom players
+    #     detect a sandboxed ancestor and refuse to initialise, which broke
+    #     local stream playback on localhost:3000. Desktop users get the normal
+    #     browser ad surface in exchange for the local feeds actually loading.
+    sandbox_html = ' sandbox="allow-scripts allow-same-origin"' if mobile else ""
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -6010,8 +6009,7 @@ async def stream_embed(url: str, request: Request) -> FastResponse:  # noqa: ARG
 </head>
 <body>
 <iframe
-  src="{safe_url}"
-  sandbox="{sandbox_attr}"
+  src="{safe_url}"{sandbox_html}
   allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
   allowfullscreen
   referrerpolicy="no-referrer-when-downgrade"
