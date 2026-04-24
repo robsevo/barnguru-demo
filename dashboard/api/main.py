@@ -5881,8 +5881,16 @@ async def stream_embed(url: str, request: Request) -> FastResponse:  # noqa: ARG
 
     Instead we return a thin HTML wrapper that:
       • Loads the embed URL directly in a sandboxed <iframe> (correct origin)
-      • Omits allow-popups → browser silently drops all window.open() calls
-      • Overrides window.open in the outer frame as a second layer
+      • Sandbox blocks popups, top-nav, downloads, pointer-lock — kills every
+        ad vector the scraper streams rely on while still letting the player JS
+        run (allow-scripts + allow-same-origin).
+      • Overrides window.open at the wrapper level as a second layer
+      • Watchdog: if the inner frame navigates (ad redirect that escapes
+        sandbox on non-sandbox providers), post ``Origin-stream-killed`` so the
+        outer frontend skips to the next stream chip.
+
+    The ``mobile`` query flag tightens the sandbox (strips ``allow-presentation``
+    which some ad players abuse to trigger fullscreen popups on iOS).
     """
     cors = {
         "Access-Control-Allow-Origin": "*",
@@ -5897,6 +5905,22 @@ async def stream_embed(url: str, request: Request) -> FastResponse:  # noqa: ARG
         safe_url = url.replace('"', "%22").replace("'", "%27")
     except Exception:
         return FastResponse(content="Invalid url", status_code=400, headers=cors)
+
+    # Parse optional flags. ``mobile=1`` tightens the sandbox; ``priority`` is
+    # accepted for forward-compat (frontend already sends it; reserved for
+    # per-stream sandbox tuning if specific providers break).
+    q = request.query_params
+    mobile = q.get("mobile") == "1"
+
+    # Canonical "safe" sandbox for video players: scripts + same-origin are
+    # both necessary (JWPlayer, Video.js, custom players all need them);
+    # everything else — popups, top-level nav, downloads, pointer-lock, modals,
+    # forms — stays blocked. Desktop additionally allows ``allow-presentation``
+    # so the native fullscreen API works; mobile strips it because Safari lets
+    # ads abuse presentation to force-fullscreen the top frame.
+    sandbox_attr = "allow-scripts allow-same-origin"
+    if not mobile:
+        sandbox_attr += " allow-presentation"
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -5913,12 +5937,31 @@ async def stream_embed(url: str, request: Request) -> FastResponse:  # noqa: ARG
   var _noop = function(){{ return {{ closed:true, focus:function(){{}} }}; }};
   try{{ window.open = _noop; }}catch(e){{}}
   window.addEventListener('blur', function(){{ setTimeout(function(){{ window.focus&&window.focus(); }}, 0); }}, true);
+
+  // Watchdog: if the inner iframe's location ever changes (ad redirect that
+  // escapes sandbox), we lose the video. Tell the outer frontend to skip.
+  var frame = document.querySelector('iframe');
+  if (frame) {{
+    var lastSrc = frame.src;
+    frame.addEventListener('load', function() {{
+      try {{
+        // Cross-origin: reading frame.contentWindow.location throws. Only
+        // same-origin (navigated-away) loads reach this branch, which is
+        // exactly the ad-redirect case we want to kill.
+        var loc = frame.contentWindow.location.href;
+        if (loc && loc !== lastSrc && loc !== 'about:blank') {{
+          parent.postMessage({{ type: 'Origin-stream-killed', url: {safe_url!r} }}, '*');
+        }}
+      }} catch (_) {{ /* cross-origin — healthy */ }}
+    }});
+  }}
 }})();
 </script>
 </head>
 <body>
 <iframe
   src="{safe_url}"
+  sandbox="{sandbox_attr}"
   allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
   allowfullscreen
   referrerpolicy="no-referrer-when-downgrade"
