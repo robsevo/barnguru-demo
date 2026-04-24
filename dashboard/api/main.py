@@ -5063,7 +5063,13 @@ _BROADCAST_CODE_MAP: dict[str, str] = {
     "NHLN":  "NHL Network",
     "TNT":   "TNT",
     "TBS":   "TBS",
-    "MAX":   "Max",
+    # NHL API sends "truTV" (camelCase) and "HBO MAX" (spaced) during playoffs —
+    # both carry the TNT simulcast of Round 1 games. Keys are looked up case-
+    # insensitive below, so casing here is cosmetic; the value is what we match
+    # IPTV channel titles against.
+    "TRUTV":   "truTV",
+    "MAX":     "Max",
+    "HBO MAX": "Max",
     "ABC":   "ABC",
     "FS1":   "FS1",
     "FS2":   "FS2",
@@ -5134,6 +5140,17 @@ async def game_iptv_streams(game_id: int) -> dict:
     if not tv_broadcasts:
         return {"broadcasts": []}
 
+    # Playoffs (gameType == 3): national networks have exclusive rights. NHL
+    # API still lists the home/away RSN rows (NESN, MSG, FDSN*, Victory+, etc.)
+    # because those networks hold historical rights, but they don't actually
+    # air the game during playoffs — they run other programming (wrestling,
+    # baseball, paid programming). Rendering those as chips sent users to
+    # non-hockey content. Keep only national-market (N) broadcasts.
+    game_type = int(landing.get("gameType") or 0)
+    is_playoffs = game_type == 3
+    if is_playoffs:
+        tv_broadcasts = [b for b in tv_broadcasts if b.get("market") == "N"]
+
     # 2. Get our IPTV channel list (cached 1hr inside iptv_channels())
     try:
         iptv_result = await iptv_channels()
@@ -5183,7 +5200,17 @@ async def game_iptv_streams(game_id: int) -> dict:
             needed = [t for t in want.split() if len(t) >= 2]
             if needed and all(tok in norm for tok in needed):
                 return True
+        # Playoffs: Sportsnet simulcasts on every regional feed (East, West,
+        # Ontario, Pacific, One, 360) — match any of them. Regular season the
+        # feeds carry different regional content so we need strict match.
+        if is_playoffs and want == "sportsnet" and norm.startswith("sportsnet"):
+            return True
         return False
+
+    # NHL API casings: "TNT", "TBS", "SN", "CBC" (upper) but also "truTV"
+    # (camelCase) and "HBO MAX" (spaced). Normalize the lookup key so all three
+    # resolve through the same map regardless of how NHL types them today.
+    _bc_map_ci = {k.upper(): v for k, v in _BROADCAST_CODE_MAP.items()}
 
     result: list[dict] = []
     seen_codes: set[str] = set()
@@ -5194,7 +5221,7 @@ async def game_iptv_streams(game_id: int) -> dict:
             continue
         seen_codes.add(code)
 
-        display = _BROADCAST_CODE_MAP.get(code, code)
+        display = _bc_map_ci.get(code.upper(), code)
         matched = [
             ch for ch in curated_channels
             if _matches_broadcast(ch.get("title", ""), display)
