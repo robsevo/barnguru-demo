@@ -26,6 +26,16 @@ const nextConfig: NextConfig = {
           // rest of the bundle is on long-cache, but they never pin to a
           // stale index.html after a deploy.
           { key: "Cache-Control", value: "public, max-age=0, must-revalidate" },
+          // Cross-origin isolation for multi-threaded WASM (2-4× faster CV
+          // inference on machines without WebGPU). `credentialless` keeps
+          // cross-origin iframes (localhost:8000 stream-embed, Brightcove
+          // highlight player) loadable — they'd fail outright under
+          // `require-corp` because those upstreams don't set CORP headers.
+          // Trade-off: cross-origin requests from this page drop cookies.
+          // We don't need cookies on those paths (stream URLs use their own
+          // auth; model files are public Cloudflare Pages).
+          { key: "Cross-Origin-Opener-Policy",   value: "same-origin" },
+          { key: "Cross-Origin-Embedder-Policy", value: "credentialless" },
         ],
       },
     ];
