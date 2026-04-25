@@ -4876,6 +4876,33 @@ async def resolve_clip(clip_id: str) -> dict:
 _streams_cache: dict[int, tuple[list, float]] = {}  # game_id -> (streams, timestamp)
 _STREAMS_CACHE_TTL = 180  # 3 minutes
 
+# Recent-success tracker. Frontend POSTs /stream-success?url=<chip_url> the
+# moment a stream actually starts playing (HLS manifest parsed or iframe
+# wrapper heartbeat received). We rank chips within their priority bucket
+# by how many successes they've logged in the last hour, so consistently
+# dead backup scrapers sink to the bottom.
+import collections as _collections
+_stream_success: dict[str, _collections.deque] = _collections.defaultdict(
+    lambda: _collections.deque(maxlen=200)
+)
+_STREAM_SUCCESS_WINDOW_S = 3600
+
+
+def _record_stream_success(url: str) -> None:
+    import time as _t
+    _stream_success[url].append(_t.monotonic())
+
+
+def _stream_recent_success_count(url: str) -> int:
+    import time as _t
+    cutoff = _t.monotonic() - _STREAM_SUCCESS_WINDOW_S
+    dq = _stream_success.get(url)
+    if not dq:
+        return 0
+    while dq and dq[0] < cutoff:
+        dq.popleft()
+    return len(dq)
+
 
 @app.get("/streams/{game_id}")
 async def game_streams(game_id: int) -> dict:
@@ -4883,7 +4910,10 @@ async def game_streams(game_id: int) -> dict:
     import time as _t
     cached = _streams_cache.get(game_id)
     if cached and (_t.monotonic() - cached[1]) < _STREAMS_CACHE_TTL:
-        streams = cached[0]
+        streams = list(cached[0])
+        # Re-sort on every request so success-rate updates from /stream-success
+        # bubble newly-validated chips up without waiting for cache expiry.
+        streams.sort(key=lambda s: (s.get("priority", 99), -_stream_recent_success_count(s.get("url", ""))))
         # Still need team abbrs for response — read from cache metadata
         meta = _streams_cache.get(-game_id)  # negative key stores metadata
         away = meta[0] if meta else "?"
@@ -5011,11 +5041,12 @@ async def game_streams(game_id: int) -> dict:
             return 2   # Playwright extracts m3u8, minimal ads
         return 3       # general aggregator or iframe fallback
 
-    streams.sort(key=_stream_priority)
-    # Annotate priority + strip internal metadata before sending to client
+    # Annotate priority first so the cache stores it; sort by (priority asc,
+    # recent-success desc) so dead backup scrapers sink within their bucket.
     for s in streams:
         s["priority"] = _stream_priority(s)
         s.pop("_direct", None)
+    streams.sort(key=lambda s: (s["priority"], -_stream_recent_success_count(s["url"])))
 
     # Cache result to avoid re-scraping on every page load
     import time as _t2
@@ -5987,6 +6018,21 @@ async def stream_embed(url: str, request: Request) -> FastResponse:  # noqa: ARG
   try{{ window.open = _noop; }}catch(e){{}}
   window.addEventListener('blur', function(){{ setTimeout(function(){{ window.focus&&window.focus(); }}, 0); }}, true);
 
+  // Heartbeat: confirms /stream-embed loaded and is alive so the parent can
+  // distinguish "wrapper never rendered" (no heartbeat → auto-skip after
+  // ~12s) from "wrapper alive, inner iframe playing some content." We can't
+  // peek inside cross-origin iframes to verify playback, but a missing
+  // heartbeat reliably catches the cases the user actually sees most:
+  // backend timeouts, ngrok tunnel down, or the wrapper getting kicked out
+  // by an ad redirect.
+  var killed = false;
+  function postBeat() {{
+    if (killed) return;
+    try {{ parent.postMessage({{ type: 'Origin-frame-progress', url: {safe_url!r} }}, '*'); }} catch (_) {{}}
+  }}
+  postBeat();
+  var beatTimer = setInterval(postBeat, 3000);
+
   // Watchdog: if the inner iframe's location ever changes (ad redirect that
   // escapes sandbox), we lose the video. Tell the outer frontend to skip.
   var frame = document.querySelector('iframe');
@@ -5999,6 +6045,8 @@ async def stream_embed(url: str, request: Request) -> FastResponse:  # noqa: ARG
         // exactly the ad-redirect case we want to kill.
         var loc = frame.contentWindow.location.href;
         if (loc && loc !== lastSrc && loc !== 'about:blank') {{
+          killed = true;
+          if (beatTimer) {{ clearInterval(beatTimer); beatTimer = null; }}
           parent.postMessage({{ type: 'Origin-stream-killed', url: {safe_url!r} }}, '*');
         }}
       }} catch (_) {{ /* cross-origin — healthy */ }}
@@ -6241,6 +6289,31 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
             status_code=502,
             headers=cors_headers,
         )
+
+
+@app.get("/stream-success")
+@app.post("/stream-success")
+async def stream_success(url: str) -> FastResponse:
+    """Frontend pings this when a stream actually starts playing.
+
+    Used to rank chips on `/streams/{game_id}` — consistently-failing backup
+    scrapers sink within their priority bucket, so users land on streams that
+    have been recently confirmed working. GET is accepted alongside POST so
+    `navigator.sendBeacon` and `fetch(..., { keepalive: true })` both work
+    without a CORS preflight.
+    """
+    _record_stream_success(url)
+    cors_headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Cache-Control": "no-cache",
+    }
+    import json as _json
+    return FastResponse(
+        content=_json.dumps({"ok": True}),
+        media_type="application/json",
+        headers=cors_headers,
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
