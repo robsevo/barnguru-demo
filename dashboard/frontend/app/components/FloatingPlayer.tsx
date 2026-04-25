@@ -194,9 +194,16 @@ export default function FloatingPlayer() {
         // explicitly so browsers allow autoplay without user interaction.
         videoEl.muted = true;
 
+        // See StreamPanel: IPTV manifests aren't LL-HLS, so lowLatencyMode's
+        // tighter window amplifies drift on flaky upstream feeds and presents as
+        // looping. Standard live tuning + capped back buffer.
         hlsInstance = new Hls({
           enableWorker: true,
-          lowLatencyMode: true,
+          lowLatencyMode: false,
+          liveDurationInfinity: true,
+          liveSyncDuration: 4,
+          liveMaxLatencyDuration: 15,
+          backBufferLength: 30,
           xhrSetup: (xhr) => { xhr.setRequestHeader("ngrok-skip-browser-warning", "skip"); },
         });
         hlsInstance.loadSource(src);
@@ -221,6 +228,37 @@ export default function FloatingPlayer() {
       hlsInstance?.destroy();
     };
   }, [stream?.url, videoEl]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Live-stream watchdog (see StreamPanel for full rationale): catch backward
+  // jumps + drift behind live edge on flaky IPTV and snap to ~4s behind buffered
+  // live edge. Capped at 3 resyncs so a genuinely broken feed doesn't get
+  // bounced forever — the existing error UI takes over after that.
+  useEffect(() => {
+    if (!videoEl || isIframe || error || loading) return;
+    const LIVE_DRIFT_RESYNC = 20;
+    const MAX_RESYNCS = 3;
+    let lastTime = -1;
+    let resyncs = 0;
+    const tick = setInterval(() => {
+      if (videoEl.paused || videoEl.ended || videoEl.readyState < 2) {
+        lastTime = videoEl.currentTime;
+        return;
+      }
+      const t = videoEl.currentTime;
+      const buf = videoEl.buffered;
+      const liveEdge = buf.length > 0 ? buf.end(buf.length - 1) : t;
+      const looped  = lastTime > 0 && t < lastTime - 3;
+      const drifted = liveEdge - t > LIVE_DRIFT_RESYNC;
+      if ((looped || drifted) && resyncs < MAX_RESYNCS && buf.length > 0) {
+        videoEl.currentTime = Math.max(0, buf.end(buf.length - 1) - 4);
+        resyncs += 1;
+        lastTime = videoEl.currentTime;
+        return;
+      }
+      lastTime = t;
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [videoEl, isIframe, error, loading]);
 
   // Track native browser PiP state
   useEffect(() => {
