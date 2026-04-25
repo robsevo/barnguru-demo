@@ -5046,6 +5046,15 @@ async def game_streams(game_id: int) -> dict:
     for s in streams:
         s["priority"] = _stream_priority(s)
         s.pop("_direct", None)
+
+    # Pre-flight the priority-3 backup chips. The scrapers happily list
+    # template URLs (wikisport.club placeholders, /sorry redirects, geo-blocked
+    # cdnlivetv proxies) that 200 with empty player containers — the wrapper
+    # iframe heartbeat keeps firing while the user stares at a broken-image
+    # icon. We probe each in parallel, drop the dead ones, and only then sort.
+    # Cached 10 min so a hot game doesn't re-probe on every browser refresh.
+    streams = await _filter_dead_embeds(streams)
+
     streams.sort(key=lambda s: (s["priority"], -_stream_recent_success_count(s["url"])))
 
     # Cache result to avoid re-scraping on every page load
@@ -5217,7 +5226,7 @@ async def game_iptv_streams(game_id: int) -> dict:
     # short French displays so we can apply a token-contains fallback only for
     # them — never for ESPN/Sportsnet, which would drag in hundreds of
     # regional/international variants.
-    _SHORT_FR_DISPLAYS = {"rds", "rds2", "rds info", "tva sports", "tva sports 2"}
+    _SHORT_FR_DISPLAYS = {"rds", "rds2", "rds info", "tva sports"}
 
     def _matches_broadcast(ch_title: str, display: str) -> bool:
         norm = _normalize_ch(ch_title)
@@ -5241,12 +5250,15 @@ async def game_iptv_streams(game_id: int) -> dict:
                 needed = [t for t in want_m.group(1).split() if len(t) >= 2]
                 if needed and all(tok in norm for tok in needed):
                     return True
-        # Playoffs: Sportsnet simulcasts on every Canadian regional feed —
-        # match any of them. Whitelist is explicit because a naive
-        # startswith("sportsnet") drags in US NBA regionals ("Sportsnet NY",
-        # "SportsNet Lakers", "Sportsnet Pittsburgh") that have no NHL content.
+        # Playoffs: Sportsnet simulcasts on the Canadian regional feeds (East,
+        # West, Ontario, Pacific, Atlantic) — those carry the same SN broadcast
+        # in-market. Sportsnet 360 / Sportsnet One are excluded: even during
+        # playoffs they routinely run other sports (NBA, F1, soccer) and
+        # surfacing them as a "this game" chip sent users to the wrong content.
+        # If a game truly airs on SN1 / SN360, NHL API ships an explicit
+        # "SN1" / "SN360" code that gets its own broadcast row.
         if is_playoffs and want == "sportsnet" and norm in (
-            "sportsnet", "sportsnet one", "sportsnet 360",
+            "sportsnet",
             "sportsnet east", "sportsnet west",
             "sportsnet ontario", "sportsnet pacific", "sportsnet atlantic",
         ):
@@ -5929,6 +5941,132 @@ _AD_STRIP_PATTERNS = [
 # Domains that use obfuscated JS players — skip yt-dlp / Playwright entirely and
 # serve them directly via the ad-stripped embed proxy.  Attempting headless
 # extraction on these wastes 30-45 s and always fails due to bot-detection.
+# ---------------------------------------------------------------------------
+# Backup-stream embed liveness probe
+# ---------------------------------------------------------------------------
+# onhockey.tv + the secondary scrapers (streameast, methstreams, etc.) ship
+# *template* URLs that always 200 — wikisport.club/court/<n>.php, streams.center
+# /embed/ch<n>.php, embedhd.org/source/fetch.php?hd=<n>, cdnlivetv.tv player
+# proxies, etc. The HTML page exists, our /stream-embed wrapper renders it,
+# the heartbeat fires forever — but the inner CDN is dead, the wrong sport,
+# or geo-blocked from our backend, so the user just stares at a broken-image
+# icon with no auto-skip. Pre-flighting each embed before returning it as a
+# chip is the only way to stop those chips from reaching the UI.
+_embed_alive_cache: dict[str, tuple[bool, float]] = {}
+_EMBED_ALIVE_TTL = 600  # 10 min — long enough to skip the probe on cache hits,
+                        # short enough that providers coming back online surface
+
+# Substrings that, on their own, mean the page is a dead skeleton or a
+# wrong-sport landing. Matched after lowercasing the body.
+_DEAD_BODY_MARKERS = (
+    'window.location.replace("/sorry"',  # wikisport.club, livesport.ws family
+    "window.location.replace('/sorry'",
+    "this stream is offline",
+    "stream not available",
+    "stream is not available",
+    "no stream found",
+    "this content is not available",
+    "geo-restricted",
+    "not licensed for your region",
+)
+
+# Markers that strongly indicate a working video player is present in the body.
+# A page is considered alive if it has any of these.
+_LIVE_BODY_MARKERS = (
+    "<video",
+    "jwplayer",
+    "clappr",
+    "playerinstance",
+    "hls.js",
+    ".m3u8",
+    "video.js",
+    "videojs",
+    "shaka",
+    "dashjs",
+)
+
+
+async def _probe_embed_alive(url: str) -> bool:
+    """Return True if the embed URL is plausibly playable.
+
+    Heuristic: GET the page with browser headers + onhockey Referer, then:
+      • if any _DEAD_BODY_MARKERS appears → False
+      • if body < 1.5 KB and no _LIVE_BODY_MARKERS → False
+      • if status is 4xx/5xx → False
+    Otherwise → True. Errs on the side of keeping the chip — false positives
+    here only mean a working stream gets dropped, which is worse than letting
+    one bad chip through (the user can still click "try next").
+
+    Cached for 10 minutes so a chip appearing across 5 scrapers is probed once.
+    """
+    import time as _tep
+    cached = _embed_alive_cache.get(url)
+    if cached and (_tep.monotonic() - cached[1]) < _EMBED_ALIVE_TTL:
+        return cached[0]
+
+    try:
+        async with _httpx_backup.AsyncClient(
+            timeout=6,
+            follow_redirects=True,
+            headers={
+                **_BROWSER_HEADERS,
+                "Referer": "https://onhockey.tv/",
+            },
+        ) as hx:
+            r = await hx.get(url)
+        if r.status_code >= 400:
+            _embed_alive_cache[url] = (False, _tep.monotonic())
+            return False
+        body = r.text
+        body_lower = body.lower()
+        if any(m in body_lower for m in _DEAD_BODY_MARKERS):
+            _embed_alive_cache[url] = (False, _tep.monotonic())
+            return False
+        # Tiny bodies are only OK if they contain a player marker — a 1KB page
+        # with no <video>/jwplayer/clappr/m3u8 string is a placeholder.
+        has_player = any(m in body_lower for m in _LIVE_BODY_MARKERS)
+        if len(body) < 1500 and not has_player:
+            _embed_alive_cache[url] = (False, _tep.monotonic())
+            return False
+        _embed_alive_cache[url] = (True, _tep.monotonic())
+        return True
+    except Exception:
+        # Network error talking to the third-party — treat as dead. If it was
+        # a transient blip the cache TTL expires in 10 min and we re-probe.
+        _embed_alive_cache[url] = (False, _tep.monotonic())
+        return False
+
+
+async def _filter_dead_embeds(streams: list[dict]) -> list[dict]:
+    """Drop chips whose embed URL is clearly dead. Direct m3u8 / known-clean
+    extractor sources skip the probe — those have other liveness signals."""
+    import asyncio as _aio_filt
+    # Probe only embed-only chips from the riskiest priority bucket. Direct
+    # CDN m3u8 (priority 0) and known-clean static extractors (apl396.me,
+    # streamfree.app — priority 1) are trusted. methstreams/crackstreams
+    # (priority 2) actually extract m3u8 via Playwright at click time, so the
+    # embed page liveness isn't load-bearing for them either. Priority 3 is
+    # the dump everyone else lands in — that's where the templates live.
+    needs_probe = [
+        s for s in streams
+        if s.get("embed_only") and s.get("priority", 99) >= 3
+    ]
+    if not needs_probe:
+        return streams
+
+    probe_results = await _aio_filt.gather(
+        *(_probe_embed_alive(s["url"]) for s in needs_probe),
+        return_exceptions=True,
+    )
+    dead: set[str] = set()
+    for s, alive in zip(needs_probe, probe_results, strict=False):
+        if isinstance(alive, BaseException) or not alive:
+            dead.add(s["url"])
+    if not dead:
+        return streams
+    return [s for s in streams if s["url"] not in dead]
+
+
 _EMBED_ONLY_DOMAINS = {
     "embedsports.top", "embedsports.me", "dlstreams.top", "wikisport.club",
     "vuen.link", "gopst.link", "dabac.link", "zenoz.link",
@@ -5995,12 +6133,22 @@ async def stream_embed(url: str, request: Request) -> FastResponse:  # noqa: ARG
 
     # Sandbox policy:
     #   Mobile: sandboxed — blocks popup ads, force-fullscreen, and popunders
-    #     on iOS/Android where ad vectors are most hostile.
+    #     on iOS/Android where ad vectors are most hostile. We DO grant
+    #     allow-popups + allow-popups-to-escape-sandbox: many embed players
+    #     (JWPlayer, Clappr, custom HTML5 wrappers) probe for sandbox by
+    #     trying to open a noop popup at startup. If the probe is blocked the
+    #     player refuses to initialise and the user sees the broken-image
+    #     icon instead of video. The browser still requires a user gesture
+    #     to actually open a popup, so this doesn't re-enable popup ads —
+    #     only legitimises the no-op probe.
     #   Desktop: no sandbox — many RSN / JWPlayer / Video.js / custom players
     #     detect a sandboxed ancestor and refuse to initialise, which broke
     #     local stream playback on localhost:3000. Desktop users get the normal
     #     browser ad surface in exchange for the local feeds actually loading.
-    sandbox_html = ' sandbox="allow-scripts allow-same-origin"' if mobile else ""
+    sandbox_html = (
+        ' sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"'
+        if mobile else ""
+    )
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -8043,7 +8191,7 @@ _BARNCENTRE_CHANNEL_NAMES = [
     "CBS Sports", "CBS Sports Network",
     # Canadian French — at the back, grouped by network
     "RDS", "RDS 2", "RDS INFO",
-    "TVA Sports", "TVA Sports 2",
+    "TVA Sports",
 ]
 
 import re as _re_bc
@@ -8085,7 +8233,7 @@ def _normalize_ch(title: str) -> str:
     return t.strip().lower()
 
 
-_SHORT_FR_DISPLAYS = {"rds", "rds2", "rds info", "tva sports", "tva sports 2"}
+_SHORT_FR_DISPLAYS = {"rds", "rds2", "rds info", "tva sports"}
 
 
 def _ch_matches(raw_title: str, ch_name: str) -> bool:
@@ -8705,7 +8853,6 @@ async def barncentre_channels() -> dict:
         "RDS 2":        ["an upstream host", "ampztl-a", "ampztl-b"],
         "RDS INFO":     ["an upstream host"],
         "TVA Sports":   ["an upstream host", "ampztl-a", "ampztl-b"],
-        "TVA Sports 2": ["an upstream host", "ampztl-a", "ampztl-b"],
     }
     _acct_re  = _re_bc.compile(r"\(([a-z0-9._-]{3,30})\)\s*$", _re_bc.I)
     _decor_re = _re_bc.compile(r"(?:\s+[^\w\s]+)+\s*$")
