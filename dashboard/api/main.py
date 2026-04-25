@@ -7650,16 +7650,12 @@ _TVPASS_CHANNELS = [
     ("TSN3 HD",  "tsn3",  "hd"),
     ("TSN4 HD",  "tsn4",  "hd"),
     ("TSN5 HD",  "tsn5",  "hd"),
-    # FanDuel Sports Networks (formerly Bally Sports) — NHL regional US
-    ("Fanduel Sports Network Detroit HD",    "fanduel-sports-network-detroit",    "hd"),
-    ("Fanduel Sports Network Florida HD",    "fanduel-sports-network-florida",    "hd"),
-    ("Fanduel Sports Network North HD",      "fanduel-sports-network-north",      "hd"),
-    ("Fanduel Sports Network Wisconsin HD",  "fanduel-sports-network-wisconsin",  "hd"),
-    ("Fanduel Sports Network Ohio HD",       "fanduel-sports-network-ohio",       "hd"),
-    ("Fanduel Sports Network South HD",      "fanduel-sports-network-south",      "hd"),
-    ("Fanduel Sports Network Southeast HD",  "fanduel-sports-network-southeast",  "hd"),
-    ("Fanduel Sports Network West HD",       "fanduel-sports-network-west",       "hd"),
-    ("Fanduel Sports Network Socal HD",      "fanduel-sports-network-socal",      "hd"),
+    # FanDuel Sports Networks (formerly Bally Sports) — NHL regional US.
+    # Only the slugs whose CDN backends return 200 are listed; the other
+    # `fanduel-sports-network-*` slugs all 404 at e2.thetvapp.to. The albinchristo04
+    # `streams.json` mirror (Source 2) carries additional working `-hd` variants.
+    ("Fanduel Sports Network Detroit HD",     "fanduel-sports-network-detroit-hd", "hd"),
+    ("Fanduel Sports Network Great Lakes HD", "fanduel-sports-network-great-lakes", "hd"),
 ]
 
 _NHL_KEYWORDS = [
