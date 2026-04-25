@@ -499,9 +499,7 @@ export default function ScoreboardBar() {
               return (
                 <div key={g.game_id} className="flex items-center shrink-0 gap-2" data-live={isLive ? "true" : undefined} data-date={g.date ?? undefined}>
                   {isNew && <DateSep date={g.date} />}
-                  <Link href={`/game/${g.game_id}`} className="block">
-                    <GameCard g={g} />
-                  </Link>
+                  <GameCard g={g} />
                 </div>
               );
             })}
