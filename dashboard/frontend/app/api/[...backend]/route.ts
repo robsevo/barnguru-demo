@@ -26,12 +26,30 @@ async function proxy(req: NextRequest, pathParts: string[]): Promise<NextRespons
     duplex: "half",
   });
 
-  const body = await upstream.arrayBuffer();
-  return new NextResponse(body, {
+  // Stream the body through. Buffering whole segments via arrayBuffer() pushes
+  // HLS fragment fetches past hls.js's timeout on slow ticks, which the player
+  // raises as a fatal network error — that used to drop us to the Brightcove
+  // iframe mid-clip. JSON endpoints stream fine too; body size doesn't change.
+  const resHeaders = new Headers();
+  const passthroughHeaders = [
+    "content-type",
+    "content-length",
+    "content-range",
+    "accept-ranges",
+    "cache-control",
+    "etag",
+    "last-modified",
+  ];
+  for (const h of passthroughHeaders) {
+    const v = upstream.headers.get(h);
+    if (v) resHeaders.set(h, v);
+  }
+  if (!resHeaders.has("content-type")) {
+    resHeaders.set("content-type", "application/json");
+  }
+  return new NextResponse(upstream.body, {
     status: upstream.status,
-    headers: {
-      "Content-Type": upstream.headers.get("Content-Type") ?? "application/json",
-    },
+    headers: resHeaders,
   });
 }
 
