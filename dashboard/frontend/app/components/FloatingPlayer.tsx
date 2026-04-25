@@ -196,14 +196,18 @@ export default function FloatingPlayer() {
 
         // See StreamPanel: IPTV manifests aren't LL-HLS, so lowLatencyMode's
         // tighter window amplifies drift on flaky upstream feeds and presents as
-        // looping. Standard live tuning + capped back buffer.
+        // looping. Tighter live tuning + fast manifest failure for snappier
+        // initial load and recovery.
         hlsInstance = new Hls({
           enableWorker: true,
           lowLatencyMode: false,
           liveDurationInfinity: true,
           liveSyncDuration: 4,
-          liveMaxLatencyDuration: 15,
-          backBufferLength: 30,
+          liveMaxLatencyDuration: 8,
+          backBufferLength: 10,
+          manifestLoadingTimeOut: 6000,
+          manifestLoadingMaxRetry: 1,
+          fragLoadingMaxRetry: 2,
           xhrSetup: (xhr) => { xhr.setRequestHeader("ngrok-skip-browser-warning", "skip"); },
         });
         hlsInstance.loadSource(src);
@@ -212,6 +216,10 @@ export default function FloatingPlayer() {
           if (cancelled) return;
           setLoading(false);
           videoEl.muted = true;
+          const buf = videoEl.buffered;
+          if (buf.length > 0) {
+            videoEl.currentTime = Math.max(0, buf.end(buf.length - 1) - 2);
+          }
           videoEl.play().catch(() => {});
         });
         hlsInstance.on(Hls.Events.ERROR, (_e, d) => {
@@ -235,7 +243,7 @@ export default function FloatingPlayer() {
   // bounced forever — the existing error UI takes over after that.
   useEffect(() => {
     if (!videoEl || isIframe || error || loading) return;
-    const LIVE_DRIFT_RESYNC = 20;
+    const LIVE_DRIFT_RESYNC = 10;
     const MAX_RESYNCS = 3;
     let lastTime = -1;
     let resyncs = 0;
