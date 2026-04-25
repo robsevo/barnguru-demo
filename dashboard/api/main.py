@@ -5190,10 +5190,10 @@ async def game_iptv_streams(game_id: int) -> dict:
         all_channels = []
 
     # 3. Match each broadcast network to IPTV channels by title tokens.
-    # Only match against curated tvpass/upstream channels — NOT raw M3U playlist dumps
-    # which contain regional channels like "NBC Sports California" that would show up
-    # on games they never broadcast.
-    curated_channels = [ch for ch in all_channels if ch.get("source") in ("tvpass", "upstream")]
+    # Only match against approved sources: tvpass static slugs, thetvapp redirects
+    # (which resolve to tvpass.org/live/* URLs), and upstream accounts (ampztl +
+    # an upstream host only — lunar/tv14s are disabled in _upstream_ACCOUNTS).
+    curated_channels = [ch for ch in all_channels if ch.get("source") in ("tvpass", "thetvapp", "upstream")]
 
     # ampztl publishes several feeds per channel marked with different glyphs.
     # Field-tested: `ƒ` and `≋` feeds don't play; `✪` plays fine (often the
@@ -7798,6 +7798,7 @@ async def _fetch_upstream_channels(
             i += 1
     return results
 
+
 def _build_m3u_sources() -> list[str]:
     return [
         "https://raw.githubusercontent.com/phosani/tvpass/refs/heads/main/tvpasshd.m3u",
@@ -7806,6 +7807,27 @@ def _build_m3u_sources() -> list[str]:
     ]
 
 _M3U_SOURCES = _build_m3u_sources()
+
+# Approved IPTV provider hosts. The public GitHub M3U mirrors include URLs
+# pointing at lots of providers we don't want (lunar.pm, tv14s.xyz, random
+# regional CDNs); only URLs whose hostname matches — or is a subdomain of —
+# one of these are accepted.
+_APPROVED_IPTV_HOSTS: tuple[str, ...] = (
+    "tvpass.org",
+    "thetvapp.to",
+    "ampztl.xyz",
+    "an upstream host.ddns.net",
+)
+
+
+def _is_approved_iptv_url(u: str) -> bool:
+    try:
+        host = (urlparse(u).hostname or "").lower()
+    except Exception:
+        return False
+    if not host:
+        return False
+    return any(host == a or host.endswith("." + a) for a in _APPROVED_IPTV_HOSTS)
 
 
 @app.get("/iptv-channels")
@@ -7859,7 +7881,11 @@ async def iptv_channels(force: bool = False):
     except Exception:
         pass
 
-    # Source 3: public M3U playlists — parse and filter for NHL channels
+    # Source 3: public M3U playlists — parse and filter for NHL channels.
+    # Channel URLs are whitelisted via _is_approved_iptv_url() so URLs pointing
+    # at non-approved providers (lunar.pm, tv14s.xyz, random regional CDNs)
+    # never enter the pool — only ampztl / an upstream host / tvpass.org-family URLs
+    # the GitHub mirrors carry get through.
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             for m3u_url in _M3U_SOURCES:
@@ -7875,7 +7901,11 @@ async def iptv_channels(force: bool = False):
                             name_match = _re_iptv.search(r'tvg-name="([^"]+)"', line)
                             display = name_match.group(1) if name_match else line.split(",")[-1].strip()
                             url_line = lines[i + 1].strip()
-                            if any(k in display.lower() for k in _NHL_KEYWORDS) and url_line.startswith("http"):
+                            if (
+                                any(k in display.lower() for k in _NHL_KEYWORDS)
+                                and url_line.startswith("http")
+                                and _is_approved_iptv_url(url_line)
+                            ):
                                 channels.append({
                                     "title": f"{display} (playlist)",
                                     "url": url_line,
@@ -8052,6 +8082,11 @@ def _normalize_ch(title: str) -> str:
     t = _re_bc.sub(r"(?i)\btva\s+sports\s+1\s*$", "TVA Sports", t)
     # Strip remaining leading/trailing punctuation
     t = t.strip(" |:-")
+    # Collapse digit-spacing for known concatenated channel names so providers
+    # emitting "TSN 1" / "ESPN 2" / "FS 1" match _BARNCENTRE_CHANNEL_NAMES
+    # entries like "TSN1" / "ESPN2" / "FS1". Anchored to whole-string after
+    # prefixes/suffixes are stripped so unrelated text never gets mangled.
+    t = _re_bc.sub(r"^(tsn|espn|fs)\s+(\d+)$", r"\1\2", t, flags=_re_bc.I)
     return t.strip().lower()
 
 
@@ -8086,36 +8121,44 @@ async def _verify_stream_alive(url: str, timeout: float = 10.0) -> bool:
     For direct m3u8 URLs: do a lightweight HEAD/GET.
     Returns False on timeout, 404/403, or non-m3u8 destination.
 
-    Relay /hls URLs: don't probe directly — that would spawn ffmpeg and stream
-    video just to health-check. Decode the inner upstream TS URL and range-probe
-    the first KB instead.
+    Relay /hls URLs: probe the relay endpoint itself, not the inner upstream URL.
+    The whole point of the relay is that the VPS can't reach the upstream
+    provider directly — probing the inner URL from here always fails (IP-banned)
+    and incorrectly marks every working an upstream host-routed channel as offline.
+    The relay returns a tiny manifest (≤1KB), so the cost is negligible.
 
     Note on ngrok: a browser UA triggers ngrok's HTML interstitial (200 OK) even
     when the upstream is 404. Send `ngrok-skip-browser-warning` so the relay
     returns the true upstream status instead of lying.
     """
     import httpx as _hx_v
-    from urllib.parse import parse_qs as _parse_qs, urlparse as _urlparse
 
-    # /hls passthrough: probe the decoded TS URL, not the ffmpeg-backed endpoint.
+    # Relay /hls passthrough — probe the relay URL itself. The relay returns
+    # a tiny manifest synchronously; checking the body starts with #EXTM3U
+    # confirms ffmpeg attached to the upstream. Be optimistic on transient
+    # ngrok / cold-ffmpeg timeouts so the chip doesn't flicker offline for
+    # streams that actually play.
     if "/hls?" in url and "u=" in url:
         try:
-            inner = _parse_qs(_urlparse(url).query).get("u", [""])[0]
-            if inner:
-                inner_url = unquote(inner)
-                async with _hx_v.AsyncClient(
-                    follow_redirects=True,
-                    timeout=timeout,
-                    headers={
-                        "User-Agent": _BROWSER_HEADERS["User-Agent"],
-                        "Range":      "bytes=0-1023",
-                    },
-                ) as cl:
-                    r = await cl.get(inner_url)
-                    return r.status_code in (200, 206) and len(r.content) > 0
+            async with _hx_v.AsyncClient(
+                follow_redirects=True,
+                timeout=timeout,
+                headers={
+                    "User-Agent": "Grtzky-StreamVerifier/1.0",
+                    "ngrok-skip-browser-warning": "skip",
+                    "Range":                     "bytes=0-1023",
+                },
+            ) as cl:
+                r = await cl.get(url)
+            if r.status_code not in (200, 206):
+                return False
+            body = r.content[:64].lstrip()
+            return body.startswith(b"#EXTM3U")
         except Exception:
-            return False
-        return False
+            # Timeout / transient relay hiccup — assume alive. The user can
+            # still try the chip; verification false-negatives caused every
+            # an upstream host-routed channel to render as "No signal" before.
+            return True
 
     try:
         async with _hx_v.AsyncClient(
