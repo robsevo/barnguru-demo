@@ -208,6 +208,8 @@ export default function FloatingPlayer() {
           manifestLoadingTimeOut: 6000,
           manifestLoadingMaxRetry: 1,
           fragLoadingMaxRetry: 2,
+          startLevel: 0,
+          capLevelToPlayerSize: true,
           xhrSetup: (xhr) => { xhr.setRequestHeader("ngrok-skip-browser-warning", "skip"); },
         });
         hlsInstance.loadSource(src);
