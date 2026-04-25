@@ -6133,22 +6133,14 @@ async def stream_embed(url: str, request: Request) -> FastResponse:  # noqa: ARG
 
     # Sandbox policy:
     #   Mobile: sandboxed — blocks popup ads, force-fullscreen, and popunders
-    #     on iOS/Android where ad vectors are most hostile. We DO grant
-    #     allow-popups + allow-popups-to-escape-sandbox: many embed players
-    #     (JWPlayer, Clappr, custom HTML5 wrappers) probe for sandbox by
-    #     trying to open a noop popup at startup. If the probe is blocked the
-    #     player refuses to initialise and the user sees the broken-image
-    #     icon instead of video. The browser still requires a user gesture
-    #     to actually open a popup, so this doesn't re-enable popup ads —
-    #     only legitimises the no-op probe.
+    #     on iOS/Android where ad vectors are most hostile. Some players
+    #     (JWPlayer/Clappr) refuse to initialise under sandbox, but Bob's
+    #     call: a dead chip is better than a popup-ad chip on a phone.
     #   Desktop: no sandbox — many RSN / JWPlayer / Video.js / custom players
     #     detect a sandboxed ancestor and refuse to initialise, which broke
     #     local stream playback on localhost:3000. Desktop users get the normal
     #     browser ad surface in exchange for the local feeds actually loading.
-    sandbox_html = (
-        ' sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"'
-        if mobile else ""
-    )
+    sandbox_html = ' sandbox="allow-scripts allow-same-origin"' if mobile else ""
 
     html = f"""<!DOCTYPE html>
 <html>
