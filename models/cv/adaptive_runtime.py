@@ -11,6 +11,13 @@ The LUT keeps self-learning every call (``update_lut=True``) so both halves of
 the rink get populated as the broadcast pans. The composed H_pixel_to_nhl is
 only valid when the anchor file exists; without it, ``update()`` still returns
 None for NHL-feet projection but the LUT continues to refine.
+
+**Fixed-anchor bypass.** If ``models/cv/rink_fixed_anchor.json`` exists at
+runtime, the LUT is ignored and ``update()`` returns that 3×3 directly as
+``H_pixel_to_nhl``. Use this when the LUT is contaminated (e.g. the SHL
+model fires on broadcast logos rather than rink lines) and you want a
+hand-calibrated pixel→NHL homography for a single camera angle to get the
+live overlay working before a clean retrain.
 """
 
 from __future__ import annotations
@@ -30,8 +37,26 @@ from models.cv.adaptive_rink_lut import AdaptiveRinkLUT, LUT_PATH
 
 log = logging.getLogger(__name__)
 
-_REPO    = Path(__file__).resolve().parents[2]
-_WEIGHTS = _REPO / "models" / "cv" / "HockeyRink.pt"
+_REPO              = Path(__file__).resolve().parents[2]
+_WEIGHTS           = _REPO / "models" / "cv" / "HockeyRink.pt"
+FIXED_ANCHOR_PATH  = _REPO / "models" / "cv" / "rink_fixed_anchor.json"
+
+
+def _load_fixed_anchor() -> Optional[np.ndarray]:
+    """Load a hand-calibrated pixel→NHL homography if present.
+
+    The fixed anchor bypasses the LUT entirely. Useful when the SHL pose
+    model fires on broadcast logos (giving the LUT a degenerate canonical
+    space) and you want the live overlay working before retraining.
+    """
+    import json
+
+    if not FIXED_ANCHOR_PATH.exists():
+        return None
+    d = json.loads(FIXED_ANCHOR_PATH.read_text())
+    if "H_pixel_to_nhl" not in d:
+        return None
+    return np.array(d["H_pixel_to_nhl"], dtype=np.float64)
 
 
 class AdaptiveRinkRuntime:
@@ -50,19 +75,21 @@ class AdaptiveRinkRuntime:
         if not weights_path.exists():
             raise FileNotFoundError(f"HockeyRink weights not found: {weights_path}")
 
-        self._model       = YOLO(str(weights_path))
-        self._lut         = AdaptiveRinkLUT.load(lut_path)
-        self._anchor      = load_anchor()
-        self._conf_min    = conf_min
-        self._trusted_n   = trusted_n
-        self._trusted_std = trusted_std
-        self._lut_path    = lut_path
+        self._model        = YOLO(str(weights_path))
+        self._lut          = AdaptiveRinkLUT.load(lut_path)
+        self._anchor       = load_anchor()
+        self._fixed_anchor = _load_fixed_anchor()
+        self._conf_min     = conf_min
+        self._trusted_n    = trusted_n
+        self._trusted_std  = trusted_std
+        self._lut_path     = lut_path
 
         log.info(
-            "[adaptive-runtime] lut: %d kps, %d frames_seen, anchor=%s",
+            "[adaptive-runtime] lut: %d kps, %d frames_seen, anchor=%s, fixed_anchor=%s",
             len(self._lut.stats),
             self._lut.frames_seen,
             self._anchor is not None,
+            self._fixed_anchor is not None,
         )
 
     def detect(self, frame: np.ndarray) -> np.ndarray:
@@ -77,7 +104,13 @@ class AdaptiveRinkRuntime:
 
         Returns the 3×3 H mapping pixel → NHL feet, or None if the frame could
         not be solved (too few trusted matches) or if no anchor is calibrated.
+
+        If the fixed-anchor file is loaded we short-circuit: the LUT and YOLO
+        pose model are not consulted. Caller still expects a non-None result
+        when the rink is "calibrated", which the fixed anchor satisfies.
         """
+        if self._fixed_anchor is not None:
+            return self._fixed_anchor
         kps = self.detect(frame)
         r = compute_homography_adaptive(
             kps,

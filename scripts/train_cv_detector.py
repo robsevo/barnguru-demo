@@ -40,7 +40,7 @@ _REPO = Path(__file__).parents[1]
 sys.path.insert(0, str(_REPO))
 
 from models.cv.player_detector import (
-    CLASS_NAMES, MAP50_GATE, NUM_CLASSES, METRICS_JSON,
+    CLASS_NAMES, MAP50_GATE, MAP50_DOWNSTREAM_GATE, NUM_CLASSES, METRICS_JSON,
     DEFAULT_PT, DEFAULT_ONNX, DEFAULT_ONNX_INT8, RUNTIME_IMGSZ,
 )
 
@@ -59,8 +59,12 @@ SPLIT_DIR   = _CV / "yolo_split"
 RUNS_DIR    = _REPO / "runs" / "cv_detector"
 MODEL_DIR   = _REPO / "models" / "cv"
 
-# Default YOLO backbone — nano for speed at inference time
-DEFAULT_BACKBONE = "yolov8n.pt"
+# Default YOLO backbone. yolov8m is the smallest model that has cleared the
+# 0.92 downstream gate on broadcast hockey footage in our internal runs;
+# yolov8s topped out near 0.81 on the current 8k-image dataset. The browser
+# artifact is the INT8-quantized v4 ONNX (~3 MB), exported separately, so
+# bumping the source backbone doesn't bloat the mobile payload.
+DEFAULT_BACKBONE = "yolov8m.pt"
 
 # Train/val split ratio (fraction of sequences for training)
 TRAIN_RATIO = 0.80
@@ -75,15 +79,26 @@ def main(argv: list[str] | None = None) -> None:
 
     print(_banner())
 
-    # ── Fast path: flat train/val layout from fetch_hockey_ai.py ─────────
-    flat_train_imgs = _CV / "images" / "train"
-    flat_val_imgs   = _CV / "images" / "val"
-    if DATASET_YAML.exists() and flat_train_imgs.is_dir() and flat_val_imgs.is_dir():
+    # ── Optional data-root override (Kaggle, CI, alt layouts) ────────────
+    # Keep _CV / DATASET_YAML / paths above as the in-repo defaults; only
+    # override the local handles used in this function so module-level
+    # imports elsewhere keep working.
+    cv_root = Path(args.data_root).resolve() if args.data_root else _CV
+    dataset_yaml = cv_root / "dataset.yaml"
+    flat_train_imgs = cv_root / "images" / "train"
+    flat_val_imgs   = cv_root / "images" / "val"
+    if dataset_yaml.exists() and flat_train_imgs.is_dir() and flat_val_imgs.is_dir():
         n_train = len(list(flat_train_imgs.glob("*.jpg")))
         n_val   = len(list(flat_val_imgs.glob("*.jpg")))
-        print(f"[detector] Using existing dataset.yaml "
+        print(f"[detector] Using dataset.yaml at {dataset_yaml} "
               f"({n_train:,} train / {n_val:,} val images)")
-        split_yaml = DATASET_YAML
+        if args.data_root:
+            # Rewrite the absolute `path:` field so Ultralytics resolves
+            # train/val under the override root. Lives in the run dir so it
+            # doesn't pollute the repo dataset.yaml.
+            split_yaml = _rewrite_dataset_yaml(dataset_yaml, cv_root, RUNS_DIR)
+        else:
+            split_yaml = dataset_yaml
     else:
         # ── Legacy path: MOT-sequence layout from build_cv_dataset.py ────
         img_root = AUG_IMG if not args.no_aug else FRAMES_DIR
@@ -146,9 +161,15 @@ def main(argv: list[str] | None = None) -> None:
     map50   = metrics.get("map50", 0.0)
     passed  = map50 >= MAP50_GATE
 
+    downstream_passed = map50 >= MAP50_DOWNSTREAM_GATE
     metrics["quality_gate"] = {
         "threshold": MAP50_GATE,
         "passed":    passed,
+        "map50":     map50,
+    }
+    metrics["downstream_gate"] = {
+        "threshold": MAP50_DOWNSTREAM_GATE,
+        "passed":    downstream_passed,
         "map50":     map50,
     }
     metrics["model_path"] = str(DEFAULT_PT)
@@ -161,13 +182,17 @@ def main(argv: list[str] | None = None) -> None:
     print(f"[detector] Metrics saved → {METRICS_JSON}")
 
     # ── Summary ───────────────────────────────────────────────────────────
-    gate_sym = "✓" if passed else "✗"
-    gate_msg = "PASS" if passed else f"FAIL (need ≥{MAP50_GATE})"
+    gate_sym       = "✓" if passed            else "✗"
+    gate_msg       = "PASS" if passed         else f"FAIL (need ≥{MAP50_GATE})"
+    downstream_sym = "✓" if downstream_passed else "✗"
+    downstream_msg = ("PASS — cv_gate safe to flip ON" if downstream_passed
+                      else f"FAIL (need ≥{MAP50_DOWNSTREAM_GATE} for CV→player-NN feed)")
 
     print(
         f"\n{'─'*55}\n"
         f"  Phase 16.2 complete.\n"
         f"  mAP@0.5    : {map50:.4f}  {gate_sym} {gate_msg}\n"
+        f"  Downstream : {map50:.4f}  {downstream_sym} {downstream_msg}\n"
         f"  mAP@0.5:0.95: {metrics.get('map50_95', 0.0):.4f}\n"
         f"  Precision  : {metrics.get('precision', 0.0):.4f}\n"
         f"  Recall     : {metrics.get('recall', 0.0):.4f}\n"
@@ -178,18 +203,57 @@ def main(argv: list[str] | None = None) -> None:
         print(
             f"  ⚠  mAP@0.5 {map50:.4f} < {MAP50_GATE} gate.\n"
             f"     Options to improve:\n"
-            f"     • Add more labeled sequences to data/cv_training/raw/\n"
-            f"     • Re-run build-cv-dataset then train-cv-detector\n"
-            f"     • Try --backbone yolov8s.pt (larger model)\n"
-            f"     • Increase --epochs\n"
+            f"     • Run audit-cv with --delete-dupes to remove near-duplicates\n"
+            f"     • Re-run fetch_mhptd_vip.py with smaller --stride for more frames\n"
+            f"     • Try --backbone yolov8m.pt or --backbone yolov8l.pt\n"
+            f"     • Increase --epochs (100+ at imgsz 480)\n"
+            f"     • Bootstrap pseudo-labels: gretzky bootstrap-pseudo\n"
+        )
+    elif not downstream_passed:
+        print(
+            f"  ⚠  Detector passes display gate but not the 0.92 downstream gate.\n"
+            f"     Boxes will render in /game/[id], but cv_gate.json should stay\n"
+            f"     OFF until mAP@0.5 ≥ {MAP50_DOWNSTREAM_GATE}. Options:\n"
+            f"     • Bigger backbone (yolov8l.pt) + more epochs\n"
+            f"     • Add more labelled sequences via fetch-* scripts\n"
+            f"     • Bootstrap pseudo-labels and retrain\n"
         )
     else:
-        print(f"  ✓ Quality gate passed. Ready for 16.7 (CV worker).\n")
+        print(f"  ✓ Both gates passed. Ready for 16.7 (CV worker) and CV→NN feed.\n")
 
     print(f"{'─'*55}\n")
 
     if not passed:
         sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# data-root override helper
+# ---------------------------------------------------------------------------
+
+def _rewrite_dataset_yaml(src: Path, cv_root: Path, runs_dir: Path) -> Path:
+    """Copy ``src`` and rewrite the absolute ``path:`` field to ``cv_root``.
+
+    Ultralytics resolves train/val relative to the YAML's path field, so a
+    repo-checked-in dataset.yaml doesn't work when the data is mounted at
+    ``/kaggle/input/grtzky-cv``. We write a sibling YAML next to the run
+    output rather than mutating the source.
+    """
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    dst = runs_dir / "dataset_kaggle.yaml"
+    out_lines: list[str] = []
+    saw_path = False
+    for raw in src.read_text().splitlines():
+        if raw.lstrip().startswith("path:"):
+            out_lines.append(f"path: {cv_root.resolve()}")
+            saw_path = True
+        else:
+            out_lines.append(raw)
+    if not saw_path:
+        out_lines.insert(0, f"path: {cv_root.resolve()}")
+    dst.write_text("\n".join(out_lines) + "\n")
+    print(f"[detector] Rewrote dataset.yaml → {dst}  (path: {cv_root})")
+    return dst
 
 
 # ---------------------------------------------------------------------------
@@ -500,12 +564,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     p.add_argument("--backbone",  default=DEFAULT_BACKBONE,
                    help=f"YOLO backbone .pt file (default: {DEFAULT_BACKBONE})")
-    p.add_argument("--epochs",    type=int,   default=50,
-                   help="Training epochs (default 50)")
+    p.add_argument("--epochs",    type=int,   default=100,
+                   help="Training epochs (default 100; 0.92 gate typically lands 80–120)")
     p.add_argument("--batch",     type=int,   default=16,
                    help="Batch size (default 16; reduce if OOM)")
-    p.add_argument("--imgsz",     type=int,   default=640,
-                   help="Training image size in pixels (default 640)")
+    p.add_argument("--imgsz",     type=int,   default=480,
+                   help="Training image size in pixels (default 480 — close to "
+                        "broadcast aspect after letterbox; bumping to 640 helps "
+                        "puck mAP at 2× compute)")
     p.add_argument("--lr",        type=float, default=0.01,
                    help="Initial learning rate (default 0.01)")
     p.add_argument("--patience",  type=int,   default=15,
@@ -530,6 +596,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
                    help="Copy-paste augmentation probability (0–1).")
     p.add_argument("--mosaic",    type=float, default=1.0,
                    help="Mosaic augmentation probability (default 1.0).")
+    p.add_argument("--data-root", default=None,
+                   help="Override the cv_training root (e.g. /kaggle/input/grtzky-cv "
+                        "for Kaggle). When set, dataset.yaml + images/ + labels/ are "
+                        "read from this directory. Outputs (.pt, .onnx, metrics) "
+                        "still go under the repo's models/cv/.")
     return p.parse_args(argv)
 
 

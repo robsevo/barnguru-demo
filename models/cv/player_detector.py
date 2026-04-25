@@ -3,13 +3,11 @@
 Loads the fine-tuned YOLO model from ``models/cv/player_detector.pt`` and
 exposes a clean ``detect(frame)`` API used by the CV worker (16.7).
 
-Classes (must match training config):
-    0  player_home
-    1  player_away
-    2  goalie_home
-    3  goalie_away
-    4  referee
-    5  puck
+Classes (must match training config — 4-class schema after migration):
+    0  player    — home/away decided post-detection by torso saturation
+    1  goalie    — home/away decided post-detection by torso saturation
+    2  referee
+    3  puck
 
 Usage::
 
@@ -64,8 +62,13 @@ CLASS_NAMES: list[str] = [
 
 NUM_CLASSES = len(CLASS_NAMES)
 
-# Quality gate from PLAN.md §16.2
+# Quality gate from PLAN.md §16.2 — minimum bar for the model to be saved.
 MAP50_GATE = 0.82
+
+# Downstream-work gate. The detector must exceed this before CV→player-NN
+# feeding is trusted, per the operator's directive. Below this, the model
+# still ships for display, but the cv_gate stays advised-OFF on /dev.
+MAP50_DOWNSTREAM_GATE = 0.92
 
 
 # ---------------------------------------------------------------------------
@@ -274,3 +277,17 @@ def check_quality_gate(metrics: dict | None = None) -> tuple[bool, float]:
         return False, 0.0
     map50 = float(metrics.get("map50", 0.0))
     return map50 >= MAP50_GATE, map50
+
+
+def check_downstream_gate(metrics: dict | None = None) -> tuple[bool, float]:
+    """Return (passed, map50) checking the stricter downstream-work gate (0.92).
+
+    Used by /api/cv/gate UI to advise rob whether the detector is good
+    enough to safely feed observations into player_behavior_net training.
+    """
+    if metrics is None:
+        metrics = load_metrics()
+    if metrics is None:
+        return False, 0.0
+    map50 = float(metrics.get("map50", 0.0))
+    return map50 >= MAP50_DOWNSTREAM_GATE, map50

@@ -97,10 +97,17 @@ def _reduce_game(game_dir: Path) -> list[dict]:
                 if arena_first is None:
                     arena_first = arena
 
+            # Per-track event attribution. Pass/shot events carry from_track_id;
+            # we credit the originator track so the per-(jersey, team) action
+            # counts the labeler emits downstream are actually sourced.
+            per_track_events: dict[int, int] = {}
             for ev in rec.get("events_recent", []) or []:
                 events_total += 1
                 if ev.get("kind") == "pass_or_shot":
                     pass_shot_total += 1
+                    src = ev.get("from_track_id")
+                    if isinstance(src, int) and src >= 0:
+                        per_track_events[src] = per_track_events.get(src, 0) + 1
 
             vt = rec.get("video_time")
             for p in rec.get("players", []) or []:
@@ -112,22 +119,34 @@ def _reduce_game(game_dir: Path) -> list[dict]:
                 sp_kmh = p.get("speed_kmh")
                 cls    = p.get("class_name", "")
                 cx, cy = p.get("cx_n"), p.get("cy_n")
+                jersey = p.get("jersey_number")
+                jersey_locked = bool(p.get("jersey_locked", False))
+                team   = p.get("team", "") or ""
 
                 entry = tracks.get(key)
                 if entry is None:
                     entry = {
-                        "client_id":   client_id,
-                        "track_id":    int(tid),
-                        "class_votes": {},
-                        "frames":      0,
-                        "sum_speed":   0.0,
-                        "n_speed":     0,
-                        "max_speed":   0.0,
-                        "first_time":  vt,
-                        "last_time":   vt,
-                        "sum_x":       0.0,
-                        "sum_y":       0.0,
-                        "n_pos":       0,
+                        "client_id":     client_id,
+                        "track_id":      int(tid),
+                        "class_votes":   {},
+                        "frames":        0,
+                        "sum_speed":     0.0,
+                        "n_speed":       0,
+                        "max_speed":     0.0,
+                        "first_time":    vt,
+                        "last_time":     vt,
+                        "sum_x":         0.0,
+                        "sum_y":         0.0,
+                        "n_pos":         0,
+                        # Jersey lock: take the first locked (jersey_number, team)
+                        # we see for this track. Locked status implies ≥3
+                        # consistent OCR reads at the frontend, so flipping it is
+                        # rare; but we deliberately never overwrite once set so a
+                        # flicker can't poison the attribution.
+                        "jersey_number": jersey if jersey_locked else None,
+                        "jersey_locked": jersey_locked,
+                        "team":          team,
+                        "pass_or_shot":  0,
                     }
                     tracks[key] = entry
 
@@ -147,6 +166,16 @@ def _reduce_game(game_dir: Path) -> list[dict]:
                     entry["sum_x"] += float(cx)
                     entry["sum_y"] += float(cy)
                     entry["n_pos"] += 1
+                # Jersey lock — first definitive lock wins.
+                if (not entry["jersey_locked"]) and jersey_locked and jersey is not None:
+                    entry["jersey_number"] = int(jersey)
+                    entry["jersey_locked"] = True
+                # Team attribution: keep the dominant non-empty value.
+                if team and not entry["team"]:
+                    entry["team"] = team
+                # Credit pass/shot events whose from_track_id matches this track.
+                if int(tid) in per_track_events:
+                    entry["pass_or_shot"] += per_track_events[int(tid)]
 
     rows: list[dict] = []
     for (client_id, tid), e in tracks.items():
@@ -169,6 +198,10 @@ def _reduce_game(game_dir: Path) -> list[dict]:
             "mean_cy":           round(e["sum_y"] / e["n_pos"], 4) if e["n_pos"] else None,
             "first_video_time":  e["first_time"],
             "last_video_time":   e["last_time"],
+            "jersey_number":     e["jersey_number"],
+            "jersey_locked":     e["jersey_locked"],
+            "team":              e["team"] or None,
+            "pass_or_shot":      e["pass_or_shot"],
         })
 
     # Most-frequent arena wins, since a single game is always in one building.

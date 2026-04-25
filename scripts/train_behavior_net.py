@@ -42,6 +42,7 @@ HEATMAP_SUBDIR        = "positional_heatmap"
 SKATING_SUBDIR        = "skating_baseline"
 BEHAVIOR_SUBDIR       = "behavior_net"
 CV_OBS_SUBDIR         = "cv_live_observations"
+CV_ACTIONS_SUBDIR     = "cv_observations"
 CV_GATE_FILE          = "cv_gate.json"
 
 
@@ -97,7 +98,40 @@ def _read_cv_gate(data_dir: Path) -> bool:
 
 
 def _load_cv_observations(data_dir: Path) -> pl.DataFrame | None:
-    """Concatenate every per-game ``summary.parquet`` written by the aggregator.
+    """Concatenate aggregator track summaries + label_actions_from_cv output.
+
+    Two sources are merged with ``how="diagonal"``: the per-track summary
+    parquets (one per game, schema dominated by per-track speed/cls stats)
+    and the action-labelled rows from ``label_actions_from_cv`` (one per
+    PBP-confirmed shot/zone-entry, schema dominated by player_id + action).
+
+    Returns None when neither source has any rows; consumers treat None as
+    a gate-off / no-data signal.
+    """
+    frames: list[pl.DataFrame] = []
+    obs_root = data_dir / CV_OBS_SUBDIR
+    if obs_root.exists():
+        for p in obs_root.glob("*/summary.parquet"):
+            try:
+                frames.append(pl.read_parquet(p))
+            except Exception:
+                continue
+    actions_root = data_dir / CV_ACTIONS_SUBDIR
+    if actions_root.exists():
+        for p in actions_root.glob("cv_actions_*.parquet"):
+            try:
+                df = pl.read_parquet(p)
+                if len(df) > 0:
+                    frames.append(df)
+            except Exception:
+                continue
+    if not frames:
+        return None
+    return pl.concat(frames, how="diagonal")
+
+
+def _load_cv_observations_legacy(data_dir: Path) -> pl.DataFrame | None:
+    """Older single-source loader kept for callers we haven't migrated.
 
     Returns None when there's nothing to feed. Consumers treat None as a
     gate-off / no-data signal.
