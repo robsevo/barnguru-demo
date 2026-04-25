@@ -8043,9 +8043,6 @@ _BARNCENTRE_CHANNEL_NAMES = [
     "NESN",
     # US sports betting / general sports
     "FanDuel",
-    # US regional — Bally Sports (an upstream host carries 30 regional feeds;
-    # single card multiplexes them all as backups)
-    "Bally Sports",
     # US — CBS Sports (placed right before the French block)
     "CBS Sports", "CBS Sports Network",
     # Canadian French — at the back, grouped by network
@@ -8080,8 +8077,10 @@ def _normalize_ch(title: str) -> str:
     t = _re_bc.sub(r"\s*\((?:FR|EN|ES|DE)\)\s*$", "", t, flags=_re_bc.I)
     # Normalize "TVA SPORTS 1" → "TVA SPORTS": tv14s numbers the primary feed.
     t = _re_bc.sub(r"(?i)\btva\s+sports\s+1\s*$", "TVA Sports", t)
-    # Strip remaining leading/trailing punctuation
-    t = t.strip(" |:-")
+    # Strip remaining leading/trailing punctuation. ampztl decorates titles
+    # with leading "." (e.g. ".NHL Network ✤", ".RDS ☆") which would otherwise
+    # leave the dot in front and break matcher equality.
+    t = t.strip(" |:-").lstrip(".")
     # Collapse digit-spacing for known concatenated channel names so providers
     # emitting "TSN 1" / "ESPN 2" / "FS 1" match _BARNCENTRE_CHANNEL_NAMES
     # entries like "TSN1" / "ESPN2" / "FS1". Anchored to whole-string after
@@ -8134,10 +8133,12 @@ async def _verify_stream_alive(url: str, timeout: float = 10.0) -> bool:
     import httpx as _hx_v
 
     # Relay /hls passthrough — probe the relay URL itself. The relay returns
-    # a tiny manifest synchronously; checking the body starts with #EXTM3U
-    # confirms ffmpeg attached to the upstream. Be optimistic on transient
-    # ngrok / cold-ffmpeg timeouts so the chip doesn't flicker offline for
-    # streams that actually play.
+    # a tiny manifest, but ffmpeg may not have written #EXTM3U yet on a cold
+    # start (the upstream takes 1-2s to attach). Earlier strict checks
+    # ("body must start with #EXTM3U") false-rejected working channels —
+    # NHL Network and FanDuel were demoted to broken tvpass slugs because of
+    # this. Now: any 2xx/206 with non-empty body counts as alive. Optimistic
+    # on transient ngrok / timeout errors for the same reason.
     if "/hls?" in url and "u=" in url:
         try:
             async with _hx_v.AsyncClient(
@@ -8150,14 +8151,8 @@ async def _verify_stream_alive(url: str, timeout: float = 10.0) -> bool:
                 },
             ) as cl:
                 r = await cl.get(url)
-            if r.status_code not in (200, 206):
-                return False
-            body = r.content[:64].lstrip()
-            return body.startswith(b"#EXTM3U")
+            return r.status_code in (200, 206) and len(r.content) > 0
         except Exception:
-            # Timeout / transient relay hiccup — assume alive. The user can
-            # still try the chip; verification false-negatives caused every
-            # an upstream host-routed channel to render as "No signal" before.
             return True
 
     try:
@@ -8713,7 +8708,7 @@ async def barncentre_channels() -> dict:
         "RDS":          ["an upstream host", "ampztl-a", "ampztl-b"],
         "RDS 2":        ["an upstream host", "ampztl-a", "ampztl-b"],
         "RDS INFO":     ["an upstream host"],
-        "TVA Sports":   ["an upstream host"],
+        "TVA Sports":   ["an upstream host", "ampztl-a", "ampztl-b"],
         "TVA Sports 2": ["an upstream host", "ampztl-a", "ampztl-b"],
     }
     _acct_re  = _re_bc.compile(r"\(([a-z0-9._-]{3,30})\)\s*$", _re_bc.I)
