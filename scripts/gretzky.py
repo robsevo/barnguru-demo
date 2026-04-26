@@ -123,54 +123,8 @@ COMMANDS: list[Cmd] = [
     # ── Phase 3+ — add here as features are built ─────────────────────────
 
     # ── Phase 16 — CV Tracking Engine ────────────────────────────────────
-    Cmd("build-cv-dataset",  "phase16",
-        "Build CV training data pipeline: download → extract → MOT→YOLO → augment (Feature 16.1)",
-        "scripts.build_cv_dataset"),
-    Cmd("train-cv-detector", "phase16",
-        "Fine-tune YOLO player+puck detector on 16.1 data; gate mAP@0.5 ≥ 0.82 (Feature 16.2)",
-        "scripts.train_cv_detector"),
-    Cmd("retrain-cv", "phase16",
-        "Weekly warm-start YOLO retrain using cached puck pseudo-labels; rejects regressions",
-        "scripts.retrain_cv_detector"),
-    Cmd("gen-jersey-data",   "phase16",
-        "Generate synthetic jersey-number training crops (~50K samples) (Feature 16.3)",
-        "scripts.generate_jersey_data"),
-    Cmd("train-jersey-ocr",  "phase16",
-        "Train jersey OCR CNN (numbers 1–99); gate top-1 ≥ 85% (Feature 16.3)",
-        "scripts.train_jersey_ocr"),
-    Cmd("build-color-lut",   "phase16",
-        "Build HSV team-colour LUT for all 32 NHL teams (Feature 16.4)",
-        "scripts.build_team_color_lut"),
-    Cmd("train-rink-kp",     "phase16",
-        "Train rink keypoint detector (heatmap regression, 7 landmarks) (Feature 16.5)",
-        "scripts.train_rink_keypoints"),
-    Cmd("set-rink-anchor",   "phase16",
-        "Write canonical-LUT → NHL feet homography (one-time arena calibration)",
-        "scripts.set_rink_anchor"),
-    Cmd("fetch-mhptd-vip",   "phase16",
-        "Merge MHPTD + VIP-HTD external datasets into the YOLO training layout",
-        "scripts.fetch_mhptd_vip"),
-    Cmd("fetch-hockey-ai",   "phase16",
-        "Pull additional HockeyAI broadcast frames + labels into cv_training/",
-        "scripts.fetch_hockey_ai"),
-    Cmd("train-cv-kaggle",   "phase16",
-        "Kaggle-only entrypoint that trains the detector against a /kaggle/input mount",
-        "scripts.train_cv_kaggle"),
-    Cmd("retrain-xg-tracking", "phase16",
-        "Retrain xG model with CV tracking features (screen_count, defender_dist, goalie_displacement); gate AUC (Feature 16.10)",
-        "scripts.retrain_xg_tracking"),
-    Cmd("aggregate-cv-obs",  "phase16",
-        "Reduce in-browser CV observation NDJSON into per-track summaries (Feature 16 bridge)",
-        "scripts.aggregate_cv_observations"),
-    Cmd("label-cv-actions",  "phase16",
-        "Join aggregator output + NHL PBP shots → action-labelled rows for player_behavior_net",
-        "scripts.label_actions_from_cv"),
-    Cmd("bootstrap-pseudo",  "phase16",
-        "Bootstrap YOLO pseudo-labels from recorded broadcast video for the retrain loop",
-        "scripts.bootstrap_pseudo_labels"),
-    Cmd("audit-cv",          "phase16",
-        "FiftyOne audit of data/cv_training: corrupt imgs, OOB labels, dupes, class balance",
-        "scripts.audit_cv_dataset"),
+    # Removed temporarily; will be reintroduced once stable. Static formation
+    # rink in the meantime; nothing in Phases 1–2 depends on CV outputs.
 ]
 
 
@@ -188,7 +142,6 @@ def _phase_label(phase: str) -> str:
         "phase3":  "PHASE 3  — Fatigue Engine",
         "phase4":  "PHASE 4  — Coaching Tendency Models",
         "phase5":  "PHASE 5  — Rust Simulation Engine",
-        "phase16": "PHASE 16 — CV Tracking Engine (parallel track)",
     }
     return labels.get(phase, phase.upper())
 

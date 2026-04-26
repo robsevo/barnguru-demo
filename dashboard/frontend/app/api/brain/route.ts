@@ -49,6 +49,6 @@ interface Observation {
   expires_after_games: number;
   active:              boolean;
   noted_at:            string;
-  /** "manual" | "ai_observer" — added by Feature 16.13 */
+  /** "manual" — Phase 16 auto-observer is removed for now. */
   source?:             string;
 }

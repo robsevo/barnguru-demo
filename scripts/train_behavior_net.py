@@ -41,9 +41,6 @@ BATTLE_SUBDIR         = "battles"
 HEATMAP_SUBDIR        = "positional_heatmap"
 SKATING_SUBDIR        = "skating_baseline"
 BEHAVIOR_SUBDIR       = "behavior_net"
-CV_OBS_SUBDIR         = "cv_live_observations"
-CV_ACTIONS_SUBDIR     = "cv_observations"
-CV_GATE_FILE          = "cv_gate.json"
 
 
 def _latest_parquet(directory: Path, glob_pattern: str) -> Path | None:
@@ -78,72 +75,6 @@ def _load_skating_baseline(skating_dir: Path, season: int) -> pl.DataFrame | Non
         print(f"  Loaded skating baseline: {f.name}")
         return pl.read_parquet(f)
     return None
-
-
-def _read_cv_gate(data_dir: Path) -> bool:
-    """Check whether the rob-only CV→player-NN gate is ON.
-
-    File at ``$GRETZKY_DATA_DIR/cv_gate.json``; absence is treated as OFF.
-    Lives next to the data dir (not the repo) so the web API and training
-    scripts share one source of truth without import cycles.
-    """
-    import json
-    p = data_dir / CV_GATE_FILE
-    if not p.exists():
-        return False
-    try:
-        return bool(json.loads(p.read_text(encoding="utf-8")).get("enabled", False))
-    except Exception:
-        return False
-
-
-def _load_cv_observations(data_dir: Path) -> pl.DataFrame | None:
-    """Concatenate aggregator track summaries + label_actions_from_cv output.
-
-    Two sources are merged with ``how="diagonal"``: the per-track summary
-    parquets (one per game, schema dominated by per-track speed/cls stats)
-    and the action-labelled rows from ``label_actions_from_cv`` (one per
-    PBP-confirmed shot/zone-entry, schema dominated by player_id + action).
-
-    Returns None when neither source has any rows; consumers treat None as
-    a gate-off / no-data signal.
-    """
-    frames: list[pl.DataFrame] = []
-    obs_root = data_dir / CV_OBS_SUBDIR
-    if obs_root.exists():
-        for p in obs_root.glob("*/summary.parquet"):
-            try:
-                frames.append(pl.read_parquet(p))
-            except Exception:
-                continue
-    actions_root = data_dir / CV_ACTIONS_SUBDIR
-    if actions_root.exists():
-        for p in actions_root.glob("cv_actions_*.parquet"):
-            try:
-                df = pl.read_parquet(p)
-                if len(df) > 0:
-                    frames.append(df)
-            except Exception:
-                continue
-    if not frames:
-        return None
-    return pl.concat(frames, how="diagonal")
-
-
-def _load_cv_observations_legacy(data_dir: Path) -> pl.DataFrame | None:
-    """Older single-source loader kept for callers we haven't migrated.
-
-    Returns None when there's nothing to feed. Consumers treat None as a
-    gate-off / no-data signal.
-    """
-    obs_root = data_dir / CV_OBS_SUBDIR
-    if not obs_root.exists():
-        return None
-    parquets = list(obs_root.glob("*/summary.parquet"))
-    if not parquets:
-        return None
-    frames = [pl.read_parquet(p) for p in parquets]
-    return pl.concat(frames, how="diagonal") if frames else None
 
 
 def main() -> None:
@@ -212,30 +143,16 @@ def main() -> None:
     if skating_df is None:
         print("  Skating baseline not available — speed priors will use defaults.")
 
-    # ── CV → player-NN feed gate (Feature 16.26) ─────────────────────────
-    # Detector + per-arena training run always. Player-specific CV features
-    # flow into this fit() call only when rob has flipped the gate ON via
-    # the /dev toggle. Nightly/weekly non-CV inputs above are untouched.
-    cv_df: pl.DataFrame | None = None
-    if _read_cv_gate(data_dir):
-        cv_df = _load_cv_observations(data_dir)
-        if cv_df is None:
-            print("[behavior-net] CV feed: ON, but no aggregated observations yet "
-                  "(run 'gretzky aggregate-cv-obs' after users watch some games).")
-        else:
-            print(f"[behavior-net] CV feed: ON — {len(cv_df):,} aggregated CV rows will join training.")
-    else:
-        print("[behavior-net] CV feed: OFF (rob has not enabled it on /dev — "
-              "flip 'CV → Player-NN Feed' when enough player data accrues).")
-
     # ── Train model ───────────────────────────────────────────────────────
+    # CV observations are the Phase 16 input and are temporarily unavailable;
+    # PlayerBehaviorNet.fit() already handles cv_observations_df=None.
     print(f"\n[behavior-net] Training behavioral network…")
     net = PlayerBehaviorNet()
     net.fit(
         player_stats_df     = player_stats_df,
         positional_df       = positional_df,
         skating_baseline_df = skating_df,
-        cv_observations_df  = cv_df,
+        cv_observations_df  = None,
     )
 
     n_players = len(net.player_ids())
