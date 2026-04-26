@@ -4,71 +4,76 @@ export const runtime = "nodejs";
 export const maxDuration = 15;
 
 /**
- * Stream embed proxy — wrapper mode (all clients).
+ * Stream embed proxy — server-side passthrough mode.
  *
- * Returns a thin HTML wrapper with a plain <iframe src="original-url">.
- * The player runs at its native origin so all self-checks pass, HLS/XHR
- * requests go directly to the stream domain (no CORS issues), and the
- * stream plays normally on both desktop and mobile.
+ * Why we can't just iframe the third-party host:
+ *   uBlock / AdGuard / Brave / Pi-hole have rules that block third-party
+ *   iframes from known popup/ad hosts (embedsports.top, dlstreams.com,
+ *   abcsport.top, ...). The user's browser refuses the iframe load — Chrome
+ *   shows "host refused to connect" inside the chip — even though the host
+ *   is reachable on direct navigation. Bob's report: every backup chip
+ *   shows that error in-page; tapping "Open / Cast ↗" works.
  *
- * Ad blocking is handled in the wrapper context (not the stream iframe):
- *   - window.open overridden to a no-op → kills popup/popunder tabs
- *   - window.location overridden → blocks redirect-based ads
- *   - fetch/XHR patched → blocks requests to known ad domains
- *   - document.createElement patched → blocks injected ad scripts
- *   - blur/focus trap → refocuses the page if a popunder steals focus
- *   - MutationObserver → removes injected ad iframes and overlays
- *   - auto-clicker → dismisses consent overlays and ad close buttons
- *   - Permissions-Policy header → blocks dangerous browser feature requests
- *   - Referrer-Policy: no-referrer → denies referrer-based ad targeting
- *
- * Note: ad scripts baked into the stream player itself are not strippable
- * via this approach (would require proxy mode which breaks CORS). The
- * popup/overlay/redirect blocking above covers the most disruptive ad formats.
+ * Fix: fetch the host HTML server-side and serve it from /api/stream-embed
+ * (localhost:3000). The browser only sees a same-origin iframe load, so the
+ * ad-blocker's third-party-iframe rule no longer triggers. Trade-offs:
+ *   - Players that check window.location will see localhost:3000 and may refuse
+ *     to initialise. Auto-skip is gone, so the user just clicks "try next ›".
+ *   - The host's relative URLs (jquery, bundle-jw.js, m3u8, ...) need to
+ *     resolve to the original host, not localhost:3000 — handled with <base href>.
+ *   - Origin-absolute paths (/api/foo) won't be caught by <base href>; we
+ *     intercept fetch/XHR client-side and rewrite them to the original host.
+ *   - Ad scripts injected by the host still try to fire — stripped server-
+ *     side and blocked again client-side via the same WRAPPER_INJECT shim
+ *     used previously.
  */
 
-// Injected into the wrapper page (not the stream iframe).
-// All selectors/observers run in the wrapper document context only —
-// cross-origin stream iframe content is inaccessible by design.
 const WRAPPER_INJECT = `<script>
 (function(){
-  // 1. Block window.open in the wrapper context (catches ads injected here)
+  var _BG_HOST=(typeof _BG_HOST!=='undefined')?_BG_HOST:'';
+
+  // 1. Block popup/popunder windows
   try{window.open=function(){return{closed:true,focus:function(){},location:{href:''}}};}catch(e){}
 
-  // 2. Block window.location redirects — ad scripts use location.href/assign/replace
-  //    to navigate away from the stream. Override them to no-ops.
+  // 2. Trap top-frame navigation attempts
   try{
     var _locRef=window.location;
     var _noop=function(){};
-    try{
-      Object.defineProperty(window,'location',{get:function(){return _locRef;},set:_noop,configurable:true});
-    }catch(e){}
+    try{Object.defineProperty(window,'location',{get:function(){return _locRef;},set:_noop,configurable:true});}catch(e){}
     try{_locRef.assign=_noop;}catch(e){}
     try{_locRef.replace=_noop;}catch(e){}
-    try{window.history.pushState=_noop;}catch(e){}
-    try{window.history.replaceState=_noop;}catch(e){}
   }catch(e){}
 
-  // 3. Block fetch/XHR to known ad networks — drop the request entirely.
-  var AD=new RegExp(
-    'popads\\.net|exoclick\\.com|trafficjunky|adnxs\\.com|doubleclick\\.net|'+
-    'popunder|clickunder|trafficstars|adsterra|hilltopads|juicyads|propellerads|'+
-    'monetizer|adcash|revcontent|outbrain|taboola|popcash|plugrush|ero-advertising|'+
-    'fuckingfast\\.co|cdn77ads|adspyglass','i'
-  );
+  // 3. Ad-network blocklist (used in 4 + 5 + DOM observer)
+  var AD=new RegExp('popads\\\\.net|exoclick\\\\.com|trafficjunky|adnxs\\\\.com|doubleclick\\\\.net|popunder|clickunder|trafficstars|adsterra|hilltopads|juicyads|propellerads|monetizer|adcash|revcontent|outbrain|taboola|popcash|plugrush|ero-advertising|fuckingfast\\\\.co|cdn77ads|adspyglass|aclib','i');
+
+  // 4. Rewrite origin-absolute fetch/XHR back to the original host. Players
+  //    that hard-code "/api/..." or "/stream/..." would 404 against localhost:3000;
+  //    rewriting to "<host>/api/..." routes them back to the real upstream.
+  //    Also drops requests to ad networks entirely.
+  function rewriteUrl(u){
+    if(typeof u!=='string')return u;
+    if(AD.test(u))return null;
+    if(u.charAt(0)==='/' && u.charAt(1)!=='/' && _BG_HOST){return _BG_HOST+u;}
+    return u;
+  }
   try{
     var _oFetch=window.fetch;
     window.fetch=function(input,init){
       var u=typeof input==='string'?input:(input&&input.url?input.url:'');
-      if(AD.test(u))return new Promise(function(){});
-      return _oFetch.apply(this,arguments);
+      var rw=rewriteUrl(u);
+      if(rw===null)return new Promise(function(){});
+      if(rw!==u && typeof input==='string')input=rw;
+      return _oFetch.apply(this,[input,init]);
     };
   }catch(e){}
   try{
     var _oOpen=XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open=function(m,url){
-      if(AD.test(url||'')){this._adBlocked=true;return;}
-      return _oOpen.apply(this,arguments);
+      var rw=rewriteUrl(url||'');
+      if(rw===null){this._adBlocked=true;return;}
+      var args=[].slice.call(arguments);args[1]=rw;
+      return _oOpen.apply(this,args);
     };
     var _oSend=XMLHttpRequest.prototype.send;
     XMLHttpRequest.prototype.send=function(){
@@ -77,7 +82,7 @@ const WRAPPER_INJECT = `<script>
     };
   }catch(e){}
 
-  // 4. Block injected ad <script> elements by intercepting createElement
+  // 5. Block injected ad <script> elements
   try{
     var _oCreate=document.createElement.bind(document);
     document.createElement=function(tag){
@@ -86,7 +91,7 @@ const WRAPPER_INJECT = `<script>
         var _desc=Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype,'src');
         if(_desc&&_desc.set){
           Object.defineProperty(el,'src',{
-            set:function(v){if(!AD.test(v||''))_desc.set.call(this,v);},
+            set:function(v){var rw=rewriteUrl(v||'');if(rw!==null)_desc.set.call(this,rw);},
             get:function(){return _desc.get?_desc.get.call(this):'';},
             configurable:true
           });
@@ -96,26 +101,21 @@ const WRAPPER_INJECT = `<script>
     };
   }catch(e){}
 
-  // 5. Block automatic fullscreen requests on mobile — stream players call
-  //    requestFullscreen()/webkitEnterFullscreen() on video play which is jarring.
-  //    We override these to no-ops; the user can still manually tap fullscreen.
+  // 6. Block automatic fullscreen
   try{
     var _noFS=function(){return Promise.resolve();};
     Element.prototype.requestFullscreen=_noFS;
     if('webkitRequestFullscreen' in Element.prototype)Element.prototype.webkitRequestFullscreen=_noFS;
-    if('mozRequestFullScreen' in Element.prototype)Element.prototype.mozRequestFullScreen=_noFS;
-    if('msRequestFullscreen' in Element.prototype)Element.prototype.msRequestFullscreen=_noFS;
-    // Also block on HTMLVideoElement directly (iOS webkitEnterFullscreen)
     if(window.HTMLVideoElement&&'webkitEnterFullscreen' in HTMLVideoElement.prototype){
       HTMLVideoElement.prototype.webkitEnterFullscreen=function(){};
       HTMLVideoElement.prototype.webkitExitFullscreen=function(){};
     }
   }catch(e){}
 
-  // 6. Refocus on blur — kills popunder focus-steal pattern
+  // 7. Refocus on blur
   window.addEventListener('blur',function(){setTimeout(function(){try{window.focus();}catch(e){}},0);},true);
 
-  // 7. Block target="_blank" / "_new" / "_top" anchor clicks in wrapper context
+  // 8. Block target=_blank/_top anchor clicks
   document.addEventListener('click',function(e){
     var el=e.target;
     while(el&&el.tagName!=='A')el=el.parentElement;
@@ -124,14 +124,14 @@ const WRAPPER_INJECT = `<script>
     }
   },true);
 
-  // 8. MutationObserver — remove ad iframes/high-z overlays/suspicious anchors injected into wrapper doc
-  var streamIframe=null;
+  // 9. MutationObserver — strip ad iframes/high-z overlays
   function killAdNode(node){
     if(!node||!node.tagName)return;
     var tag=node.tagName;
-    // Any iframe that isn't the stream player → kill it
-    if(tag==='IFRAME'&&node!==streamIframe){try{node.remove();}catch(e){}return;}
-    // Fixed/absolute elements with suspiciously high z-index → kill them
+    if(tag==='IFRAME'){
+      try{if(AD.test(node.src||''))node.remove();}catch(e){}
+      return;
+    }
     if(/^(DIV|SECTION|ASIDE|FIGURE|SPAN|A)$/.test(tag)){
       try{
         var st=window.getComputedStyle(node);
@@ -139,74 +139,46 @@ const WRAPPER_INJECT = `<script>
         if((st.position==='fixed'||st.position==='absolute')&&z>9000){node.remove();return;}
       }catch(e){}
     }
-    // Anchor tags added to body pointing to ad domains → kill them
-    if(tag==='A'){
-      try{if(AD.test(node.href||''))node.remove();}catch(e){}
-    }
-    // Script tags pointing to ad domains injected into the wrapper → block src
     if(tag==='SCRIPT'){
       try{if(AD.test(node.src||'')){node.src='';node.remove();}}catch(e){}
     }
   }
-  var obs=new MutationObserver(function(muts){
-    muts.forEach(function(m){m.addedNodes.forEach(killAdNode);});
-  });
-
-  // 9. Auto-dismiss consent dialogs / ad overlays; auto-click play buttons
-  var C=['[class*="close" i]','[class*="dismiss" i]','[class*="skip" i]','[id*="close" i]',
-    '[id*="dismiss" i]','[aria-label*="close" i]','.ad-close','#ad-close','.skip-ad',
-    '.fc-cta-consent','#didomi-notice-agree-button','.qc-cmp2-summary-buttons button',
-    '[class*="cookie" i] button','[id*="cookie" i] button','[class*="consent" i] button'],
-    P=['button.jw-icon-display','.vjs-big-play-button','[class*="play-btn" i]',
-    '[aria-label*="play" i]','button[class*="play" i]','.plyr__control--overlaid'];
-  function click(s){s.forEach(function(q){try{document.querySelectorAll(q).forEach(function(el){if(el&&el.offsetParent!==null)el.click();});}catch(e){}});}
-  function run(){click(C);setTimeout(function(){click(P);},200);}
+  var obs=new MutationObserver(function(muts){muts.forEach(function(m){m.addedNodes.forEach(killAdNode);});});
 
   function init(){
-    streamIframe=document.querySelector('iframe');
     obs.observe(document.body,{childList:true,subtree:true});
-    run();
-    setTimeout(run,300);setTimeout(run,800);
-
-    var _streamUrl=typeof _BG_URL!=='undefined'?_BG_URL:'';
-
-    // 9. Stream-killed detection — fires when an ad redirects the inner iframe
-    //    to a new URL. The first 'load' is the stream loading normally; any
-    //    subsequent 'load' means the iframe was navigated away by an ad.
-    if(streamIframe){
-      var _firstLoad=true;
-      streamIframe.addEventListener('load',function(){
-        if(_firstLoad){_firstLoad=false;return;}
-        // Inner iframe reloaded → stream killed by ad redirect. Tell parent to auto-skip.
-        try{window.parent.postMessage({type:'Origin-stream-killed',url:_streamUrl},'*');}catch(e){}
-      });
-    }
-
-    // 10. Sandbox failure detection — only when _BG_SANDBOX flag is set.
-    if(typeof _BG_SANDBOX!=='undefined'&&_BG_SANDBOX&&streamIframe){
-      var _playerActive=false;
-      window.addEventListener('message',function(e){
-        if(streamIframe&&e.source===streamIframe.contentWindow)_playerActive=true;
-      });
-      document.addEventListener('click',function(){_playerActive=true;},{once:true});
-      streamIframe.addEventListener('load',function(){
-        setTimeout(function(){
-          if(!_playerActive){
-            try{window.parent.postMessage({type:'Origin-sandbox-fail',url:_streamUrl},'*');}catch(e){}
-          }
-        },3000);
-      });
-    }
+    // Heartbeat — tells the parent the wrapper rendered, used for chip-success ranking
+    var _streamUrl=(typeof _BG_URL!=='undefined')?_BG_URL:'';
+    setInterval(function(){
+      try{window.parent.postMessage({type:'Origin-frame-progress',url:_streamUrl},'*');}catch(e){}
+    },1500);
   }
-
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){init();});
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);
   else init();
-  var t=setInterval(run,1500);setTimeout(function(){clearInterval(t);},30000);
 })();
 </script>`;
 
-function isMobile(ua: string): boolean {
-  return /android|iphone|ipad|ipod|mobile|tablet/i.test(ua);
+const AD_HOST_RE = /(popads\.net|exoclick\.com|trafficjunky|adnxs\.com|doubleclick\.net|popunder|clickunder|trafficstars|adsterra|hilltopads|juicyads|propellerads|monetizer|adcash|revcontent|outbrain|taboola|popcash|plugrush|ero-advertising|fuckingfast\.co|cdn77ads|adspyglass|aclib|al5sm\.com|kzt2afc1rp52\.com|beggingmusty\.com)/i;
+
+function stripAdScripts(html: string): string {
+  // Remove <script src="..."> pointing to ad networks
+  html = html.replace(/<script[^>]*\ssrc=["'][^"']*["'][^>]*>\s*<\/script>/gi, (m) =>
+    AD_HOST_RE.test(m) ? "" : m,
+  );
+  // Remove inline <script>...</script> that calls aclib.runPop / popads / etc.
+  html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, (m) =>
+    /aclib\.runpop|aclib\.runautopop|popads|popunder|adsterra|propellerads/i.test(m) ? "" : m,
+  );
+  return html;
+}
+
+function injectBaseHref(html: string, baseHref: string): string {
+  const tag = `<base href="${baseHref}">`;
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/<head[^>]*>/i, (m) => `${m}${tag}`);
+  }
+  // Some hosts skip <head> — wrap a synthetic one in
+  return `<head>${tag}</head>${html}`;
 }
 
 export async function GET(request: NextRequest) {
@@ -223,49 +195,68 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Invalid url", { status: 400 });
   }
 
-  const safeUrl = parsedUrl.href.replace(/"/g, "%22").replace(/'/g, "%27");
-  const ua = request.headers.get("user-agent") ?? "";
-  const priorityParam = request.nextUrl.searchParams.get("priority");
-  const priority = priorityParam != null ? parseInt(priorityParam, 10) : 3;
+  const baseHref = `${parsedUrl.protocol}//${parsedUrl.host}/`;
+  const hostOrigin = `${parsedUrl.protocol}//${parsedUrl.host}`;
 
-  // Sandbox policy:
-  //   Mobile: sandbox — Bob's call. Phones are where popup ads are most
-  //     hostile (ads grab fullscreen, hijack tabs, redirect to app stores),
-  //     so we accept that some chips break under sandbox in exchange for ad
-  //     protection. Auto-skip is gone, so a broken chip just sits there
-  //     until the user taps "try next ›".
-  //   Desktop: no sandbox. Players that detect sandbox refuse to init, and
-  //     popup ads on desktop are way less hostile than on mobile. The
-  //     wrapper's window.open / fetch / XHR / script overrides still block
-  //     the noisiest ad vectors.
-  const mobile = isMobile(ua);
-  void priority;
-  const sandboxAttr = mobile
-    ? `sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-orientation-lock allow-modals" `
-    : "";
+  // Server-side fetch the host HTML. Onhockey is the canonical referer for
+  // most of these aggregator pages; without it many of them serve a 403 or
+  // a "direct access denied" body.
+  let upstreamHtml: string;
+  try {
+    const upstream = await fetch(parsedUrl.href, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Referer: "https://onhockey.tv/",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      // 8 s ceiling — aggregator pages should respond fast; if they don't,
+      // the chip is dead and we want to bail rather than blow the 15 s
+      // serverless cap.
+      signal: AbortSignal.timeout(8000),
+      redirect: "follow",
+    });
+    if (!upstream.ok) {
+      return new NextResponse(`Upstream ${upstream.status}`, { status: 502 });
+    }
+    // Some hosts (onhockey-derivatives) ship windows-1251; most ship utf-8.
+    // We let the browser sort out odd charsets — Node fetch returns text via
+    // the Content-Type charset hint, defaulting to utf-8 when none is given.
+    upstreamHtml = await upstream.text();
+  } catch {
+    return new NextResponse("Upstream fetch failed", { status: 502 });
+  }
 
-  // _BG_URL: always injected so stream-killed detection works on all platforms.
-  // _BG_SANDBOX is no longer used — we removed the auto-skip on sandbox-fail
-  // and the wrapper's sandbox-fail watcher gates on this var.
-  const bgVars = `<script>var _BG_URL=${JSON.stringify(safeUrl)};</script>`;
+  // Server-side ad strip first, then inject base + wrapper script.
+  let html = stripAdScripts(upstreamHtml);
+  html = injectBaseHref(html, baseHref);
 
-  const html = `<!DOCTYPE html>
-<html><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Permissions-Policy" content="geolocation=(), camera=(), microphone=(), payment=()">
-<style>*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;background:#000;overflow:hidden;color-scheme:dark}iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000;color-scheme:dark}</style>
-${bgVars}${WRAPPER_INJECT}
-</head><body>
-<iframe src="${safeUrl}" ${sandboxAttr}allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen referrerpolicy="no-referrer-when-downgrade"></iframe>
-</body></html>`;
+  // Inject our wrapper context vars + ad-blocker shim. Goes right after the
+  // <base href> we just inserted so subresource resolution and ad-blocking
+  // run before any inline script in the body fires.
+  const safeOrigin = JSON.stringify(hostOrigin);
+  const safeUrl = JSON.stringify(parsedUrl.href);
+  const ctxVars = `<script>var _BG_HOST=${safeOrigin};var _BG_URL=${safeUrl};</script>`;
+  // Defensive dark-bg style so a host that forgets to set a body color
+  // doesn't show as a white screen for the brief load handshake.
+  const darkStyle = `<style>html,body{background:#000 !important;color-scheme:dark}body{margin:0}</style>`;
+  if (/<head[^>]*>/i.test(html)) {
+    html = html.replace(/<head[^>]*>/i, (m) => `${m}${ctxVars}${darkStyle}${WRAPPER_INJECT}`);
+  } else {
+    html = `<head>${ctxVars}${darkStyle}${WRAPPER_INJECT}</head>${html}`;
+  }
 
   return new NextResponse(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Access-Control-Allow-Origin": "*",
-      "Cache-Control": "no-cache",
+      // No-store — these are short-lived live streams; caching a token-
+      // signed page would serve stale URLs to the next viewer.
+      "Cache-Control": "no-store",
       "Referrer-Policy": "no-referrer",
-      "Permissions-Policy": "geolocation=(), camera=(), microphone=(), payment=(), interest-cohort=()",
+      "Permissions-Policy":
+        "geolocation=(), camera=(), microphone=(), payment=(), interest-cohort=()",
     },
   });
 }
