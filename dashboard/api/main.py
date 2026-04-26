@@ -5968,6 +5968,21 @@ _DEAD_BODY_MARKERS = (
     "this content is not available",
     "geo-restricted",
     "not licensed for your region",
+    # Generic "page deleted / 404 in 200" markers. These render as a white
+    # broken-image-ish page in the iframe — kill them at probe time.
+    "content removed",
+    "page not found",
+    "404 not found",
+    "video unavailable",
+    "match has not started",
+    "stream will be available",
+    "no stream is currently available",
+    "<h4>content removed",
+    "<h1>404",
+    "this page has been removed",
+    "the requested url was not found",
+    "stream will start",
+    "stream offline",
 )
 
 # Markers that strongly indicate a working video player is present in the body.
@@ -6045,6 +6060,12 @@ async def _probe_embed_alive(url: str) -> bool:
         if len(body) < 1500 and not has_player:
             _embed_alive_cache[url] = (False, _tep.monotonic())
             return False
+        # Broken-image-only stub: small-ish body with <img> and no <video>/
+        # player markers is the white-screen-with-broken-image-icon page Bob
+        # was hitting. Drop it before it reaches the chip list.
+        if not has_player and len(body) < 4000 and "<img" in body_lower:
+            _embed_alive_cache[url] = (False, _tep.monotonic())
+            return False
         _embed_alive_cache[url] = (True, _tep.monotonic())
         return True
     except Exception:
@@ -6058,15 +6079,13 @@ async def _filter_dead_embeds(streams: list[dict]) -> list[dict]:
     """Drop chips whose embed URL is clearly dead. Direct m3u8 / known-clean
     extractor sources skip the probe — those have other liveness signals."""
     import asyncio as _aio_filt
-    # Probe only embed-only chips from the riskiest priority bucket. Direct
-    # CDN m3u8 (priority 0) and known-clean static extractors (apl396.me,
-    # streamfree.app — priority 1) are trusted. methstreams/crackstreams
-    # (priority 2) actually extract m3u8 via Playwright at click time, so the
-    # embed page liveness isn't load-bearing for them either. Priority 3 is
-    # the dump everyone else lands in — that's where the templates live.
+    # Probe every embed_only chip. Auto-skip is gone on the frontend, so a
+    # dead chip just shows a white-screen-with-broken-image until the user
+    # taps "try next ›" — better to drop them all up here. Direct m3u8
+    # (priority 0) skips the probe; those have hls.js error handling.
     needs_probe = [
         s for s in streams
-        if s.get("embed_only") and s.get("priority", 99) >= 3
+        if s.get("embed_only")
     ]
     if not needs_probe:
         return streams
