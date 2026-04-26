@@ -229,6 +229,11 @@ export default function FloatingPlayer() {
           // first segment lands.
           manifestLoadingTimeOut: 14000,
           manifestLoadingMaxRetry: 2,
+          // Buffer caps — see StreamPanel.tsx. Keeps PiP behavior symmetric
+          // with the main game-page player.
+          maxBufferLength: 20,
+          maxMaxBufferLength: 45,
+          fragLoadingTimeOut: 8000,
           fragLoadingMaxRetry: 2,
           startLevel: 0,
           capLevelToPlayerSize: true,

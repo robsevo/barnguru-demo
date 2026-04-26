@@ -57,7 +57,7 @@ FETCH_TIMEOUT = 20.0
 # you can sanity-check which path is in use before relying on it for many
 # concurrent feeds.
 HLS_WORKDIR            = Path("/tmp/iptv_relay_hls")
-HLS_SEGMENT_SECONDS    = 4
+HLS_SEGMENT_SECONDS    = 3
 HLS_LIST_SIZE          = 6
 HLS_IDLE_TIMEOUT_S     = 30.0
 HLS_STARTUP_TIMEOUT_S  = 15.0
@@ -139,8 +139,12 @@ def _encode_args(quality: str, encoder: str) -> list[str]:
                 "-profile:v", "main",
                 *gop, *scale, *common_rate, *common_audio]
     # libx264 fallback. -sc_threshold 0 stops scene-cut from breaking
-    # constant-GOP, which keeps HLS segment boundaries aligned.
-    return ["-c:v", "libx264", "-preset", "veryfast", "-profile:v", "main",
+    # constant-GOP, which keeps HLS segment boundaries aligned. -tune
+    # zerolatency removes B-frames + tightens lookahead so the first
+    # segment finalizes ~30-50 ms sooner — meaningful when the manifest
+    # poll loop in /hls is waiting for it on cold start.
+    return ["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
+            "-profile:v", "main",
             "-sc_threshold", "0",
             *gop, *scale, *common_rate, *common_audio]
 

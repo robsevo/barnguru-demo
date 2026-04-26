@@ -5110,6 +5110,10 @@ async def game_iptv_streams(game_id: int) -> dict:
     import time as _t_iptv
     cached = _game_iptv_cache.get(game_id)
     if cached and (_t_iptv.monotonic() - cached[1]) < _GAME_IPTV_TTL:
+        # Cache TTL is 1 hr; relay ffmpeg idle timeout is 30 s, so we always
+        # re-warm the top an upstream host chips on every request, not just the
+        # cache miss. Cheap because _PROXY_INFLIGHT dedups collisions.
+        _kick_chip_warmups(cached[0])
         return {"broadcasts": cached[0], "cached": True}
 
     from data.nhl_client import NHLClient
@@ -5253,7 +5257,52 @@ async def game_iptv_streams(game_id: int) -> dict:
         })
 
     _game_iptv_cache[game_id] = (result, _t_iptv.monotonic())
+    _kick_chip_warmups(result)
     return {"broadcasts": result}
+
+
+def _kick_chip_warmups(broadcasts: list[dict]) -> None:
+    """Fire-and-forget GET against the top an upstream host relay URL of up to 2
+    distinct networks. The relay's ffmpeg cold-start (~4-7s on libx264) used
+    to be paid in full by whoever clicked first; this spawns the session
+    before any user click. Capped at 2 per call to avoid spawning many
+    ffmpegs on slate load. _PROXY_INFLIGHT dedups concurrent collisions.
+    """
+    try:
+        import asyncio as _aio_warm
+        warmups: list[str] = []
+        for b in broadcasts:
+            if len(warmups) >= 2:
+                break
+            for c in b.get("channels", []):
+                u = c.get("url", "")
+                if "an upstream host" in u and u.startswith("http"):
+                    warmups.append(u)
+                    break
+        for url in warmups:
+            _aio_warm.create_task(_warm_relay_url(url))
+    except Exception:
+        pass
+
+
+async def _warm_relay_url(url: str) -> None:
+    """Single GET at a relay /hls URL to spin up its ffmpeg session.
+
+    Body is discarded. Any error is swallowed — this is best-effort.
+    """
+    try:
+        client = await _get_proxy_http()
+        r = await client.get(
+            url,
+            headers={
+                "User-Agent": "Grtzky-Warmup/1.0",
+                "ngrok-skip-browser-warning": "skip",
+            },
+            timeout=httpx.Timeout(connect=4.0, read=8.0, write=4.0, pool=4.0),
+        )
+        _ = r.content
+    except Exception:
+        return
 
 
 # ---------------------------------------------------------------------------
@@ -6277,7 +6326,7 @@ async def stream_resolve(url: str) -> dict:
 # ---------------------------------------------------------------------------
 _PROXY_HTTP: httpx.AsyncClient | None = None
 
-_PROXY_MANIFEST_TTL = 1.5   # seconds; live playlists rotate every 2-6 s
+_PROXY_MANIFEST_TTL = 1.0   # seconds; live playlists rotate every 2-6 s
 _PROXY_SEGMENT_TTL = 30.0   # seconds; segments are immutable
 _PROXY_CACHE_MAX_BYTES = 32 * 1024 * 1024
 _PROXY_CACHE: dict[str, tuple[float, str, bytes, int]] = {}
