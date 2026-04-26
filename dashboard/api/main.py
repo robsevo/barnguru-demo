@@ -4932,9 +4932,13 @@ async def game_streams(game_id: int) -> dict:
             )
             if link_m:
                 raw_url = "https:" + link_m.group(1)
-                # Only treat as direct CDN if it's an actual m3u8/mpd URL.
-                # Most onhockey.tv channel links are embed pages — mark those
-                # embed_only so the frontend skips slow yt-dlp extraction.
+                # Mark direct CDN m3u8/mpd as priority-0; otherwise only stamp
+                # embed_only when the host genuinely can't be Playwright-
+                # extracted (auth-walled / X-Frame-Options'd — see
+                # _EMBED_ONLY_DOMAINS). For everything else, leave both flags
+                # unset so the frontend hits /stream-resolve and Playwright
+                # gets to pull a real m3u8 — iframing those hosts directly
+                # was breaking for any user with an ad-blocker on aclib/popads.
                 is_direct_m3u8 = ".m3u8" in raw_url or ".mpd" in raw_url
                 entry: dict = {
                     "url":   raw_url,
@@ -4943,7 +4947,7 @@ async def game_streams(game_id: int) -> dict:
                 }
                 if is_direct_m3u8:
                     entry["_direct"] = True
-                else:
+                elif _is_embed_only_host(raw_url):
                     entry["embed_only"] = True
                 streams.append(entry)
 
@@ -5361,7 +5365,11 @@ def _extract_game_links(
                 "feed":  feed,
                 "title": text or f"{away_abbr} @ {home_abbr}",
             }
-            if embed_only:
+            # Host-gated: only stamp embed_only for hosts where Playwright
+            # can't extract a real m3u8 (auth-walled, X-Frame-Options'd).
+            # For typical aggregator embed pages, leave the flag unset so the
+            # frontend's /stream-resolve call gets a Playwright run.
+            if embed_only and _is_embed_only_host(full_url):
                 entry["embed_only"] = True
             found.append(entry)
     return found
@@ -5507,10 +5515,13 @@ async def _scrape_pixelsports(
                 "feed":  "main",
                 "title": str(title_raw),
             }
-            # Direct m3u8 — mark as clean source
+            # Direct m3u8 — mark as clean source. Otherwise host-gate the
+            # embed_only flag (see _is_embed_only_host docstring) so non-m3u8
+            # URLs that Playwright can drive go through /stream-resolve
+            # rather than being iframed directly.
             if url.endswith(".m3u8") or ".m3u8?" in url:
                 entry["_direct"] = True
-            else:
+            elif _is_embed_only_host(url):
                 entry["embed_only"] = True
             results.append(entry)
 
@@ -5597,12 +5608,15 @@ async def _scrape_bunchatv(
             if url in seen or not any(ext in url for ext in (".m3u8", "/live/", "stream")):
                 continue
             seen.add(url)
-            results.append({
-                "url":        url,
-                "feed":       "main",
-                "title":      page_title or f"{away_abbr} @ {home_abbr}",
-                "embed_only": True,
-            })
+            entry = {
+                "url":     url,
+                "feed":    "main",
+                "title":   page_title or f"{away_abbr} @ {home_abbr}",
+            }
+            # Host-gated embed_only — leave unset for hosts Playwright can drive.
+            if _is_embed_only_host(url):
+                entry["embed_only"] = True
+            results.append(entry)
 
     return results
 
@@ -6018,6 +6032,23 @@ async def _probe_embed_alive(url: str) -> bool:
         if any(m in body_lower for m in _DEAD_BODY_MARKERS):
             _embed_alive_cache[url] = (False, _tep.monotonic())
             return False
+        # embedsports.top/.me popunder stub: every URL returns the same
+        # 1221-byte clappr-loader that calls aclib.runPop and reads stream
+        # config from the URL hash. onhockey.tv passes us URLs without a
+        # hash, so the stub never resolves to a real stream. Detect by the
+        # aclib.runpop tell + absence of any actual stream-source token.
+        from urllib.parse import urlparse as _u
+        try:
+            host = _u(url).netloc.lstrip("www.")
+        except Exception:
+            host = ""
+        if host in ("embedsports.top", "embedsports.me") and "aclib.runpop" in body_lower:
+            has_stream_src = any(
+                s in body_lower for s in (".m3u8", ".mpd", '"file":"http', "'file':'http", '"source":"http')
+            )
+            if not has_stream_src:
+                _embed_alive_cache[url] = (False, _tep.monotonic())
+                return False
         # Tiny bodies are only OK if they contain a player marker — a 1KB page
         # with no <video>/jwplayer/clappr/m3u8 string is a placeholder.
         has_player = any(m in body_lower for m in _LIVE_BODY_MARKERS)
@@ -6063,17 +6094,47 @@ async def _filter_dead_embeds(streams: list[dict]) -> list[dict]:
     return [s for s in streams if s["url"] not in dead]
 
 
+# Hosts where Playwright extraction has no chance of returning an m3u8.
+# Trimmed aggressively (Apr 2026): every other host gets a Playwright run via
+# /stream-resolve so the user gets a clean m3u8 served through /stream-proxy.
+# Iframing those hosts directly was broken for any user with a popup-ad
+# blocker (uBlock / AdGuard / Brave / Pi-hole) because the embed pages load
+# aclib.runPop / popads, which the blocker cuts and Chrome reports as
+# "<host> refused to connect" inside the iframe.
+#
+# What stays here:
+#   - onhockey.tv: sets X-Frame-Options: SAMEORIGIN, can't be iframed; keep
+#     for safety so _resolve_embed short-circuits if a stray onhockey URL
+#     ever leaks through to a chip URL.
+#   - nhl.com / espn.com / nhl66.ir / nhltv.is: auth-walled / DRM, no public
+#     m3u8 to extract.
 _EMBED_ONLY_DOMAINS = {
-    "embedsports.top", "embedsports.me", "dlstreams.top", "wikisport.club",
-    "vuen.link", "gopst.link", "dabac.link", "zenoz.link",
-    "lovecdn.ru", "viewembed.ru", "streams.center", "embedhd.org",
-    "yuntracking.co", "helpless.click", "onhockey.tv",
-    "sportscentral.io", "sportsonline.to", "720pstream.me",
-    # Additional embed-page hosts seen in onhockey.tv channel links
-    "lovetier.bz", "cdn-live.tv", "antenasport.org", "livesport.ws",
-    "sportlemon.tv", "streambtw.com", "livetv.sx", "livetv.ru",
-    "nhl66.ir", "nhltv.is", "nhl.com", "espn.com",
+    "onhockey.tv",
+    "nhl.com", "espn.com", "nhl66.ir", "nhltv.is",
+    # embedsports.top / .me are popunder stubs — every URL returns the same
+    # 1221-byte clappr-loader page that reads stream config from the URL
+    # hash, but onhockey.tv hands us URLs without a hash, so there's
+    # nothing for Playwright to extract. We keep them here so the chip is
+    # routed through the iframe path → _filter_dead_embeds probes it →
+    # _probe_embed_alive's aclib-stub check drops it before it reaches
+    # the user. Net effect: these chips disappear from the list.
+    "embedsports.top", "embedsports.me",
 }
+
+
+def _is_embed_only_host(url: str) -> bool:
+    """True iff the URL's host is in _EMBED_ONLY_DOMAINS.
+
+    Used at chip-stamp time to decide whether to set ``embed_only=true`` on a
+    stream entry. When False, the frontend will hit /stream-resolve and the
+    Playwright extraction chain gets a chance to find a real m3u8.
+    """
+    from urllib.parse import urlparse as _u
+    try:
+        host = _u(url).netloc.lstrip("www.")
+    except Exception:
+        return False
+    return host in _EMBED_ONLY_DOMAINS
 
 
 def _strip_ads_from_html(html: str) -> str:
