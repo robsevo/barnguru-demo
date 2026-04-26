@@ -41,13 +41,23 @@ def _load_iptv_env_file() -> None:
     still works.
     """
     if not _ENV_FILE.exists():
+        print(f"[extract-iptv] iptv.env not found at {_ENV_FILE}", file=sys.stderr)
         return
+    loaded_keys: list[str] = []
     for line in _ENV_FILE.read_text(encoding="utf-8").splitlines():
         s = line.strip()
         if not s or s.startswith("#") or "=" not in s:
             continue
         k, _, v = s.partition("=")
-        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+        k = k.strip()
+        os.environ.setdefault(k, v.strip().strip('"').strip("'"))
+        loaded_keys.append(k)
+    iptv_keys = [k for k in loaded_keys if k.startswith("IPTV")]
+    print(
+        f"[extract-iptv] loaded {len(loaded_keys)} keys from {_ENV_FILE} "
+        f"({len(iptv_keys)} IPTV*: {sorted(set(iptv_keys))[:8]})",
+        file=sys.stderr,
+    )
 
 
 _load_iptv_env_file()
