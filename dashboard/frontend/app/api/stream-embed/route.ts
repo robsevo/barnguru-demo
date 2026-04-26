@@ -82,17 +82,38 @@ const WRAPPER_INJECT = `<script>
     };
   }catch(e){}
 
-  // 5. Block injected ad <script> elements
+  // 5. Block injected ad <script> elements + force runtime-created
+  //    <iframe> srcs through /api/stream-embed so they don't slip past the
+  //    server-side rewriter when the host builds the iframe in JS.
+  function proxify(raw){
+    if(typeof raw!=='string'||!raw)return raw;
+    if(/^\\/api\\/stream-embed\\?/.test(raw))return raw;
+    try{
+      var abs=new URL(raw,_BG_HOST||document.baseURI).href;
+      if(!/^https?:/i.test(abs))return raw;
+      return '/api/stream-embed?url='+encodeURIComponent(abs);
+    }catch(e){return raw;}
+  }
   try{
     var _oCreate=document.createElement.bind(document);
     document.createElement=function(tag){
       var el=_oCreate(tag);
-      if((tag+'').toLowerCase()==='script'){
-        var _desc=Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype,'src');
-        if(_desc&&_desc.set){
+      var t=(tag+'').toLowerCase();
+      if(t==='script'){
+        var _sdesc=Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype,'src');
+        if(_sdesc&&_sdesc.set){
           Object.defineProperty(el,'src',{
-            set:function(v){var rw=rewriteUrl(v||'');if(rw!==null)_desc.set.call(this,rw);},
-            get:function(){return _desc.get?_desc.get.call(this):'';},
+            set:function(v){var rw=rewriteUrl(v||'');if(rw!==null)_sdesc.set.call(this,rw);},
+            get:function(){return _sdesc.get?_sdesc.get.call(this):'';},
+            configurable:true
+          });
+        }
+      }else if(t==='iframe'||t==='frame'){
+        var _idesc=Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'src');
+        if(_idesc&&_idesc.set){
+          Object.defineProperty(el,'src',{
+            set:function(v){_idesc.set.call(this,proxify(v));},
+            get:function(){return _idesc.get?_idesc.get.call(this):'';},
             configurable:true
           });
         }
@@ -170,6 +191,27 @@ function stripAdScripts(html: string): string {
     /aclib\.runpop|aclib\.runautopop|popads|popunder|adsterra|propellerads/i.test(m) ? "" : m,
   );
   return html;
+}
+
+// The host page often has <iframe src="https://other-aggregator.tld/..."> —
+// that nested third-party iframe gets blocked by the user's ad-blocker the
+// same way the outer one was, defeating our proxy. Rewrite every absolute-
+// URL iframe/frame src to recurse through /api/stream-embed so the inner
+// load is also same-origin.
+function rewriteNestedIframes(html: string, baseHref: string): string {
+  const proxyOf = (raw: string): string => {
+    try {
+      const abs = new URL(raw, baseHref).href;
+      if (!/^https?:/i.test(abs)) return raw;
+      return `/api/stream-embed?url=${encodeURIComponent(abs)}`;
+    } catch {
+      return raw;
+    }
+  };
+  return html.replace(
+    /(<(?:iframe|frame)\b[^>]*?\bsrc=)(["'])(.*?)\2/gi,
+    (_m, prefix, q, src) => `${prefix}${q}${proxyOf(src)}${q}`,
+  );
 }
 
 function injectIntoHead(html: string, snippet: string): string {
@@ -251,6 +293,7 @@ export async function GET(request: NextRequest) {
   const preamble = `${baseTag}${ctxVars}${darkStyle}${WRAPPER_INJECT}`;
 
   let html = stripAdScripts(upstreamHtml);
+  html = rewriteNestedIframes(html, baseHref);
   html = injectIntoHead(html, preamble);
 
   return new NextResponse(html, {
@@ -261,8 +304,7 @@ export async function GET(request: NextRequest) {
       // signed page would serve stale URLs to the next viewer.
       "Cache-Control": "no-store",
       "Referrer-Policy": "no-referrer",
-      "Permissions-Policy":
-        "geolocation=(), camera=(), microphone=(), payment=(), interest-cohort=()",
+      "Permissions-Policy": "geolocation=(), camera=(), microphone=(), payment=()",
     },
   });
 }
