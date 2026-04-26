@@ -6476,7 +6476,9 @@ class CvStartRequest(_BaseModel):
     """Request body for POST /api/cv/start/{game_id}."""
     hls_url: str
     fps: float = 6.0
-    arena: str | None = None   # NHL API arena name; used for homography cache
+    arena: str | None = None       # NHL API arena name; used for homography cache
+    home_team: str | None = None   # 3-letter NHL code; used by 4→6 class translator
+    away_team: str | None = None   # 3-letter NHL code; used by 4→6 class translator
 
 
 def _cv_accumulator():
@@ -6522,6 +6524,8 @@ async def cv_start(game_id: int, body: CvStartRequest):
             hls_url=body.hls_url,
             fps=body.fps,
             arena=body.arena,
+            home_team=body.home_team,
+            away_team=body.away_team,
         )
         return status.to_dict()
     except Exception as exc:

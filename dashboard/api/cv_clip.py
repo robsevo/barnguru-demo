@@ -152,6 +152,12 @@ def process_clip(
     except ImportError as exc:
         raise RuntimeError(f"gretzky_engine not built: {exc}. Run: make build-engine") from exc
 
+    # Detector class indices (single source of truth = player_detector.py).
+    _PUCK_CLASS_ID    = CLASS_NAMES.index("puck")
+    _REFEREE_CLASS_ID = CLASS_NAMES.index("referee")
+    _GOALIE_CLASS_ID  = CLASS_NAMES.index("goalie")
+    _PLAYER_CLASS_ID  = CLASS_NAMES.index("player")
+
     CLIP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     log.info("[cv-clip:%s] starting (hls=%s)", clip_id, hls_url[:80])
@@ -160,6 +166,57 @@ def process_clip(
     rink_rt    = AdaptiveRinkRuntime()
     tracker    = Tracker(fps=_FPS, n_init=3, max_lost=15, iou_threshold=0.25, reid_iou=0.30)
     puck_tr    = PuckTracker()
+
+    # Team classifier — needed to split detector "player" / "goalie" into the
+    # legacy player_home / player_away buckets the highlight overlay expects.
+    # Best-effort: if the LUT is missing or the NHL landing fetch fails the
+    # clip still processes, just without home/away colour separation.
+    color_clf = None
+    home_team: str | None = None
+    away_team: str | None = None
+    try:
+        from models.cv.team_color_classifier import TeamColorClassifier
+        color_clf = TeamColorClassifier()
+    except Exception as exc:
+        log.warning("[cv-clip:%s] team color classifier unavailable: %s", clip_id, exc)
+    if game_id is not None:
+        try:
+            import asyncio as _aio_clip
+            from data.nhl_client import NHLClient
+            async def _fetch_teams():
+                async with NHLClient() as cl:
+                    return await cl.get_landing(game_id)
+            landing = _aio_clip.run(_fetch_teams())
+            if isinstance(landing, dict):
+                home_team = (landing.get("homeTeam", {}) or {}).get("abbrev")
+                away_team = (landing.get("awayTeam", {}) or {}).get("abbrev")
+                home_team = home_team.upper() if home_team else None
+                away_team = away_team.upper() if away_team else None
+        except Exception as exc:
+            log.warning("[cv-clip:%s] could not fetch team codes for game_id=%s: %s",
+                        clip_id, game_id, exc)
+
+    def _resolve_class_name(cls_id: int, team: str | None) -> str:
+        """Translate detector 4-class output to legacy 6-class label.
+
+        Mirrors data/cv_tracker.py:_resolve_class_name. Falls back to home
+        when the team classifier is unsure or unconfigured — better than
+        dropping the player from the overlay.
+        """
+        if cls_id == _PUCK_CLASS_ID:
+            return "puck"
+        if cls_id == _REFEREE_CLASS_ID:
+            return "referee"
+        if cls_id == _PLAYER_CLASS_ID:
+            base = "player"
+        elif cls_id == _GOALIE_CLASS_ID:
+            base = "goalie"
+        else:
+            return "unknown"
+        team_u = (team or "").upper()
+        if away_team and team_u == away_team:
+            return f"{base}_away"
+        return f"{base}_home"
 
     # Probe duration so the UI can show an ETA + progress denominator.
     # Best-effort — if ffprobe fails we just leave the hint at 0.
@@ -265,11 +322,28 @@ def process_clip(
                     except Exception:
                         pass
 
+                # Team classification — only meaningful for player/goalie.
+                team_code: str | None = None
+                if (
+                    color_clf is not None
+                    and tcls in (_PLAYER_CLASS_ID, _GOALIE_CLASS_ID)
+                ):
+                    x1 = max(0, int(tcx - tw / 2))
+                    y1 = max(0, int(tcy - th / 2))
+                    x2 = min(_FRAME_W, int(tcx + tw / 2))
+                    y2 = min(_FRAME_H, int(tcy + th / 2))
+                    if x2 > x1 and y2 > y1:
+                        try:
+                            team_code, _ = color_clf.classify(frame[y1:y2, x1:x2])
+                        except Exception:
+                            team_code = None
+
                 speed_px = math.sqrt(tvx * tvx + tvy * tvy)
                 players_out.append({
                     "track_id":      tid,
                     "class_id":      tcls,
-                    "class_name":    CLASS_NAMES[tcls] if 0 <= tcls < len(CLASS_NAMES) else "unknown",
+                    "class_name":    _resolve_class_name(tcls, team_code),
+                    "team":          team_code,
                     "cx_n":          round(tcx / _FRAME_W, 4),
                     "cy_n":          round(tcy / _FRAME_H, 4),
                     "w_n":           round(tw  / _FRAME_W, 4),
@@ -297,7 +371,7 @@ def process_clip(
                         pass
                 players_out.append({
                     "track_id":      -1,
-                    "class_id":      5,
+                    "class_id":      _PUCK_CLASS_ID,
                     "class_name":    "puck",
                     "cx_n":          round(puck_state.cx / _FRAME_W, 4),
                     "cy_n":          round(puck_state.cy / _FRAME_H, 4),

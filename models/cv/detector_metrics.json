@@ -1,14 +1,14 @@
 {
-  "map50": 0.7756503611993477,
-  "map50_95": 0.47758511926171965,
-  "precision": 0.7773538952088715,
-  "recall": 0.7816678342345393,
+  "map50": 0.80921,
+  "map50_95": 0.48288,
+  "precision": 0.84178,
+  "recall": 0.79708,
   "quality_gate": {
     "threshold": 0.82,
     "passed": false,
-    "map50": 0.7756503611993477
+    "map50": 0.80921
   },
   "model_path": "/home/user/programs/grtzky-main/models/cv/player_detector.pt",
-  "backbone": "yolov8n.pt",
-  "epochs": 30
+  "backbone": "yolov8s.pt",
+  "epochs": 75
 }
