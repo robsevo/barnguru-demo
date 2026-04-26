@@ -72,19 +72,33 @@ _VALID_QUALITIES = frozenset({"720p", "480p", "passthrough"})
 _ENCODER: str | None = None
 
 
+def _probe_encoder(enc: str) -> bool:
+    """Run a 1-frame test encode to confirm the encoder actually works.
+
+    Hardware encoders often appear in `ffmpeg -encoders` because they are
+    compiled in, but fail at runtime when the matching driver/runtime isn't
+    installed (e.g. h264_nvenc with no libcuda.so.1, h264_qsv with no iHD
+    driver). A 1-frame null-mux is the cheapest way to find that out.
+    """
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error",
+             "-f", "lavfi", "-i", "color=black:s=64x64:d=0.05",
+             "-c:v", enc, "-frames:v", "1",
+             "-f", "null", "-"],
+            capture_output=True, timeout=10,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 def _detect_encoder() -> str:
-    """Pick the fastest available H.264 encoder. libx264 always works."""
+    """Pick the fastest *actually-working* H.264 encoder. libx264 always works."""
     if not shutil.which("ffmpeg"):
         return "libx264"
-    try:
-        out = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-encoders"],
-            capture_output=True, text=True, timeout=5,
-        ).stdout
-    except Exception:
-        return "libx264"
     for enc in ("h264_videotoolbox", "h264_nvenc", "h264_qsv"):
-        if enc in out:
+        if _probe_encoder(enc):
             return enc
     return "libx264"
 
@@ -100,7 +114,9 @@ def _encode_args(quality: str, encoder: str) -> list[str]:
     """ffmpeg args between `-i <url>` and the HLS muxer for the given tier.
 
     Audio is always re-encoded to AAC — stream-copying audio while re-encoding
-    video drifts apart on long-running live streams.
+    video drifts apart on long-running live streams. `-sc_threshold` is
+    libx264-only; nvenc/qsv reject it and refuse to start, so each encoder
+    branch picks its own scene-cut control.
     """
     if quality == "passthrough":
         return ["-c", "copy"]
@@ -109,22 +125,24 @@ def _encode_args(quality: str, encoder: str) -> list[str]:
     common_audio = ["-c:a", "aac", "-b:a", abr, "-ac", "2"]
     common_rate  = ["-b:v", vbr, "-maxrate", vbr, "-bufsize", vbufsize]
     scale        = ["-vf", f"scale={width}:{height}"]
-    keyframes    = ["-g", "96", "-keyint_min", "96", "-sc_threshold", "0"]
+    gop          = ["-g", "96", "-keyint_min", "96"]
 
     if encoder == "h264_videotoolbox":
         return ["-c:v", "h264_videotoolbox", "-profile:v", "main",
-                *keyframes, *scale, *common_rate, *common_audio]
+                *gop, *scale, *common_rate, *common_audio]
     if encoder == "h264_nvenc":
         return ["-c:v", "h264_nvenc", "-preset", "p4", "-tune", "ll",
-                "-profile:v", "main",
-                *keyframes, *scale, *common_rate, *common_audio]
+                "-profile:v", "main", "-no-scenecut", "1",
+                *gop, *scale, *common_rate, *common_audio]
     if encoder == "h264_qsv":
         return ["-c:v", "h264_qsv", "-preset", "veryfast",
                 "-profile:v", "main",
-                *keyframes, *scale, *common_rate, *common_audio]
-    # libx264 fallback
+                *gop, *scale, *common_rate, *common_audio]
+    # libx264 fallback. -sc_threshold 0 stops scene-cut from breaking
+    # constant-GOP, which keeps HLS segment boundaries aligned.
     return ["-c:v", "libx264", "-preset", "veryfast", "-profile:v", "main",
-            *keyframes, *scale, *common_rate, *common_audio]
+            "-sc_threshold", "0",
+            *gop, *scale, *common_rate, *common_audio]
 
 # Defence-in-depth: tunnel is publicly reachable, so refuse any URL not
 # pointing at one of the upstream hosts wired in dashboard/api/main.py.
@@ -374,8 +392,14 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough") -> _
         workdir.mkdir(parents=True, exist_ok=True)
 
         encode = _encode_args(quality, _get_encoder())
+        # `-fflags +discardcorrupt -err_detect ignore_err` keeps ffmpeg alive
+        # through transient TS packet corruption from flaky upstream upstreams.
+        # Copy-mode tolerated this implicitly; once we re-encode the decoder
+        # gets stricter and otherwise exits early on the first bad MB.
         args = [
             "ffmpeg", "-hide_banner", "-loglevel", "warning",
+            "-fflags", "+discardcorrupt",
+            "-err_detect", "ignore_err",
             "-user_agent", _BROWSER_UA,
             "-reconnect", "1",
             "-reconnect_streamed", "1",
