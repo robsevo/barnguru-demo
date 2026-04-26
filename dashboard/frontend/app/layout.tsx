@@ -42,8 +42,19 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  // Open the TLS connection to the stream proxy before the user clicks any chip
+  // so the first manifest fetch skips the ~80-150 ms TCP+TLS handshake.
+  const apiOrigin = process.env.NEXT_PUBLIC_API_URL || "";
   return (
     <html lang="en">
+      <head>
+        {apiOrigin ? (
+          <>
+            <link rel="preconnect" href={apiOrigin} crossOrigin="anonymous" />
+            <link rel="dns-prefetch" href={apiOrigin} />
+          </>
+        ) : null}
+      </head>
       <body className={`${barlow.variable} ${barlowCondensed.variable}`}>
         <AppShell>
           {children}
