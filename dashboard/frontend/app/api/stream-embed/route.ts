@@ -228,19 +228,25 @@ export async function GET(request: NextRequest) {
   const priorityParam = request.nextUrl.searchParams.get("priority");
   const priority = priorityParam != null ? parseInt(priorityParam, 10) : 3;
 
-  // Sandbox policy: never sandbox. We tried sandboxing on mobile to block
-  // popup ads, but JWPlayer/Clappr/Video.js detect sandbox and refuse to
-  // initialise — Bob hit "sandbox not allowed" on every backup chip on his
-  // phone. Trade-off: popup ads can fire on mobile, but the stream actually
-  // plays. Ad blocking still happens in the wrapper context (window.open
-  // override + ad-domain fetch/XHR/script blocking in WRAPPER_INJECT).
+  // Sandbox policy:
+  //   Mobile: sandbox — Bob's call. Phones are where popup ads are most
+  //     hostile (ads grab fullscreen, hijack tabs, redirect to app stores),
+  //     so we accept that some chips break under sandbox in exchange for ad
+  //     protection. Auto-skip is gone, so a broken chip just sits there
+  //     until the user taps "try next ›".
+  //   Desktop: no sandbox. Players that detect sandbox refuse to init, and
+  //     popup ads on desktop are way less hostile than on mobile. The
+  //     wrapper's window.open / fetch / XHR / script overrides still block
+  //     the noisiest ad vectors.
   const mobile = isMobile(ua);
-  void mobile;
   void priority;
-  const sandboxAttr = "";
+  const sandboxAttr = mobile
+    ? `sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-orientation-lock allow-modals" `
+    : "";
 
-  // _BG_URL is injected so stream-killed detection works on all platforms.
-  // _BG_SANDBOX is no longer set — we don't sandbox anywhere now.
+  // _BG_URL: always injected so stream-killed detection works on all platforms.
+  // _BG_SANDBOX is no longer used — we removed the auto-skip on sandbox-fail
+  // and the wrapper's sandbox-fail watcher gates on this var.
   const bgVars = `<script>var _BG_URL=${JSON.stringify(safeUrl)};</script>`;
 
   const html = `<!DOCTYPE html>

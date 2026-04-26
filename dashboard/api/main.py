@@ -4932,13 +4932,13 @@ async def game_streams(game_id: int) -> dict:
             )
             if link_m:
                 raw_url = "https:" + link_m.group(1)
-                # Mark direct CDN m3u8/mpd as priority-0; otherwise only stamp
-                # embed_only when the host genuinely can't be Playwright-
-                # extracted (auth-walled / X-Frame-Options'd — see
-                # _EMBED_ONLY_DOMAINS). For everything else, leave both flags
-                # unset so the frontend hits /stream-resolve and Playwright
-                # gets to pull a real m3u8 — iframing those hosts directly
-                # was breaking for any user with an ad-blocker on aclib/popads.
+                # Direct .m3u8/.mpd → priority 0, plays via hls.js/stream-proxy.
+                # Anything else → embed_only=true → frontend goes straight to
+                # IframePlayer (no /stream-resolve round-trip, no Playwright
+                # spin). Per Bob: chips were "just loading" on desktop while
+                # Playwright tried to extract for 30s and almost always
+                # failed; iframe is instant even when it dies (user clicks
+                # "try next"). Mobile sandboxes the iframe to block popup ads.
                 is_direct_m3u8 = ".m3u8" in raw_url or ".mpd" in raw_url
                 entry: dict = {
                     "url":   raw_url,
@@ -4947,7 +4947,7 @@ async def game_streams(game_id: int) -> dict:
                 }
                 if is_direct_m3u8:
                     entry["_direct"] = True
-                elif _is_embed_only_host(raw_url):
+                else:
                     entry["embed_only"] = True
                 streams.append(entry)
 
@@ -5365,11 +5365,7 @@ def _extract_game_links(
                 "feed":  feed,
                 "title": text or f"{away_abbr} @ {home_abbr}",
             }
-            # Host-gated: only stamp embed_only for hosts where Playwright
-            # can't extract a real m3u8 (auth-walled, X-Frame-Options'd).
-            # For typical aggregator embed pages, leave the flag unset so the
-            # frontend's /stream-resolve call gets a Playwright run.
-            if embed_only and _is_embed_only_host(full_url):
+            if embed_only:
                 entry["embed_only"] = True
             found.append(entry)
     return found
@@ -5515,13 +5511,10 @@ async def _scrape_pixelsports(
                 "feed":  "main",
                 "title": str(title_raw),
             }
-            # Direct m3u8 — mark as clean source. Otherwise host-gate the
-            # embed_only flag (see _is_embed_only_host docstring) so non-m3u8
-            # URLs that Playwright can drive go through /stream-resolve
-            # rather than being iframed directly.
+            # Direct m3u8 — mark as clean source
             if url.endswith(".m3u8") or ".m3u8?" in url:
                 entry["_direct"] = True
-            elif _is_embed_only_host(url):
+            else:
                 entry["embed_only"] = True
             results.append(entry)
 
@@ -5608,15 +5601,12 @@ async def _scrape_bunchatv(
             if url in seen or not any(ext in url for ext in (".m3u8", "/live/", "stream")):
                 continue
             seen.add(url)
-            entry = {
-                "url":     url,
-                "feed":    "main",
-                "title":   page_title or f"{away_abbr} @ {home_abbr}",
-            }
-            # Host-gated embed_only — leave unset for hosts Playwright can drive.
-            if _is_embed_only_host(url):
-                entry["embed_only"] = True
-            results.append(entry)
+            results.append({
+                "url":        url,
+                "feed":       "main",
+                "title":      page_title or f"{away_abbr} @ {home_abbr}",
+                "embed_only": True,
+            })
 
     return results
 
