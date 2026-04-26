@@ -6881,7 +6881,12 @@ def _rewrite_iptv_url(url: str) -> str:
     endpoint = "m3u8" if ".m3u8" in inner.lower().split("?", 1)[0] else "hls"
     token    = os.environ.get("IPTV_RELAY_TOKEN") or ""
     tq       = f"&t={quote(token, safe='')}" if token else ""
-    return f"{tunnel}/{endpoint}?u={quote(inner, safe='')}{tq}"
+    # Default the ffmpeg-transmux path (ampztl + an upstream host /ts) to q=720p so the
+    # relay re-encodes to a capped bitrate. The frontend watchdog flips q=720p
+    # → q=480p in-place after repeated stalls. /m3u8 passthrough doesn't encode,
+    # so no q param there.
+    qq = "&q=720p" if endpoint == "hls" else ""
+    return f"{tunnel}/{endpoint}?u={quote(inner, safe='')}{tq}{qq}"
 
 
 async def _fetch_upstream_channels(
@@ -7831,22 +7836,40 @@ async def barncentre_channels() -> dict:
 
     # ── 4. Verify each channel's primary stream in parallel ───────────────────
     async def _build_channel(ch_name: str, candidates: list[dict]) -> dict:
-        """Check primary (and first backup) for liveness; return channel dict."""
-        # Try candidates in priority order — use first live one as primary
-        verified_primary: str | None = None
-        for cand in candidates[:3]:          # check up to 3 URLs per channel
-            alive = await _verify_stream_alive(cand["url"])
-            if alive:
-                verified_primary = cand["url"]
-                break
+        """Pick primary stream + run liveness check; return channel dict.
 
-        # If none verified live, fall back to top-priority URL and mark offline
-        primary    = verified_primary or candidates[0]["url"]
-        backup_src = [c["url"] for c in candidates if c["url"] != primary][:4]
+        Priority hard-bias: any upstream candidate (an upstream host / ampztl) wins
+        primary if it exists, regardless of verifier outcome. The relay's
+        ffmpeg cold start (~4-5s) can blow past the 10s verifier window on the
+        first probe of the day, which previously demoted an upstream host below
+        tvpass. We trust _sort_by_url_priority's field-tested ordering and
+        only use the verifier to decide the `online` badge.
+        """
+        def _is_upstream(u: str) -> bool:
+            return ("an upstream host" in u) or ("ampztl" in u)
+
+        upstream_cands = [c for c in candidates if _is_upstream(c["url"])]
+        chosen = (upstream_cands[0] if upstream_cands else candidates[0])["url"]
+
+        # Run liveness check on the chosen primary — purely informational. If
+        # the verifier comes back negative, fall through the rest of the
+        # candidates so the badge reflects actual reachability for any source.
+        verified_primary: str | None = None
+        if await _verify_stream_alive(chosen):
+            verified_primary = chosen
+        else:
+            for cand in candidates[:3]:
+                if cand["url"] == chosen:
+                    continue
+                if await _verify_stream_alive(cand["url"]):
+                    verified_primary = cand["url"]
+                    break
+
+        backup_src = [c["url"] for c in candidates if c["url"] != chosen][:4]
 
         return {
             "name":         ch_name,
-            "primary_url":  primary,
+            "primary_url":  chosen,
             "backup_urls":  backup_src,
             "programs":     programs.get(ch_name, []),
             "online":       verified_primary is not None,

@@ -48,11 +48,83 @@ FETCH_TIMEOUT = 20.0
 # can't be played by hls.js directly. /hls spawns ffmpeg to repackage the TS
 # into a rolling HLS playlist on disk; the browser consumes the manifest and
 # segments from this relay.
+#
+# Quality tiers: /hls?q=720p|480p re-encodes to a capped bitrate so users on
+# weak connections don't sit on buffer-empty spinners. q=passthrough (or
+# missing q) keeps the original `-c copy` behavior. Software libx264 veryfast
+# costs ~30-50% of one core per 720p stream; hardware encoders (NVENC, QSV,
+# VideoToolbox) drop that to <5%. The startup log names the chosen encoder so
+# you can sanity-check which path is in use before relying on it for many
+# concurrent feeds.
 HLS_WORKDIR            = Path("/tmp/iptv_relay_hls")
 HLS_SEGMENT_SECONDS    = 4
 HLS_LIST_SIZE          = 6
 HLS_IDLE_TIMEOUT_S     = 30.0
 HLS_STARTUP_TIMEOUT_S  = 15.0
+
+# (width, height, video_bitrate, video_bufsize, audio_bitrate)
+_QUALITY_TIERS: dict[str, tuple[int, int, str, str, str]] = {
+    "720p": (1280, 720, "2500k", "5000k", "128k"),
+    "480p": (854,  480, "1200k", "2400k", "96k"),
+}
+_VALID_QUALITIES = frozenset({"720p", "480p", "passthrough"})
+
+_ENCODER: str | None = None
+
+
+def _detect_encoder() -> str:
+    """Pick the fastest available H.264 encoder. libx264 always works."""
+    if not shutil.which("ffmpeg"):
+        return "libx264"
+    try:
+        out = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+    except Exception:
+        return "libx264"
+    for enc in ("h264_videotoolbox", "h264_nvenc", "h264_qsv"):
+        if enc in out:
+            return enc
+    return "libx264"
+
+
+def _get_encoder() -> str:
+    global _ENCODER
+    if _ENCODER is None:
+        _ENCODER = _detect_encoder()
+    return _ENCODER
+
+
+def _encode_args(quality: str, encoder: str) -> list[str]:
+    """ffmpeg args between `-i <url>` and the HLS muxer for the given tier.
+
+    Audio is always re-encoded to AAC — stream-copying audio while re-encoding
+    video drifts apart on long-running live streams.
+    """
+    if quality == "passthrough":
+        return ["-c", "copy"]
+
+    width, height, vbr, vbufsize, abr = _QUALITY_TIERS[quality]
+    common_audio = ["-c:a", "aac", "-b:a", abr, "-ac", "2"]
+    common_rate  = ["-b:v", vbr, "-maxrate", vbr, "-bufsize", vbufsize]
+    scale        = ["-vf", f"scale={width}:{height}"]
+    keyframes    = ["-g", "96", "-keyint_min", "96", "-sc_threshold", "0"]
+
+    if encoder == "h264_videotoolbox":
+        return ["-c:v", "h264_videotoolbox", "-profile:v", "main",
+                *keyframes, *scale, *common_rate, *common_audio]
+    if encoder == "h264_nvenc":
+        return ["-c:v", "h264_nvenc", "-preset", "p4", "-tune", "ll",
+                "-profile:v", "main",
+                *keyframes, *scale, *common_rate, *common_audio]
+    if encoder == "h264_qsv":
+        return ["-c:v", "h264_qsv", "-preset", "veryfast",
+                "-profile:v", "main",
+                *keyframes, *scale, *common_rate, *common_audio]
+    # libx264 fallback
+    return ["-c:v", "libx264", "-preset", "veryfast", "-profile:v", "main",
+            *keyframes, *scale, *common_rate, *common_audio]
 
 # Defence-in-depth: tunnel is publicly reachable, so refuse any URL not
 # pointing at one of the upstream hosts wired in dashboard/api/main.py.
@@ -249,8 +321,8 @@ _BROWSER_UA     = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
 
 
-def _hls_session_id(url: str) -> str:
-    return hashlib.sha1(url.encode()).hexdigest()[:16]
+def _hls_session_id(url: str, quality: str = "passthrough") -> str:
+    return hashlib.sha1(f"{quality}|{url}".encode()).hexdigest()[:16]
 
 
 async def _ensure_hls_reaper() -> None:
@@ -287,8 +359,8 @@ def _kill_session(sess: _HLSSession) -> None:
     shutil.rmtree(sess.workdir, ignore_errors=True)
 
 
-async def _start_or_get_hls_session(url: str) -> _HLSSession:
-    sid = _hls_session_id(url)
+async def _start_or_get_hls_session(url: str, quality: str = "passthrough") -> _HLSSession:
+    sid = _hls_session_id(url, quality)
 
     async with _HLS_LOCK:
         existing = _HLS_SESSIONS.get(sid)
@@ -301,6 +373,7 @@ async def _start_or_get_hls_session(url: str) -> _HLSSession:
             shutil.rmtree(workdir, ignore_errors=True)
         workdir.mkdir(parents=True, exist_ok=True)
 
+        encode = _encode_args(quality, _get_encoder())
         args = [
             "ffmpeg", "-hide_banner", "-loglevel", "warning",
             "-user_agent", _BROWSER_UA,
@@ -308,7 +381,7 @@ async def _start_or_get_hls_session(url: str) -> _HLSSession:
             "-reconnect_streamed", "1",
             "-reconnect_delay_max", "5",
             "-i", url,
-            "-c", "copy",
+            *encode,
             "-f", "hls",
             "-hls_time", str(HLS_SEGMENT_SECONDS),
             "-hls_list_size", str(HLS_LIST_SIZE),
@@ -353,19 +426,23 @@ async def _start_or_get_hls_session(url: str) -> _HLSSession:
 
 
 @app.get("/hls")
-async def proxy_hls(u: str, request: Request) -> Response:
+async def proxy_hls(u: str, request: Request, q: str = "passthrough") -> Response:
     """Transmux a raw MPEG-TS upstream into a rolling HLS playlist.
 
-    Shared by session id = sha1(url)[:16], so N viewers on the same channel
-    cost one ffmpeg process, not N. Segments are served via /hls-seg/<sid>/<f>.
+    Shared by session id = sha1(quality|url)[:16], so N viewers on the same
+    (channel, quality) cost one ffmpeg process, not N. Segments are served via
+    /hls-seg/<sid>/<f>. q=720p|480p re-encode for buffering relief; default
+    passthrough keeps the original `-c copy` behavior.
     """
     _check_token(request)
     url = unquote(u)
     _check_host(url)
+    if q not in _VALID_QUALITIES:
+        raise HTTPException(status_code=400, detail=f"unknown q: {q}")
 
     await _ensure_hls_reaper()
 
-    sess = await _start_or_get_hls_session(url)
+    sess = await _start_or_get_hls_session(url, q)
     sess.last_access = time.monotonic()
 
     try:
@@ -419,6 +496,7 @@ if __name__ == "__main__":
     HLS_WORKDIR.mkdir(parents=True, exist_ok=True)
     if not shutil.which("ffmpeg"):
         print("[iptv-relay] WARNING: ffmpeg not found on PATH — /hls endpoint will 502")
+    print(f"[iptv-relay] h264 encoder: {_get_encoder()}")
     print(f"[iptv-relay] port {PORT} — token: {'SET' if TOKEN else 'none (set IPTV_RELAY_TOKEN for auth)'}")
     print(f"[iptv-relay] cache: {CACHE_BYTES // 1024 // 1024} MB / {CACHE_TTL_S}s TTL")
     print(f"[iptv-relay] allowed hosts: {sorted(ALLOWED_HOSTS)}")

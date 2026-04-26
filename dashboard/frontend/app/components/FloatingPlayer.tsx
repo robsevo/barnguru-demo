@@ -137,6 +137,20 @@ export default function FloatingPlayer() {
   const [pipActive, setPipActive] = useState(false);
   const pipSupported = typeof document !== "undefined" && !!document.pictureInPictureEnabled;
 
+  // Auto-fallback to 480p — see StreamPanel for the full rationale. Keeps
+  // PiP and the main game-page player symmetric.
+  const lowQualityRef  = useRef(false);
+  const resolvedUrlRef = useRef<string | null>(null);
+  const [reattachToken,  setReattachToken]  = useState(0);
+  const [downgradeNotice, setDowngradeNotice] = useState(false);
+
+  // Reset on stream change so a new pinned stream starts at 720p again.
+  useEffect(() => {
+    lowQualityRef.current = false;
+    resolvedUrlRef.current = null;
+    setDowngradeNotice(false);
+  }, [stream?.url]);
+
   useEffect(() => {
     if (!stream || !videoEl) return;
 
@@ -173,7 +187,11 @@ export default function FloatingPlayer() {
           return;
         }
 
-        const src    = proxyUrl(data.url);
+        const effective = lowQualityRef.current
+          ? data.url.replace("q=720p", "q=480p")
+          : data.url;
+        resolvedUrlRef.current = effective;
+        const src    = proxyUrl(effective);
         const HlsMod = await import("hls.js");
         const Hls    = HlsMod.default;
         if (cancelled) return;
@@ -205,8 +223,12 @@ export default function FloatingPlayer() {
           liveSyncDuration: 4,
           liveMaxLatencyDuration: 8,
           backBufferLength: 10,
-          manifestLoadingTimeOut: 6000,
-          manifestLoadingMaxRetry: 1,
+          // Cold-start budget — see StreamPanel.tsx for the full rationale.
+          // Relay ffmpeg spin-up + ngrok hop + re-encode startup can blow past
+          // the old 6s window on a fresh chip click and fail-over before the
+          // first segment lands.
+          manifestLoadingTimeOut: 14000,
+          manifestLoadingMaxRetry: 2,
           fragLoadingMaxRetry: 2,
           startLevel: 0,
           capLevelToPlayerSize: true,
@@ -237,7 +259,7 @@ export default function FloatingPlayer() {
       cancelled = true;
       hlsInstance?.destroy();
     };
-  }, [stream?.url, videoEl]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [stream?.url, videoEl, reattachToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Live-stream watchdog (see StreamPanel for full rationale): catch backward
   // jumps + drift behind live edge on flaky IPTV and snap to ~4s behind buffered
@@ -249,6 +271,18 @@ export default function FloatingPlayer() {
     const MAX_RESYNCS = 3;
     let lastTime = -1;
     let resyncs = 0;
+
+    const tryDowngrade = (): boolean => {
+      if (lowQualityRef.current) return false;
+      const r = resolvedUrlRef.current;
+      if (!r || !r.includes("q=720p")) return false;
+      lowQualityRef.current = true;
+      setDowngradeNotice(true);
+      setTimeout(() => setDowngradeNotice(false), 2_500);
+      setReattachToken((n) => n + 1);
+      return true;
+    };
+
     const tick = setInterval(() => {
       if (videoEl.paused || videoEl.ended || videoEl.readyState < 2) {
         lastTime = videoEl.currentTime;
@@ -260,6 +294,7 @@ export default function FloatingPlayer() {
       const looped  = lastTime > 0 && t < lastTime - 3;
       const drifted = liveEdge - t > LIVE_DRIFT_RESYNC;
       if ((looped || drifted) && resyncs < MAX_RESYNCS && buf.length > 0) {
+        if (resyncs >= 1 && tryDowngrade()) return;
         videoEl.currentTime = Math.max(0, buf.end(buf.length - 1) - 4);
         resyncs += 1;
         lastTime = videoEl.currentTime;
@@ -268,7 +303,7 @@ export default function FloatingPlayer() {
       lastTime = t;
     }, 1000);
     return () => clearInterval(tick);
-  }, [videoEl, isIframe, error, loading]);
+  }, [videoEl, isIframe, error, loading, reattachToken]);
 
   // Track native browser PiP state
   useEffect(() => {
@@ -434,6 +469,12 @@ export default function FloatingPlayer() {
                 onLoadedData={() => setLoading(false)}
                 onError={() => { setError("stream unavailable"); setLoading(false); }}
               />
+
+              {downgradeNotice && !loading && !error && (
+                <div className="absolute top-2 left-1/2 -translate-x-1/2 px-2.5 py-1 rounded bg-black/70 pointer-events-none">
+                  <span className="text-[9px] font-mono text-white/60 uppercase tracking-[0.18em]">switched to 480p</span>
+                </div>
+              )}
 
               {loading && !error && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/70 pointer-events-none">
