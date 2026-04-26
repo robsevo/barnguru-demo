@@ -27,6 +27,30 @@ _NHL_KEYWORDS = [
 ]
 
 _OUT_PATH = Path(__file__).parent.parent / "dashboard" / "api" / "iptv_paid_channels.json"
+_ENV_FILE = Path(__file__).parent.parent / "dashboard" / "api" / "iptv.env"
+
+
+def _load_iptv_env_file() -> None:
+    """Seed os.environ from dashboard/api/iptv.env if present.
+
+    Mirrors the loader in dashboard/api/main.py so this script works in
+    both contexts: CI runner (where the sidecar file is freshly written
+    from the IPTV_ENV_BLOCK secret) and local dev (where the user has
+    set the env vars in their shell or written the file by hand).
+    Existing environment values win over the file so a manual override
+    still works.
+    """
+    if not _ENV_FILE.exists():
+        return
+    for line in _ENV_FILE.read_text(encoding="utf-8").splitlines():
+        s = line.strip()
+        if not s or s.startswith("#") or "=" not in s:
+            continue
+        k, _, v = s.partition("=")
+        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+
+_load_iptv_env_file()
 
 
 def _account_label(base_url: str) -> str:
