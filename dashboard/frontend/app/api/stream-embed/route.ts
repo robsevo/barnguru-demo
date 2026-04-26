@@ -228,22 +228,20 @@ export async function GET(request: NextRequest) {
   const priorityParam = request.nextUrl.searchParams.get("priority");
   const priority = priorityParam != null ? parseInt(priorityParam, 10) : 3;
 
-  // Sandbox policy:
-  //   Mobile: always sandbox — blocks popup ads. If the provider detects sandbox
-  //     and refuses to load, the user can tap "Open / Cast ↗" in native browser.
-  //   Desktop priority 0-1: sandbox — these providers don't check for it.
-  //   Desktop priority 2-3: no sandbox — these providers detect and reject it,
-  //     and on desktop we can try yt-dlp extraction as a fallback.
+  // Sandbox policy: never sandbox. We tried sandboxing on mobile to block
+  // popup ads, but JWPlayer/Clappr/Video.js detect sandbox and refuse to
+  // initialise — Bob hit "sandbox not allowed" on every backup chip on his
+  // phone. Trade-off: popup ads can fire on mobile, but the stream actually
+  // plays. Ad blocking still happens in the wrapper context (window.open
+  // override + ad-domain fetch/XHR/script blocking in WRAPPER_INJECT).
   const mobile = isMobile(ua);
-  const useSandbox = mobile || priority <= 1;
-  const sandboxAttr = useSandbox
-    ? `sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-orientation-lock allow-modals" `
-    : "";
+  void mobile;
+  void priority;
+  const sandboxAttr = "";
 
-  // _BG_URL: always injected so stream-killed detection works on all platforms.
-  // _BG_SANDBOX: only on desktop+sandbox so the 3s auto-skip doesn't fire on mobile.
-  const bgSandboxVar = useSandbox && !mobile ? "var _BG_SANDBOX=1;" : "";
-  const bgVars = `<script>${bgSandboxVar}var _BG_URL=${JSON.stringify(safeUrl)};</script>`;
+  // _BG_URL is injected so stream-killed detection works on all platforms.
+  // _BG_SANDBOX is no longer set — we don't sandbox anywhere now.
+  const bgVars = `<script>var _BG_URL=${JSON.stringify(safeUrl)};</script>`;
 
   const html = `<!DOCTYPE html>
 <html><head>
