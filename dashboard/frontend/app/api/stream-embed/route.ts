@@ -172,13 +172,22 @@ function stripAdScripts(html: string): string {
   return html;
 }
 
-function injectBaseHref(html: string, baseHref: string): string {
-  const tag = `<base href="${baseHref}">`;
+function injectIntoHead(html: string, snippet: string): string {
+  // Prefer an existing <head> open tag.
   if (/<head[^>]*>/i.test(html)) {
-    return html.replace(/<head[^>]*>/i, (m) => `${m}${tag}`);
+    return html.replace(/<head[^>]*>/i, (m) => `${m}${snippet}`);
   }
-  // Some hosts skip <head> — wrap a synthetic one in
-  return `<head>${tag}</head>${html}`;
+  // No <head> — many of these hosts ship `<!doctype><html><meta ...>` and
+  // rely on the parser to auto-create a head. Slot our snippet right after
+  // <html> so it lives in the implicit head rather than dangling above
+  // <!doctype>.
+  if (/<html[^>]*>/i.test(html)) {
+    return html.replace(/<html[^>]*>/i, (m) => `${m}<head>${snippet}</head>`);
+  }
+  if (/<!doctype[^>]*>/i.test(html)) {
+    return html.replace(/<!doctype[^>]*>/i, (m) => `${m}<head>${snippet}</head>`);
+  }
+  return `<head>${snippet}</head>${html}`;
 }
 
 export async function GET(request: NextRequest) {
@@ -228,24 +237,21 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Upstream fetch failed", { status: 502 });
   }
 
-  // Server-side ad strip first, then inject base + wrapper script.
-  let html = stripAdScripts(upstreamHtml);
-  html = injectBaseHref(html, baseHref);
-
-  // Inject our wrapper context vars + ad-blocker shim. Goes right after the
-  // <base href> we just inserted so subresource resolution and ad-blocking
-  // run before any inline script in the body fires.
+  // Server-side ad strip first, then inject our preamble in the head.
+  // Order matters: <base href> first so subresource URLs resolve correctly,
+  // then context vars + dark style, then WRAPPER_INJECT last so its shims
+  // are installed before any inline script in the body runs.
   const safeOrigin = JSON.stringify(hostOrigin);
   const safeUrl = JSON.stringify(parsedUrl.href);
+  const baseTag = `<base href="${baseHref}">`;
   const ctxVars = `<script>var _BG_HOST=${safeOrigin};var _BG_URL=${safeUrl};</script>`;
   // Defensive dark-bg style so a host that forgets to set a body color
   // doesn't show as a white screen for the brief load handshake.
   const darkStyle = `<style>html,body{background:#000 !important;color-scheme:dark}body{margin:0}</style>`;
-  if (/<head[^>]*>/i.test(html)) {
-    html = html.replace(/<head[^>]*>/i, (m) => `${m}${ctxVars}${darkStyle}${WRAPPER_INJECT}`);
-  } else {
-    html = `<head>${ctxVars}${darkStyle}${WRAPPER_INJECT}</head>${html}`;
-  }
+  const preamble = `${baseTag}${ctxVars}${darkStyle}${WRAPPER_INJECT}`;
+
+  let html = stripAdScripts(upstreamHtml);
+  html = injectIntoHead(html, preamble);
 
   return new NextResponse(html, {
     headers: {
