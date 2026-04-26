@@ -6255,11 +6255,111 @@ async def stream_resolve(url: str) -> dict:
     return {"type": "embed", "url": url}
 
 
+# ---------------------------------------------------------------------------
+# Pooled HTTP client + tiny in-process cache for /stream-proxy.
+#
+# Cold-start buffering on Barncentre / game pages came down to two avoidable
+# costs on every fetch this proxy makes upstream:
+#   1. A fresh TCP+TLS handshake per request (~100-200 ms each), because the
+#      old code opened a new httpx.AsyncClient inside every handler call.
+#   2. No collapsing of duplicate work — ten viewers tapping the same chip
+#      meant ten manifest fetches plus ten segment fetches end-to-end.
+#
+# The pooled client below keeps a small set of warm keep-alive connections
+# to each upstream CDN; the cache absorbs the thundering-herd on chip clicks
+# and on hover/touch warmup. Segments are immutable for their lifetime so
+# they can be cached briefly; manifests get a tighter TTL because live
+# playlists rotate every few seconds.
+#
+# HTTP/2 stays off — enabling it requires `httpx[http2]` which would add
+# the `h2` dep; HTTP/1.1 keep-alive already removes the per-request
+# handshake, which is the dominant cold-start cost.
+# ---------------------------------------------------------------------------
+_PROXY_HTTP: httpx.AsyncClient | None = None
+
+_PROXY_MANIFEST_TTL = 1.5   # seconds; live playlists rotate every 2-6 s
+_PROXY_SEGMENT_TTL = 30.0   # seconds; segments are immutable
+_PROXY_CACHE_MAX_BYTES = 32 * 1024 * 1024
+_PROXY_CACHE: dict[str, tuple[float, str, bytes, int]] = {}
+# value: (expires_at, content_type, body, status_code)
+_PROXY_CACHE_BYTES = 0
+_PROXY_INFLIGHT: dict[str, "asyncio.Future[tuple[str, bytes, int]]"] = {}
+
+
+async def _get_proxy_http() -> httpx.AsyncClient:
+    """Return the pooled client; lazy-init in case startup didn't run."""
+    global _PROXY_HTTP
+    if _PROXY_HTTP is None:
+        _PROXY_HTTP = httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=4.0, read=15.0, write=15.0, pool=5.0),
+            limits=httpx.Limits(
+                max_connections=200,
+                max_keepalive_connections=100,
+                keepalive_expiry=30.0,
+            ),
+            follow_redirects=True,
+        )
+    return _PROXY_HTTP
+
+
+def _proxy_cache_evict_if_needed(incoming_bytes: int) -> None:
+    global _PROXY_CACHE_BYTES
+    if _PROXY_CACHE_BYTES + incoming_bytes <= _PROXY_CACHE_MAX_BYTES:
+        return
+    # Drop expired entries first, then oldest by expires_at until under cap.
+    now = _time.monotonic()
+    for k, (exp, _ct, body, _sc) in list(_PROXY_CACHE.items()):
+        if exp <= now:
+            _PROXY_CACHE_BYTES -= len(body)
+            _PROXY_CACHE.pop(k, None)
+    if _PROXY_CACHE_BYTES + incoming_bytes <= _PROXY_CACHE_MAX_BYTES:
+        return
+    for k, _v in sorted(_PROXY_CACHE.items(), key=lambda kv: kv[1][0]):
+        body = _v[2]
+        _PROXY_CACHE_BYTES -= len(body)
+        _PROXY_CACHE.pop(k, None)
+        if _PROXY_CACHE_BYTES + incoming_bytes <= _PROXY_CACHE_MAX_BYTES:
+            return
+
+
+def _proxy_cache_get(url: str) -> tuple[str, bytes, int] | None:
+    entry = _PROXY_CACHE.get(url)
+    if not entry:
+        return None
+    expires_at, content_type, body, status_code = entry
+    if expires_at <= _time.monotonic():
+        global _PROXY_CACHE_BYTES
+        _PROXY_CACHE_BYTES -= len(body)
+        _PROXY_CACHE.pop(url, None)
+        return None
+    return content_type, body, status_code
+
+
+def _proxy_cache_put(url: str, content_type: str, body: bytes, status_code: int, ttl: float) -> None:
+    if status_code != 200 or not body or ttl <= 0:
+        return
+    global _PROXY_CACHE_BYTES
+    _proxy_cache_evict_if_needed(len(body))
+    _PROXY_CACHE[url] = (_time.monotonic() + ttl, content_type, body, status_code)
+    _PROXY_CACHE_BYTES += len(body)
+
+
+@app.on_event("startup")
+async def _start_proxy_http() -> None:
+    await _get_proxy_http()
+
+
+@app.on_event("shutdown")
+async def _stop_proxy_http() -> None:
+    global _PROXY_HTTP
+    if _PROXY_HTTP is not None:
+        await _PROXY_HTTP.aclose()
+        _PROXY_HTTP = None
+
+
 @app.get("/stream-proxy")
 async def stream_proxy(url: str, request: Request) -> FastResponse:
     """Proxy an HLS stream URL, rewriting internal URLs to also go through proxy."""
-    import httpx as _httpx
-
     # Build the proxy base URL so rewritten segment URLs point back through the
     # same origin the browser used to load the manifest.
     # When running behind Vercel (or any reverse proxy), X-Forwarded-Host carries
@@ -6305,9 +6405,64 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
         "Cache-Control": "no-cache",
     }
 
+    # Cheap path-only check so we can pick the right cache TTL up front.
+    # Manifests get a tight TTL; segments inherit a longer one.
+    _path_lower = url.split("?", 1)[0].lower()
+    looks_like_segment = (
+        _path_lower.endswith(".ts")
+        or _path_lower.endswith(".aac")
+        or _path_lower.endswith(".m4s")
+        or _path_lower.endswith(".fmp4")
+        or _path_lower.endswith(".mp4")
+    )
+
+    cached = _proxy_cache_get(url)
+    if cached is not None:
+        ct, body, _sc = cached
+        if "mpegurl" in ct.lower():
+            text = body.decode("utf-8", errors="replace")
+            text = _rewrite_m3u8(text, url, proxy_base)
+            return FastResponse(
+                content=text,
+                media_type="application/vnd.apple.mpegurl",
+                headers=cors_headers,
+            )
+        return FastResponse(
+            content=body,
+            media_type=ct or "application/octet-stream",
+            headers=cors_headers,
+        )
+
+    # In-flight dedupe: if another request for the same URL is already
+    # fetching upstream, await its result instead of opening a second fetch.
+    inflight = _PROXY_INFLIGHT.get(url)
+    if inflight is not None:
+        try:
+            ct, body, sc = await inflight
+            if sc == 200:
+                if "mpegurl" in ct.lower():
+                    text = body.decode("utf-8", errors="replace")
+                    text = _rewrite_m3u8(text, url, proxy_base)
+                    return FastResponse(
+                        content=text,
+                        media_type="application/vnd.apple.mpegurl",
+                        headers=cors_headers,
+                    )
+                return FastResponse(
+                    content=body,
+                    media_type=ct or "application/octet-stream",
+                    headers=cors_headers,
+                )
+        except Exception:
+            pass  # fall through and try ourselves
+
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future[tuple[str, bytes, int]] = loop.create_future()
+    _PROXY_INFLIGHT[url] = fut
+
     try:
-        async with _httpx.AsyncClient(timeout=15, follow_redirects=True) as hx:
-            resp = await hx.get(url, headers=_stream_headers)
+        client = await _get_proxy_http()
+        resp = await client.get(url, headers=_stream_headers)
 
         content_type = resp.headers.get("content-type", "")
         body = resp.content
@@ -6322,6 +6477,13 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
         )
 
         if is_m3u8:
+            # Cache the *raw* upstream body keyed by the upstream URL so warmup
+            # hits land here on the actual click. Rewriting happens per-request
+            # because proxy_base depends on x-forwarded-host.
+            stored_ct = content_type or "application/vnd.apple.mpegurl"
+            _proxy_cache_put(url, stored_ct, body, 200, _PROXY_MANIFEST_TTL)
+            if not fut.done():
+                fut.set_result((stored_ct, body, 200))
             text = body.decode("utf-8", errors="replace")
             text = _rewrite_m3u8(text, url, proxy_base)
             return FastResponse(
@@ -6333,10 +6495,8 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
         # HTML embed page — extract the real m3u8 via three escalating layers
         is_html = "text/html" in content_type.lower() or body[:15].lower().lstrip().startswith(b"<!doctype")
         if is_html:
-            import asyncio as _aio
-
             # Layer 1: yt-dlp (JWPlayer/Video.js config detection, no browser, ~2s)
-            real_m3u8 = await _aio.to_thread(_ytdlp_extract_m3u8, url)
+            real_m3u8 = await asyncio.to_thread(_ytdlp_extract_m3u8, url)
 
             # Layer 2: Playwright network interception (headless browser, ~8s)
             if not real_m3u8:
@@ -6345,9 +6505,13 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
             if real_m3u8:
                 if not real_m3u8.startswith("http"):
                     real_m3u8 = urljoin(url, real_m3u8)
-                async with _httpx.AsyncClient(timeout=15, follow_redirects=True) as hx2:
-                    m3u8_resp = await hx2.get(real_m3u8, headers=_stream_headers)
-                m3u8_text = m3u8_resp.content.decode("utf-8", errors="replace")
+                m3u8_resp = await client.get(real_m3u8, headers=_stream_headers)
+                m3u8_body = m3u8_resp.content
+                stored_ct = m3u8_resp.headers.get("content-type") or "application/vnd.apple.mpegurl"
+                _proxy_cache_put(real_m3u8, stored_ct, m3u8_body, m3u8_resp.status_code, _PROXY_MANIFEST_TTL)
+                if not fut.done():
+                    fut.set_result(("application/vnd.apple.mpegurl", m3u8_body, m3u8_resp.status_code))
+                m3u8_text = m3u8_body.decode("utf-8", errors="replace")
                 m3u8_text = _rewrite_m3u8(m3u8_text, real_m3u8, proxy_base)
                 return FastResponse(
                     content=m3u8_text,
@@ -6356,6 +6520,8 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
                 )
             # Layer 3: iframe fallback — tell the frontend to embed the page directly
             import json as _json
+            if not fut.done():
+                fut.set_result(("application/json", b"", 422))
             return FastResponse(
                 content=_json.dumps({"fallback_url": url}),
                 status_code=422,
@@ -6363,7 +6529,13 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
                 headers={**cors_headers, "Content-Type": "application/json"},
             )
 
-        # Binary segment (.ts, .aac, etc.) — stream through as-is
+        # Binary segment (.ts, .aac, etc.) — stream through as-is.
+        # Cache only if the path looks like a segment, so we don't accidentally
+        # cache an HTML error page that slipped through the checks above.
+        if looks_like_segment:
+            _proxy_cache_put(url, content_type, body, resp.status_code, _PROXY_SEGMENT_TTL)
+        if not fut.done():
+            fut.set_result((content_type, body, resp.status_code))
         return FastResponse(
             content=body,
             media_type=content_type or "application/octet-stream",
@@ -6371,11 +6543,19 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
         )
 
     except Exception as exc:
+        if not fut.done():
+            fut.set_exception(exc)
         return FastResponse(
             content=str(exc),
             status_code=502,
             headers=cors_headers,
         )
+    finally:
+        # Always clear the in-flight slot. If we never set a result, awaiters
+        # will see a CancelledError-like state and just re-fetch on their own.
+        if not fut.done():
+            fut.cancel()
+        _PROXY_INFLIGHT.pop(url, None)
 
 
 @app.get("/stream-success")
