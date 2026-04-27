@@ -155,9 +155,7 @@ def _encode_args(quality: str, encoder: str) -> list[str]:
 # that either equals the base domain or ends with a dotted suffix of it.
 ALLOWED_HOSTS = {
     "an upstream host.ddns.net",
-    "tv14s.xyz",
     "ampztl.xyz",
-    "lunar.pm",
     "tvpass.org",
     "thetvapp.to",
 }
