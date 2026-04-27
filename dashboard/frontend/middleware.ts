@@ -11,9 +11,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/_next/") ||
     pathname.startsWith("/favicon")
   ) {
-    const headers = new Headers(request.headers);
-    headers.set("ngrok-skip-browser-warning", "true");
-    return NextResponse.next({ request: { headers } });
+    return NextResponse.next();
   }
 
   const token   = request.cookies.get("grtzky_session")?.value;
@@ -44,9 +42,7 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  const headers = new Headers(request.headers);
-  headers.set("ngrok-skip-browser-warning", "true");
-  return NextResponse.next({ request: { headers } });
+  return NextResponse.next();
 }
 
 export const config = {

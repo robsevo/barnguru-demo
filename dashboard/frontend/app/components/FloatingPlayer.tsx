@@ -224,7 +224,7 @@ export default function FloatingPlayer() {
           liveMaxLatencyDuration: 8,
           backBufferLength: 10,
           // Cold-start budget — see StreamPanel.tsx for the full rationale.
-          // Relay ffmpeg spin-up + ngrok hop + re-encode startup can blow past
+          // Relay ffmpeg spin-up + tunnel hop + re-encode startup can blow past
           // the old 6s window on a fresh chip click and fail-over before the
           // first segment lands.
           manifestLoadingTimeOut: 14000,
@@ -237,7 +237,6 @@ export default function FloatingPlayer() {
           fragLoadingMaxRetry: 2,
           startLevel: 0,
           capLevelToPlayerSize: true,
-          xhrSetup: (xhr) => { xhr.setRequestHeader("ngrok-skip-browser-warning", "skip"); },
         });
         hlsInstance.loadSource(src);
         hlsInstance.attachMedia(videoEl);

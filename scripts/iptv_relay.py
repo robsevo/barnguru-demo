@@ -2,8 +2,8 @@
 IPTV residential relay — bypasses VPS IP blocking on upstream providers.
 
 Run on a machine with a residential IP (laptop, later Pi). Expose publicly via
-ngrok or Cloudflare Tunnel. The localhost:8000 backend rewrites upstream URLs
-through here when IPTV_LOCAL_PROXY_URL is set, so the provider sees a
+a Cloudflare Tunnel (cloudflared). The localhost:8000 backend rewrites upstream
+URLs through here when IPTV_LOCAL_PROXY_URL is set, so the provider sees a
 residential IP instead of our VPS.
 
 Caches HLS segments briefly (30s / ~300 MB). 7 viewers on the same channel
@@ -12,11 +12,11 @@ upload budget and the provider's per-account concurrent-session cap.
 
 Usage:
     uv run python scripts/iptv_relay.py                # or set IPTV_RELAY_PORT
-    ngrok http 9000                                     # pin the tunnel URL
-    # on localhost:8000:
-    #   systemctl edit Origin-guru-api.service
-    #   Environment="IPTV_LOCAL_PROXY_URL=https://abc.ngrok-free.app"
-    #   Environment="IPTV_RELAY_TOKEN=<same_as_below>"    (optional)
+    cloudflared tunnel run iptv-relay                  # public URL via localhost:3000
+    # IPTV_LOCAL_PROXY_URL + IPTV_RELAY_TOKEN are deployed via the
+    # IPTV_ENV_BLOCK GitHub secret → dashboard/api/iptv.env (see
+    # .github/workflows/nightly.yml). Update the secret + redeploy if the
+    # tunnel URL ever changes.
 """
 
 from __future__ import annotations
@@ -192,8 +192,9 @@ class _LRU:
 
 
 app = FastAPI()
-# hls.js sends `ngrok-skip-browser-warning` on every segment request, which
-# triggers a CORS preflight against this cross-origin relay. Handle it here.
+# CORS: hls.js fetches segments from this relay across origins (the player
+# runs on localhost:3000 / localhost:8000, the relay sits at localhost:8000 — a
+# different origin). Allow all so cross-origin segment reads work.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -220,7 +221,8 @@ def _check_host(url: str) -> None:
 
 
 def _tunnel_base(request: Request) -> str:
-    # ngrok + Cloudflare Tunnel both set x-forwarded-host/proto.
+    # Cloudflare Tunnel sets x-forwarded-host/proto so we can reconstruct
+    # the public URL even when the relay binds to localhost.
     host  = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
     proto = request.headers.get("x-forwarded-proto", "https")
     return f"{proto}://{host}"
@@ -529,5 +531,5 @@ if __name__ == "__main__":
     print(f"[iptv-relay] cache: {CACHE_BYTES // 1024 // 1024} MB / {CACHE_TTL_S}s TTL")
     print(f"[iptv-relay] allowed hosts: {sorted(ALLOWED_HOSTS)}")
     print(f"[iptv-relay] hls workdir: {HLS_WORKDIR} (idle timeout {HLS_IDLE_TIMEOUT_S}s)")
-    print(f"[iptv-relay] next step: `ngrok http {PORT}` (or `cloudflared tunnel …`)")
+    print(f"[iptv-relay] next step: `cloudflared tunnel run iptv-relay` (publishes via localhost:8000)")
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")

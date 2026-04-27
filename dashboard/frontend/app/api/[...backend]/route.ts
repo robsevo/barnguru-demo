@@ -8,7 +8,6 @@ async function proxy(req: NextRequest, pathParts: string[]): Promise<NextRespons
   const targetUrl = `${API_URL}/${path}${search}`;
 
   const headers = new Headers(req.headers);
-  headers.set("ngrok-skip-browser-warning", "skip");
   headers.delete("host");
   // Inject x-forwarded-proto so the backend's stream-proxy can correctly construct
   // segment URLs. Next.js adds x-forwarded-host but not x-forwarded-proto, causing

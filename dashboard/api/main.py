@@ -5300,7 +5300,6 @@ async def _warm_relay_url(url: str) -> None:
             url,
             headers={
                 "User-Agent": "Grtzky-Warmup/1.0",
-                "ngrok-skip-browser-warning": "skip",
             },
             timeout=httpx.Timeout(connect=4.0, read=8.0, write=4.0, pool=4.0),
         )
@@ -6229,7 +6228,7 @@ async def stream_embed(url: str, request: Request) -> FastResponse:  # noqa: ARG
   // ~12s) from "wrapper alive, inner iframe playing some content." We can't
   // peek inside cross-origin iframes to verify playback, but a missing
   // heartbeat reliably catches the cases the user actually sees most:
-  // backend timeouts, ngrok tunnel down, or the wrapper getting kicked out
+  // backend timeouts, relay tunnel down, or the wrapper getting kicked out
   // by an ad redirect.
   var killed = false;
   function postBeat() {{
@@ -6511,10 +6510,6 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
                       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer": _referer,
         "Origin": _referer.rstrip("/"),
-        # Some upstream upstreams route through ngrok (IPTV_LOCAL_PROXY_URL). ngrok's
-        # interstitial swallows browser-UA requests with a 200-OK HTML warning
-        # page, which _rewrite_m3u8 then treats as a manifest and feeds to hls.js.
-        "ngrok-skip-browser-warning": "skip",
     }
 
     cors_headers = {
@@ -6965,11 +6960,11 @@ _upstream_ACCOUNTS: list[tuple[str, str, int, str, str]] = [
     # ("lunar",       "lunar.pm",            8080, "JeffOglesby",           "Marriage101"),
 ]
 
-# Residential relay — scripts/iptv_relay.py run on a laptop/Pi and exposed via
-# ngrok. When IPTV_LOCAL_PROXY_URL is set, every stream URL we hand to the
-# browser is rewritten to go through that tunnel (upstream providers block VPS
-# IPs; the relay punches through from a residential address). Empty ⇒
-# direct-to-provider fallback, same as before this release.
+# Residential relay — scripts/iptv_relay.py run on a laptop/Pi and exposed
+# via Cloudflare Tunnel (localhost:8000). When IPTV_LOCAL_PROXY_URL is set,
+# every stream URL we hand to the browser is rewritten to go through that
+# tunnel (upstream providers block VPS IPs; the relay punches through from a
+# residential address). Empty ⇒ direct-to-provider fallback.
 _upstream_HOSTS: frozenset[str] = frozenset(h for _, h, *_ in _upstream_ACCOUNTS)
 
 
@@ -7292,7 +7287,7 @@ async def iptv_debug():
     accounts = [r if isinstance(r, dict) else {"error": str(r)} for r in results]
 
     # Expose the relay config so we can verify IPTV_LOCAL_PROXY_URL matches the
-    # laptop's current ngrok tunnel without leaking the raw token value.
+    # laptop's current Cloudflare Tunnel without leaking the raw token value.
     tunnel = (os.environ.get("IPTV_LOCAL_PROXY_URL") or "").rstrip("/")
     sample_in  = "http://an upstream host.ddns.net:80/live/foo/bar/123.m3u8"
     sample_out = _rewrite_iptv_url(sample_in)
@@ -7410,9 +7405,6 @@ async def _verify_stream_alive(url: str, timeout: float = 10.0) -> bool:
     and incorrectly marks every working an upstream host-routed channel as offline.
     The relay returns a tiny manifest (≤1KB), so the cost is negligible.
 
-    Note on ngrok: a browser UA triggers ngrok's HTML interstitial (200 OK) even
-    when the upstream is 404. Send `ngrok-skip-browser-warning` so the relay
-    returns the true upstream status instead of lying.
     """
     import httpx as _hx_v
 
@@ -7422,7 +7414,7 @@ async def _verify_stream_alive(url: str, timeout: float = 10.0) -> bool:
     # ("body must start with #EXTM3U") false-rejected working channels —
     # NHL Network and FanDuel were demoted to broken tvpass slugs because of
     # this. Now: any 2xx/206 with non-empty body counts as alive. Optimistic
-    # on transient ngrok / timeout errors for the same reason.
+    # on transient timeout errors for the same reason.
     if "/hls?" in url and "u=" in url:
         try:
             async with _hx_v.AsyncClient(
@@ -7430,8 +7422,7 @@ async def _verify_stream_alive(url: str, timeout: float = 10.0) -> bool:
                 timeout=timeout,
                 headers={
                     "User-Agent": "Grtzky-StreamVerifier/1.0",
-                    "ngrok-skip-browser-warning": "skip",
-                    "Range":                     "bytes=0-1023",
+                    "Range":      "bytes=0-1023",
                 },
             ) as cl:
                 r = await cl.get(url)
@@ -7445,9 +7436,8 @@ async def _verify_stream_alive(url: str, timeout: float = 10.0) -> bool:
             timeout=timeout,
             headers={
                 "User-Agent": "Grtzky-StreamVerifier/1.0",
-                "ngrok-skip-browser-warning": "skip",
-                "Referer":  "https://tvpass.org/",
-                "Origin":   "https://tvpass.org",
+                "Referer":    "https://tvpass.org/",
+                "Origin":     "https://tvpass.org",
             },
         ) as cl:
             if url.lower().split("?")[0].endswith(".m3u8"):
