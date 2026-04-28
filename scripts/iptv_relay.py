@@ -443,10 +443,15 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough") -> _
             async with _HLS_LOCK:
                 _HLS_SESSIONS.pop(sid, None)
             _kill_session(sess)
-            raise HTTPException(
-                status_code=502,
-                detail=f"ffmpeg exited early: {stderr_tail.decode(errors='replace')[:400]}",
-            )
+            stderr_text = stderr_tail.decode(errors="replace")[:400]
+            # Distinguish permanent upstream failures (auth, account-locked,
+            # forbidden) from transient ones. hls.js retries 5xx automatically,
+            # which on a dead chip wastes 10-20s before fail-over fires —
+            # returning 4xx tells hls.js to give up immediately so StreamPanel's
+            # onError advances to the next chip without delay.
+            if any(tok in stderr_text for tok in ("401 Unauthorized", "403 Forbidden", "authorization failed")):
+                raise HTTPException(status_code=410, detail=f"upstream auth failed: {stderr_text}")
+            raise HTTPException(status_code=502, detail=f"ffmpeg exited early: {stderr_text}")
         await asyncio.sleep(0.25)
 
     async with _HLS_LOCK:
