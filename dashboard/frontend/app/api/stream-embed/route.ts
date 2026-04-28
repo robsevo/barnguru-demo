@@ -82,9 +82,18 @@ const WRAPPER_INJECT = `<script>
     };
   }catch(e){}
 
-  // 5. Block injected ad <script> elements + force runtime-created
-  //    <iframe> srcs through /api/stream-embed so they don't slip past the
-  //    server-side rewriter when the host builds the iframe in JS.
+  // 5. Force every runtime <iframe>/<frame> src through /api/stream-embed and
+  //    block ad-host <script> srcs. Three injection paths to cover:
+  //    a) document.createElement('iframe').src = X
+  //    b) el.innerHTML = '<iframe src=X>' (parser path; createElement bypassed)
+  //    c) someIframe.setAttribute('src', X) (sets attribute, not the JS prop)
+  //    The earlier per-element hook covered (a) only — ad networks routinely
+  //    use innerHTML to inject their player iframes, which slipped past it
+  //    and the user saw "exposestrat.com refused to connect" when their
+  //    browser refused the X-Frame-Options-DENY load.
+  //    Fix: hook the prototype-level src setter + setAttribute, so EVERY
+  //    iframe in the page proxifies regardless of construction path. Same
+  //    pattern for <script> with the ad-host blocklist.
   function proxify(raw){
     if(typeof raw!=='string'||!raw)return raw;
     if(/^\\/api\\/stream-embed\\?/.test(raw))return raw;
@@ -94,31 +103,53 @@ const WRAPPER_INJECT = `<script>
       return '/api/stream-embed?url='+encodeURIComponent(abs);
     }catch(e){return raw;}
   }
+  // Prototype-level src hook — catches createElement, innerHTML-parsed,
+  // cloned, document.write'd iframes; anything that ends up calling the
+  // .src setter goes through proxify.
   try{
-    var _oCreate=document.createElement.bind(document);
-    document.createElement=function(tag){
-      var el=_oCreate(tag);
-      var t=(tag+'').toLowerCase();
-      if(t==='script'){
-        var _sdesc=Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype,'src');
-        if(_sdesc&&_sdesc.set){
-          Object.defineProperty(el,'src',{
-            set:function(v){var rw=rewriteUrl(v||'');if(rw!==null)_sdesc.set.call(this,rw);},
-            get:function(){return _sdesc.get?_sdesc.get.call(this):'';},
-            configurable:true
-          });
-        }
-      }else if(t==='iframe'||t==='frame'){
-        var _idesc=Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'src');
-        if(_idesc&&_idesc.set){
-          Object.defineProperty(el,'src',{
-            set:function(v){_idesc.set.call(this,proxify(v));},
-            get:function(){return _idesc.get?_idesc.get.call(this):'';},
-            configurable:true
-          });
-        }
+    var _ifDesc=Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'src');
+    if(_ifDesc&&_ifDesc.set){
+      Object.defineProperty(HTMLIFrameElement.prototype,'src',{
+        set:function(v){_ifDesc.set.call(this,proxify(v));},
+        get:_ifDesc.get,
+        configurable:true
+      });
+    }
+    if(window.HTMLFrameElement){
+      var _frDesc=Object.getOwnPropertyDescriptor(HTMLFrameElement.prototype,'src');
+      if(_frDesc&&_frDesc.set){
+        Object.defineProperty(HTMLFrameElement.prototype,'src',{
+          set:function(v){_frDesc.set.call(this,proxify(v));},
+          get:_frDesc.get,
+          configurable:true
+        });
       }
-      return el;
+    }
+  }catch(e){}
+  // <script> src hook — same prototype-level pattern; blocks ad-host scripts
+  // injected via innerHTML or appendChild.
+  try{
+    var _scDesc=Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype,'src');
+    if(_scDesc&&_scDesc.set){
+      Object.defineProperty(HTMLScriptElement.prototype,'src',{
+        set:function(v){var rw=rewriteUrl(v||'');if(rw!==null)_scDesc.set.call(this,rw);},
+        get:_scDesc.get,
+        configurable:true
+      });
+    }
+  }catch(e){}
+  // setAttribute hook — covers iframe.setAttribute('src', X), the third
+  // injection path. Element.setAttribute('src',...) on iframes/scripts goes
+  // here BEFORE the parser-driven src reflection runs.
+  try{
+    var _oSetAttr=Element.prototype.setAttribute;
+    Element.prototype.setAttribute=function(name,value){
+      if(name && (name+'').toLowerCase()==='src' && this.tagName){
+        var T=this.tagName;
+        if(T==='IFRAME'||T==='FRAME')value=proxify(value);
+        else if(T==='SCRIPT'){var rw=rewriteUrl(value||'');if(rw===null)return;value=rw;}
+      }
+      return _oSetAttr.call(this,name,value);
     };
   }catch(e){}
 
@@ -145,12 +176,24 @@ const WRAPPER_INJECT = `<script>
     }
   },true);
 
-  // 9. MutationObserver — strip ad iframes/high-z overlays
+  // 9. MutationObserver — last line of defence:
+  //    a) strip ad iframes (matches AD blocklist) and high-z overlays
+  //    b) re-proxify any iframe whose src ended up un-proxied. The setter
+  //       hook above catches most paths, but iframes parsed from innerHTML
+  //       can occasionally race — by the time the observer fires the load
+  //       has been queued; rewriting src here cancels the in-flight load
+  //       and re-issues it through /api/stream-embed.
   function killAdNode(node){
     if(!node||!node.tagName)return;
     var tag=node.tagName;
-    if(tag==='IFRAME'){
-      try{if(AD.test(node.src||''))node.remove();}catch(e){}
+    if(tag==='IFRAME'||tag==='FRAME'){
+      try{
+        var s=node.getAttribute('src')||'';
+        if(AD.test(s)){node.remove();return;}
+        if(s && /^https?:/i.test(s) && !/^\\/api\\/stream-embed\\?/.test(s)){
+          node.setAttribute('src',proxify(s));
+        }
+      }catch(e){}
       return;
     }
     if(/^(DIV|SECTION|ASIDE|FIGURE|SPAN|A)$/.test(tag)){
