@@ -200,7 +200,8 @@ export default function FloatingPlayer() {
           if (videoEl.canPlayType("application/vnd.apple.mpegurl")) {
             videoEl.muted = true;
             videoEl.src = src;
-            videoEl.load();
+            setLoading(false);
+            videoEl.play().catch(() => {});
           } else {
             setError("format not supported");
             setLoading(false);
