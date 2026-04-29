@@ -5108,32 +5108,87 @@ _game_iptv_cache: dict[int, tuple[list, float]] = {}
 _GAME_IPTV_TTL = 3600  # 1 hour — broadcasts don't change during a game
 
 
+_GAME_IPTV_REFRESH_TASKS: dict[int, "asyncio.Task"] = {}
+
+
+def _kick_game_iptv_refresh(game_id: int) -> None:
+    """Spawn one background rebuild of _game_iptv_cache[game_id]; no-op if
+    one is already in flight for this game. Used by the stale-while-revalidate
+    path so users never wait for the NHL landing fetch + IPTV fan-out once
+    the cache has any data for this game."""
+    existing = _GAME_IPTV_REFRESH_TASKS.get(game_id)
+    if existing is not None and not existing.done():
+        return
+    try:
+        async def _refresh() -> None:
+            try:
+                fresh = await _build_game_iptv(game_id)
+                if fresh is not None:
+                    import time as _t_refresh
+                    _game_iptv_cache[game_id] = (fresh, _t_refresh.monotonic())
+            except Exception:
+                pass
+            finally:
+                _GAME_IPTV_REFRESH_TASKS.pop(game_id, None)
+
+        _GAME_IPTV_REFRESH_TASKS[game_id] = asyncio.create_task(_refresh())
+    except RuntimeError:
+        pass
+
+
 @app.get("/game-iptv-streams/{game_id}")
 async def game_iptv_streams(game_id: int) -> dict:
     """Return IPTV channels matched to this game's actual broadcast networks."""
     import time as _t_iptv
     cached = _game_iptv_cache.get(game_id)
-    if cached and (_t_iptv.monotonic() - cached[1]) < _GAME_IPTV_TTL:
+    if cached:
+        age = _t_iptv.monotonic() - cached[1]
         # Cache TTL is 1 hr; relay ffmpeg idle timeout is 30 s, so we always
-        # re-warm the top an upstream host chips on every request, not just the
+        # re-warm the top relay /hls chips on every request, not just the
         # cache miss. Cheap because _PROXY_INFLIGHT dedups collisions.
         _kick_chip_warmups(cached[0])
-        return {"broadcasts": cached[0], "cached": True}
+        if age < _GAME_IPTV_TTL:
+            return {"broadcasts": cached[0], "cached": True}
+        # Stale-while-revalidate: serve last-good slate immediately, refresh
+        # in the background. Hides the NHL landing fetch + IPTV fan-out
+        # latency from every cache turnover.
+        _kick_game_iptv_refresh(game_id)
+        return {"broadcasts": cached[0], "cached": True, "stale": True}
 
+    # First request for this game (or first after process start): pay the cost.
+    result = await _build_game_iptv(game_id)
+    if result is None:
+        return {"broadcasts": []}
+    _game_iptv_cache[game_id] = (result, _t_iptv.monotonic())
+    _kick_chip_warmups(result)
+    return {"broadcasts": result}
+
+
+async def _build_game_iptv(game_id: int) -> list[dict] | None:
+    """Build the broadcast slate for a game. Returns the slate list, or None
+    on hard failure (the caller skips caching so subsequent requests retry).
+
+    Runs the NHL landing fetch and the IPTV channel pull in parallel via
+    asyncio.gather — they're independent, so doing them sequentially used to
+    add the smaller of the two latencies on every cold start."""
     from data.nhl_client import NHLClient
 
-    # 1. Fetch tvBroadcasts from NHL API
     try:
         async with NHLClient() as client:
-            landing = await client.get_landing(game_id)
-        if isinstance(landing, Exception) or not landing:
-            return {"broadcasts": []}
+            landing, iptv_result = await asyncio.gather(
+                client.get_landing(game_id),
+                iptv_channels(),
+                return_exceptions=True,
+            )
     except Exception:
-        return {"broadcasts": []}
+        return None
+
+    if isinstance(landing, Exception) or not landing:
+        return None
 
     tv_broadcasts: list[dict] = landing.get("tvBroadcasts") or []
     if not tv_broadcasts:
-        return {"broadcasts": []}
+        return []
 
     # Playoffs (gameType == 3): national networks have exclusive rights. NHL
     # API still lists the home/away RSN rows (NESN, MSG, FDSN*, Victory+, etc.)
@@ -5146,14 +5201,12 @@ async def game_iptv_streams(game_id: int) -> dict:
     if is_playoffs:
         tv_broadcasts = [b for b in tv_broadcasts if b.get("market") == "N"]
 
-    # 2. Get our IPTV channel list (cached 1hr inside iptv_channels())
-    try:
-        iptv_result = await iptv_channels()
-        all_channels: list[dict] = iptv_result.get("channels", []) if isinstance(iptv_result, dict) else []
-    except Exception:
+    if isinstance(iptv_result, dict):
+        all_channels: list[dict] = iptv_result.get("channels", []) or []
+    else:
         all_channels = []
 
-    # 3. Match each broadcast network to IPTV channels by title tokens.
+    # Match each broadcast network to IPTV channels by title tokens.
     # Only match against approved sources: tvpass static slugs, thetvapp redirects
     # (which resolve to tvpass.org/live/* URLs), and upstream accounts (ampztl +
     # an upstream host only — lunar/tv14s are disabled in _upstream_ACCOUNTS).
@@ -5260,28 +5313,36 @@ async def game_iptv_streams(game_id: int) -> dict:
             "channels": matched,
         })
 
-    _game_iptv_cache[game_id] = (result, _t_iptv.monotonic())
-    _kick_chip_warmups(result)
-    return {"broadcasts": result}
+    return result
 
 
 def _kick_chip_warmups(broadcasts: list[dict]) -> None:
-    """Fire-and-forget GET against the top an upstream host relay URL of up to 2
-    distinct networks. The relay's ffmpeg cold-start (~4-7s on libx264) used
-    to be paid in full by whoever clicked first; this spawns the session
-    before any user click. Capped at 2 per call to avoid spawning many
-    ffmpegs on slate load. _PROXY_INFLIGHT dedups concurrent collisions.
+    """Fire-and-forget GET against the top relay /hls URL of up to 5 distinct
+    networks. The relay's ffmpeg cold-start (~4-7s on libx264) used to be paid
+    in full by whoever clicked first; this spawns the session before any user
+    click. Cap of 5 per call avoids spawning too many concurrent ffmpegs on
+    slate load. _PROXY_INFLIGHT dedups concurrent collisions.
+
+    We warm any chip whose final URL hits the relay's /hls endpoint — that's
+    where ffmpeg actually starts. Covers both an upstream host and ts-only ampztl
+    variants. /m3u8 passthrough URLs (no ffmpeg) and direct provider URLs
+    (no benefit, may anger ratelimits) are skipped.
     """
     try:
         import asyncio as _aio_warm
         warmups: list[str] = []
+        seen_networks: set[str] = set()
         for b in broadcasts:
-            if len(warmups) >= 2:
+            if len(warmups) >= 5:
                 break
+            net = b.get("network", "")
+            if net in seen_networks:
+                continue
             for c in b.get("channels", []):
                 u = c.get("url", "")
-                if "an upstream host" in u and u.startswith("http"):
+                if "/hls?" in u and u.startswith("http"):
                     warmups.append(u)
+                    seen_networks.add(net)
                     break
         for url in warmups:
             _aio_warm.create_task(_warm_relay_url(url))
@@ -7109,15 +7170,187 @@ def _is_approved_iptv_url(u: str) -> bool:
     return any(host == a or host.endswith("." + a) for a in _APPROVED_IPTV_HOSTS)
 
 
+_IPTV_REFRESH_TASK: "asyncio.Task | None" = None
+
+
+def _kick_iptv_refresh() -> None:
+    """Spawn one background refresh of _IPTV_CACHE; no-op if one is already
+    in flight. Used by the stale-while-revalidate path so the user never
+    waits for a cold-start fan-out once the cache has data at all."""
+    global _IPTV_REFRESH_TASK
+    try:
+        if _IPTV_REFRESH_TASK is not None and not _IPTV_REFRESH_TASK.done():
+            return
+
+        async def _refresh() -> None:
+            try:
+                fresh = await _build_iptv_channels()
+                if fresh:
+                    _IPTV_CACHE["data"] = fresh
+                    _IPTV_CACHE["ts"] = _time_iptv.time()
+            except Exception:
+                pass
+
+        _IPTV_REFRESH_TASK = asyncio.create_task(_refresh())
+    except RuntimeError:
+        # No running event loop — extremely unlikely from a request handler,
+        # but worth defending against (e.g. import-time call from a script).
+        pass
+
+
 @app.get("/iptv-channels")
 async def iptv_channels(force: bool = False):
     now = _time_iptv.time()
-    if not force and now - _IPTV_CACHE["ts"] < _IPTV_TTL and _IPTV_CACHE["data"]:
+    have = bool(_IPTV_CACHE["data"])
+    fresh = have and (now - _IPTV_CACHE["ts"] < _IPTV_TTL)
+
+    if not force and have and fresh:
         return {"channels": _IPTV_CACHE["data"], "count": len(_IPTV_CACHE["data"]), "cached": True}
 
-    channels = []
+    if not force and have:
+        # Stale-while-revalidate: data is past TTL but exists. Return it
+        # immediately and refresh in the background. Hides the 30-60s
+        # cold-start fan-out cost from every cache turnover.
+        _kick_iptv_refresh()
+        return {
+            "channels": _IPTV_CACHE["data"],
+            "count": len(_IPTV_CACHE["data"]),
+            "cached": True,
+            "stale": True,
+        }
 
-    # Source 1: static tvpass.org slugs (always available)
+    # First request after process start (or force=True): pay the cost.
+    channels = await _build_iptv_channels()
+    _IPTV_CACHE["data"] = channels
+    _IPTV_CACHE["ts"] = now
+    return {"channels": channels, "count": len(channels), "cached": False}
+
+
+async def _src_streams_json() -> list[dict]:
+    """Source 2: albinchristo04/tvpass streams.json — tvpass.org redirect URLs
+    with fresh tokens. Each entry has:
+      original_url: tvpass.org/live/<slug>/hd  ← use this (fresh token at stream time)
+      stream_url:   thetvapp.to/hls/...?token=... ← stale within hours — do NOT use
+    """
+    out: list[dict] = []
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                "https://raw.githubusercontent.com/albinchristo04/tvpass/main/streams.json"
+            )
+            if r.status_code != 200:
+                return out
+            payload = r.json()
+            entries = payload.get("channels", []) if isinstance(payload, dict) else payload
+            for entry in entries:
+                name_lower = (entry.get("name") or "").lower()
+                original_url = entry.get("original_url") or ""
+                stream_url   = entry.get("stream_url") or ""
+                use_url = original_url if original_url.startswith("http") else stream_url
+                if (
+                    entry.get("status") == "working"
+                    and use_url.startswith("http")
+                    and any(k in name_lower for k in _NHL_KEYWORDS)
+                ):
+                    out.append({
+                        "title": f"{entry['name']} (thetvapp)",
+                        "url": use_url,
+                        "source": "thetvapp",
+                        "feed": "iptv",
+                        "priority": 0,
+                        "embed_only": False,
+                    })
+    except Exception:
+        pass
+    return out
+
+
+async def _src_m3u_playlists() -> list[dict]:
+    """Source 3: public M3U playlists. URLs are whitelisted via
+    _is_approved_iptv_url so non-approved providers (lunar.pm, tv14s.xyz,
+    random regional CDNs) never enter the pool — only ampztl / an upstream host /
+    tvpass.org-family URLs the GitHub mirrors carry get through.
+
+    Fires all 3 mirrors in parallel; one slow mirror no longer drags the
+    others.
+    """
+    out: list[dict] = []
+
+    async def _one(client: httpx.AsyncClient, m3u_url: str) -> list[dict]:
+        inner: list[dict] = []
+        try:
+            r = await client.get(m3u_url)
+            if r.status_code != 200:
+                return inner
+            lines = r.text.splitlines()
+            i = 0
+            while i < len(lines) - 1:
+                line = lines[i]
+                if line.startswith("#EXTINF"):
+                    name_match = _re_iptv.search(r'tvg-name="([^"]+)"', line)
+                    display = name_match.group(1) if name_match else line.split(",")[-1].strip()
+                    url_line = lines[i + 1].strip()
+                    if (
+                        any(k in display.lower() for k in _NHL_KEYWORDS)
+                        and url_line.startswith("http")
+                        and _is_approved_iptv_url(url_line)
+                    ):
+                        inner.append({
+                            "title": f"{display} (playlist)",
+                            "url": url_line,
+                            "source": "m3u_playlist",
+                            "feed": "iptv",
+                            "priority": 1,
+                            "embed_only": False,
+                        })
+                    i += 2
+                else:
+                    i += 1
+        except Exception:
+            pass
+        return inner
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            results = await asyncio.gather(
+                *[_one(client, u) for u in _M3U_SOURCES],
+                return_exceptions=True,
+            )
+        for r in results:
+            if isinstance(r, list):
+                out.extend(r)
+    except Exception:
+        pass
+    return out
+
+
+async def _src_upstream() -> list[dict]:
+    """Source 4: upstream Codes accounts — fire all in parallel, merge results."""
+    out: list[dict] = []
+    try:
+        results = await asyncio.gather(
+            *[_fetch_upstream_channels(lbl, h, p, u, pw) for lbl, h, p, u, pw in _upstream_ACCOUNTS],
+            return_exceptions=True,
+        )
+        for res in results:
+            if isinstance(res, list):
+                out.extend(res)
+    except Exception:
+        pass
+    return out
+
+
+async def _build_iptv_channels() -> list[dict]:
+    """Fetch all IPTV sources and return the deduped channel list.
+
+    Sources 2, 3, and 4 fan out concurrently via asyncio.gather — previously
+    they ran one-after-another, so a slow GitHub mirror or hung upstream panel
+    blocked the others. Worst-case cold-start is now max(source) instead of
+    sum(sources): roughly 30s instead of 60s+.
+    """
+    channels: list[dict] = []
+
+    # Source 1: static tvpass.org slugs (in-memory, instant).
     for name, slug, quality in _TVPASS_CHANNELS:
         channels.append({
             "title": name,
@@ -7128,104 +7361,25 @@ async def iptv_channels(force: bool = False):
             "embed_only": False,
         })
 
-    # Source 2: albinchristo04/tvpass streams.json — tvpass.org redirect URLs with fresh tokens.
-    # The JSON has structure {"channels": [...]} where each entry has:
-    #   original_url: tvpass.org/live/<slug>/hd  ← use this (generates fresh token at stream time)
-    #   stream_url:   thetvapp.to/hls/...?token=... ← stale, expires within hours — do NOT use
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.get("https://raw.githubusercontent.com/albinchristo04/tvpass/main/streams.json")
-            if r.status_code == 200:
-                payload = r.json()
-                entries = payload.get("channels", []) if isinstance(payload, dict) else payload
-                for entry in entries:
-                    name_lower = (entry.get("name") or "").lower()
-                    # Prefer original_url (tvpass redirect → fresh token); fall back to stream_url
-                    original_url = entry.get("original_url") or ""
-                    stream_url   = entry.get("stream_url") or ""
-                    use_url = original_url if original_url.startswith("http") else stream_url
-                    if (
-                        entry.get("status") == "working"
-                        and use_url.startswith("http")
-                        and any(k in name_lower for k in _NHL_KEYWORDS)
-                    ):
-                        channels.append({
-                            "title": f"{entry['name']} (thetvapp)",
-                            "url": use_url,
-                            "source": "thetvapp",
-                            "feed": "iptv",
-                            "priority": 0,
-                            "embed_only": False,
-                        })
-    except Exception:
-        pass
+    # Sources 2, 3, 4 in parallel.
+    src_results = await asyncio.gather(
+        _src_streams_json(),
+        _src_m3u_playlists(),
+        _src_upstream(),
+        return_exceptions=True,
+    )
+    for r in src_results:
+        if isinstance(r, list):
+            channels.extend(r)
 
-    # Source 3: public M3U playlists — parse and filter for NHL channels.
-    # Channel URLs are whitelisted via _is_approved_iptv_url() so URLs pointing
-    # at non-approved providers (lunar.pm, tv14s.xyz, random regional CDNs)
-    # never enter the pool — only ampztl / an upstream host / tvpass.org-family URLs
-    # the GitHub mirrors carry get through.
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            for m3u_url in _M3U_SOURCES:
-                try:
-                    r = await client.get(m3u_url)
-                    if r.status_code != 200:
-                        continue
-                    lines = r.text.splitlines()
-                    i = 0
-                    while i < len(lines) - 1:
-                        line = lines[i]
-                        if line.startswith("#EXTINF"):
-                            name_match = _re_iptv.search(r'tvg-name="([^"]+)"', line)
-                            display = name_match.group(1) if name_match else line.split(",")[-1].strip()
-                            url_line = lines[i + 1].strip()
-                            if (
-                                any(k in display.lower() for k in _NHL_KEYWORDS)
-                                and url_line.startswith("http")
-                                and _is_approved_iptv_url(url_line)
-                            ):
-                                channels.append({
-                                    "title": f"{display} (playlist)",
-                                    "url": url_line,
-                                    "source": "m3u_playlist",
-                                    "feed": "iptv",
-                                    "priority": 1,
-                                    "embed_only": False,
-                                })
-                            i += 2
-                        else:
-                            i += 1
-                except Exception:
-                    continue
-    except Exception:
-        pass
-
-    # Source 4: upstream Codes accounts — fire all in parallel, merge results
-    try:
-        import asyncio as _aio_xt
-        xt_results = await _aio_xt.gather(
-            *[_fetch_upstream_channels(lbl, h, p, u, pw) for lbl, h, p, u, pw in _upstream_ACCOUNTS],
-            return_exceptions=True,
-        )
-        for res in xt_results:
-            if isinstance(res, list):
-                channels.extend(res)
-    except Exception:
-        pass
-
-    # Deduplicate by exact URL — keeps first occurrence (highest-priority source wins)
-    _seen_urls: set[str] = set()
-    _deduped: list = []
-    for _ch in channels:
-        if _ch["url"] not in _seen_urls:
-            _seen_urls.add(_ch["url"])
-            _deduped.append(_ch)
-    channels = _deduped
-
-    _IPTV_CACHE["data"] = channels
-    _IPTV_CACHE["ts"] = now
-    return {"channels": channels, "count": len(channels), "cached": False}
+    # Deduplicate by exact URL — keeps first occurrence (highest-priority source wins).
+    seen: set[str] = set()
+    deduped: list[dict] = []
+    for ch in channels:
+        if ch["url"] not in seen:
+            seen.add(ch["url"])
+            deduped.append(ch)
+    return deduped
 
 
 @app.get("/iptv-channel-status")
