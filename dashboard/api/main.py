@@ -6641,11 +6641,13 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
                 content=text,
                 media_type="application/vnd.apple.mpegurl",
                 headers=cors_headers,
+                status_code=_sc or 200,
             )
         return FastResponse(
             content=body,
             media_type=ct or "application/octet-stream",
             headers=seg_cors_headers if looks_like_segment else cors_headers,
+            status_code=_sc or 200,
         )
 
     # Segment cache miss: stream the body through instead of buffering ~1 MB
@@ -6786,10 +6788,15 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
             _proxy_cache_put(url, content_type, body, resp.status_code, _PROXY_SEGMENT_TTL)
         if not fut.done():
             fut.set_result((content_type, body, resp.status_code))
+        # Preserve upstream status_code. Returning a fake 200 for a 4xx/5xx
+        # makes hls.js retry up to 3x at 9s each (~27s of spinner) instead
+        # of failing fast — the player just sits there spinning when in
+        # reality the chip is dead and we should advance to the next one.
         return FastResponse(
             content=body,
             media_type=content_type or "application/octet-stream",
             headers=seg_cors_headers if looks_like_segment and resp.status_code == 200 else cors_headers,
+            status_code=resp.status_code,
         )
 
     except Exception as exc:
