@@ -125,18 +125,31 @@ def _encode_args(quality: str, encoder: str) -> list[str]:
     common_audio = ["-c:a", "aac", "-b:a", abr, "-ac", "2"]
     common_rate  = ["-b:v", vbr, "-maxrate", vbr, "-bufsize", vbufsize]
     scale        = ["-vf", f"scale={width}:{height}"]
-    gop          = ["-g", "96", "-keyint_min", "96"]
+    # GOP = 60 frames ≈ 2s at 30fps (2.4s at 25fps). With HLS_SEGMENT_SECONDS=3
+    # this guarantees a keyframe inside the first segment instead of forcing
+    # hls.js to wait an extra GOP on cold start. Was -g 96 (3.2s GOP) which
+    # frequently misaligned with the segment boundary and added 0.5-1.5s of
+    # first-paint latency.
+    gop          = ["-g", "60", "-keyint_min", "60"]
 
     if encoder == "h264_videotoolbox":
         return ["-c:v", "h264_videotoolbox", "-profile:v", "main",
                 *gop, *scale, *common_rate, *common_audio]
     if encoder == "h264_nvenc":
+        # -bf 0 + -rc-lookahead 0 mirror libx264's -tune zerolatency: zero
+        # B-frames and zero lookahead cut first-segment latency to roughly
+        # match the libx264 path. -preset p4 -tune ll already targets
+        # low-latency, but B-frames remain on by default.
         return ["-c:v", "h264_nvenc", "-preset", "p4", "-tune", "ll",
                 "-profile:v", "main", "-no-scenecut", "1",
+                "-bf", "0", "-rc-lookahead", "0",
                 *gop, *scale, *common_rate, *common_audio]
     if encoder == "h264_qsv":
+        # Same zero-latency posture as nvenc — qsv accepts -bf 0 and
+        # -look_ahead 0 (qsv-specific name for lookahead).
         return ["-c:v", "h264_qsv", "-preset", "veryfast",
                 "-profile:v", "main",
+                "-bf", "0", "-look_ahead", "0",
                 *gop, *scale, *common_rate, *common_audio]
     # libx264 fallback. -sc_threshold 0 stops scene-cut from breaking
     # constant-GOP, which keeps HLS segment boundaries aligned. -tune

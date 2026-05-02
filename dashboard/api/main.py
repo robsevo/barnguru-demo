@@ -6537,6 +6537,20 @@ async def _start_proxy_http() -> None:
     await _get_proxy_http()
 
 
+@app.on_event("startup")
+async def _prewarm_barncentre() -> None:
+    """Build the BarnCentre cache in the background at startup so the first
+    real user lands on a warm cache instead of paying the full 50-65s cold
+    fan-out (NHL + ESPN + MLB + NBA + IPTV sources + ~100 verifier probes).
+    """
+    async def _runner() -> None:
+        try:
+            await _build_barncentre_payload()
+        except Exception:
+            pass
+    asyncio.create_task(_runner())
+
+
 @app.on_event("shutdown")
 async def _stop_proxy_http() -> None:
     global _PROXY_HTTP
@@ -7636,7 +7650,21 @@ def _ch_matches(raw_title: str, ch_name: str) -> bool:
     return False
 
 
-async def _verify_stream_alive(url: str, timeout: float = 10.0) -> bool:
+# Concurrency cap on the verifier. Without this, `gather()` spawns ~100
+# probes that all queue behind httpx's default 5-connection pool — adding
+# 20-25s of head-of-line blocking on cold start despite "parallel". 20
+# concurrent slots maxes out a typical pool budget without trashing it.
+_VERIFY_SEM: "asyncio.Semaphore | None" = None
+
+
+def _get_verify_sem() -> "asyncio.Semaphore":
+    global _VERIFY_SEM
+    if _VERIFY_SEM is None:
+        _VERIFY_SEM = asyncio.Semaphore(20)
+    return _VERIFY_SEM
+
+
+async def _verify_stream_alive(url: str, timeout: float = 4.0) -> bool:
     """Follow redirects and confirm the URL resolves to a reachable HLS stream.
 
     For tvpass.org/live/* URLs: follow 302 → check final URL is m3u8 + HTTP 200.
@@ -7649,7 +7677,17 @@ async def _verify_stream_alive(url: str, timeout: float = 10.0) -> bool:
     and incorrectly marks every working an upstream host-routed channel as offline.
     The relay returns a tiny manifest (≤1KB), so the cost is negligible.
 
+    Timeout default is 4s. Slow upstreams in this code path are nearly always
+    dead — the long tail (>4s) almost never converts to "actually online".
+    Combined with _VERIFY_SEM(20) this caps cold-cache verifier latency to
+    ~6-10s instead of 20-25s.
     """
+    sem = _get_verify_sem()
+    async with sem:
+        return await _verify_stream_alive_inner(url, timeout)
+
+
+async def _verify_stream_alive_inner(url: str, timeout: float) -> bool:
     import httpx as _hx_v
 
     # Relay /hls passthrough — probe the relay URL itself. The relay returns
@@ -8064,21 +8102,65 @@ async def _fetch_nba_schedule() -> dict[str, list[dict]]:
 
 _barncentre_cache: dict = {"data": None, "ts": 0.0}
 _BARNCENTRE_TTL = 3600  # 1 hour
+_BARNCENTRE_REFRESH_TASK: "asyncio.Task | None" = None
+
+
+def _kick_barncentre_refresh() -> None:
+    """Spawn one background rebuild of _barncentre_cache; no-op if one is
+    already in flight. Mirrors _kick_iptv_refresh — used by the
+    stale-while-revalidate path so the user never waits for the 50-65s
+    cold fan-out (NHL + ESPN + MLB + NBA + IPTV sources + ~100 verifier probes)
+    once the cache has data at all.
+    """
+    global _BARNCENTRE_REFRESH_TASK
+    try:
+        if _BARNCENTRE_REFRESH_TASK is not None and not _BARNCENTRE_REFRESH_TASK.done():
+            return
+
+        async def _refresh() -> None:
+            try:
+                await _build_barncentre_payload()
+            except Exception:
+                pass
+
+        _BARNCENTRE_REFRESH_TASK = asyncio.create_task(_refresh())
+    except RuntimeError:
+        pass
 
 
 @app.get("/barncentre-channels")
 async def barncentre_channels() -> dict:
     """Return curated, verified channel list for BarnCentre with today's NHL programs.
 
-    Each channel is verified live by following the stream URL and checking for a
-    reachable HLS manifest. Verification runs in parallel across all channels.
-    Cache is valid for 1 hour.
+    Stale-while-revalidate: a hit on stale data (>1h) returns cached payload
+    immediately and rebuilds in the background. First-ever request after
+    process restart still pays the full cost, but every later cache turnover
+    is invisible to users.
+    """
+    import time as _t_bc
+    now_ts = _t_bc.time()
+    have   = _barncentre_cache["data"] is not None
+    fresh  = have and (now_ts - _barncentre_cache["ts"] < _BARNCENTRE_TTL)
+
+    if have and fresh:
+        return {"channels": _barncentre_cache["data"], "cached": True}
+
+    if have:
+        _kick_barncentre_refresh()
+        return {"channels": _barncentre_cache["data"], "cached": True, "stale": True}
+
+    # Cold cache — pay the full cost.
+    return await _build_barncentre_payload()
+
+
+async def _build_barncentre_payload() -> dict:
+    """Full builder for /barncentre-channels. Extracted so SWR + startup
+    pre-warm can both call it. Writes _barncentre_cache and returns the
+    response payload.
     """
     import time as _t_bc
     import asyncio as _aio_bc
     now_ts = _t_bc.time()
-    if _barncentre_cache["data"] is not None and now_ts - _barncentre_cache["ts"] < _BARNCENTRE_TTL:
-        return {"channels": _barncentre_cache["data"], "cached": True}
 
     # ── 1. Full IPTV channel list (shared 1-hr cache) ─────────────────────────
     iptv_result  = await iptv_channels()
@@ -8301,6 +8383,20 @@ async def barncentre_channels() -> dict:
     # Re-apply the global ordering after the French rebuild.
     result.sort(key=lambda ch: order.get(ch["name"], 999))
     # ──────────────────────────────────────────────────────────────────────────
+
+    # Warm the relay's ffmpeg sessions for the resolved primary chips. Reuses
+    # _kick_chip_warmups (already used by /game-iptv-streams) — its expected
+    # input shape is broadcasts with `network` + `channels[].url`, so map the
+    # BarnCentre result into that shape. Cap-of-5 is enforced inside the
+    # warmup helper so spawning here doesn't blow up ffmpeg counts.
+    try:
+        warmup_input = [
+            {"network": ch["name"], "channels": [{"url": ch["primary_url"]}]}
+            for ch in result if ch.get("primary_url")
+        ]
+        _kick_chip_warmups(warmup_input)
+    except Exception:
+        pass
 
     _barncentre_cache["data"] = result
     _barncentre_cache["ts"]   = now_ts
