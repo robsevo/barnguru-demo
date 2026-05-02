@@ -328,6 +328,36 @@ async def health() -> dict:
     return {"ok": True, "cached_bytes": seg_cache._bytes, "cached_items": len(seg_cache._d)}
 
 
+@app.get("/upstream-json")
+async def proxy_upstream_json(u: str, request: Request) -> Response:
+    """Proxy an upstream Codes JSON catalog call (player_api.php, get.php).
+
+    Some upstream panels (kstv.us today, possibly others tomorrow) firewall
+    the VPS IP at their edge — channel enumeration fails with
+    "All connection attempts failed" even though stream playback through
+    the relay works fine. This endpoint lets localhost:8000 fetch the JSON
+    catalog from the relay's residential IP, just like it already routes
+    playback URLs through /m3u8 and /hls. Body is returned as-is; the API
+    parses it (no rewriting needed since stream URLs in the catalog get
+    rewritten via _rewrite_iptv_url after parsing).
+    """
+    _check_token(request)
+    url = unquote(u)
+    _check_host(url)
+
+    try:
+        cl = await _get_upstream_http()
+        r = await cl.get(url)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"upstream: {e}")
+    return Response(
+        content=r.content,
+        status_code=r.status_code,
+        media_type=r.headers.get("content-type") or "application/json",
+        headers={**_CORS, "Cache-Control": "no-cache"},
+    )
+
+
 @app.get("/m3u8")
 async def proxy_m3u8(u: str, request: Request) -> Response:
     _check_token(request)

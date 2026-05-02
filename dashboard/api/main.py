@@ -7161,6 +7161,29 @@ def _rewrite_iptv_url(url: str) -> str:
     return f"{tunnel}/{endpoint}?u={quote(inner, safe='')}{tq}"
 
 
+# upstream hosts that firewall the VPS IP. Channel enumeration for these has
+# to go through the residential relay — same trick we already use for stream
+# playback. Add a host here when a previously-working provider starts
+# returning "All connection attempts failed" or 403 from the API box.
+_VPS_BLOCKED_upstream_HOSTS: frozenset[str] = frozenset({
+    "kstv.us",
+})
+
+
+def _upstream_fetch_url(upstream_url: str, host: str) -> str:
+    """If the host blocks the VPS, route the JSON catalog fetch through the
+    relay's /upstream-json endpoint (residential IP). Otherwise return as-is.
+    """
+    if host.lower() not in _VPS_BLOCKED_upstream_HOSTS:
+        return upstream_url
+    tunnel = (os.environ.get("IPTV_LOCAL_PROXY_URL") or "").rstrip("/")
+    if not tunnel:
+        return upstream_url  # no relay configured — best-effort direct fetch
+    token = os.environ.get("IPTV_RELAY_TOKEN") or ""
+    tq    = f"&t={quote(token, safe='')}" if token else ""
+    return f"{tunnel}/upstream-json?u={quote(upstream_url, safe='')}{tq}"
+
+
 async def _fetch_upstream_channels(
     label: str, host: str, port: int, username: str, password: str,
 ) -> list[dict]:
@@ -7173,6 +7196,10 @@ async def _fetch_upstream_channels(
     open. Stream URLs are constructed as /live/<user>/<pass>/<id>.m3u8 (upstream
     convention). The relay's /m3u8 endpoint follows redirects to whatever
     CDN the panel hands back.
+
+    Hosts in _VPS_BLOCKED_upstream_HOSTS firewall the API VPS IP, so all
+    catalog fetches for those panels are routed through the relay's
+    /upstream-json endpoint (residential IP) — see _upstream_fetch_url.
     """
     base = f"http://{host}:{port}"
     ua   = _BROWSER_HEADERS["User-Agent"]
@@ -7182,7 +7209,10 @@ async def _fetch_upstream_channels(
     try:
         async with _httpx_backup.AsyncClient(timeout=10.0, follow_redirects=True) as hx:
             probe = await hx.get(
-                f"{base}/player_api.php?username={username}&password={password}",
+                _upstream_fetch_url(
+                    f"{base}/player_api.php?username={username}&password={password}",
+                    host,
+                ),
                 headers={"User-Agent": ua},
             )
         if probe.status_code == 200:
@@ -7201,9 +7231,10 @@ async def _fetch_upstream_channels(
         pass  # probe failure is not fatal — try m3u8 then ts
 
     async def _fetch_via_m3u(fmt: str) -> list[dict]:
-        url = (
+        url = _upstream_fetch_url(
             f"{base}/get.php?username={username}&password={password}"
-            f"&type=m3u_plus&output={fmt}"
+            f"&type=m3u_plus&output={fmt}",
+            host,
         )
         try:
             async with _httpx_backup.AsyncClient(timeout=20.0, follow_redirects=True) as hx:
@@ -7247,8 +7278,11 @@ async def _fetch_upstream_channels(
         try:
             async with _httpx_backup.AsyncClient(timeout=20.0, follow_redirects=True) as hx:
                 r = await hx.get(
-                    f"{base}/player_api.php?username={username}&password={password}"
-                    "&action=get_live_streams",
+                    _upstream_fetch_url(
+                        f"{base}/player_api.php?username={username}&password={password}"
+                        "&action=get_live_streams",
+                        host,
+                    ),
                     headers={"User-Agent": ua},
                 )
             if r.status_code != 200:
