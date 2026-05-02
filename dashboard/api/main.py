@@ -4862,8 +4862,15 @@ def _stream_recent_success_count(url: str) -> int:
 
 @app.get("/streams/{game_id}")
 async def game_streams(game_id: int) -> dict:
-    """Scrape live stream embed links from onhockey.tv for a given NHL game."""
-    import time as _t
+    """Scrape live stream embed links from onhockey.tv for a given NHL game.
+
+    Disabled for now — onhockey.tv chips were adding noise to the game-page
+    stream selector without contributing reliable playback. IPTV (upstream)
+    chips come from a separate endpoint and are unaffected. Re-enable by
+    removing this short-circuit.
+    """
+    return {"streams": [], "game_id": game_id, "away": "", "home": "", "disabled": True}
+    import time as _t  # noqa: F401  (dead code below; kept for easy revert)
     cached = _streams_cache.get(game_id)
     if cached and (_t.monotonic() - cached[1]) < _STREAMS_CACHE_TTL:
         streams = list(cached[0])
@@ -7141,12 +7148,17 @@ def _rewrite_iptv_url(url: str) -> str:
     endpoint = "m3u8" if ".m3u8" in inner.lower().split("?", 1)[0] else "hls"
     token    = os.environ.get("IPTV_RELAY_TOKEN") or ""
     tq       = f"&t={quote(token, safe='')}" if token else ""
-    # Default the ffmpeg-transmux path (ampztl + an upstream host /ts) to q=720p so the
-    # relay re-encodes to a capped bitrate. The frontend watchdog flips q=720p
-    # → q=480p in-place after repeated stalls. /m3u8 passthrough doesn't encode,
-    # so no q param there.
-    qq = "&q=720p" if endpoint == "hls" else ""
-    return f"{tunnel}/{endpoint}?u={quote(inner, safe='')}{tq}{qq}"
+    # Pass through. No q param means the relay falls into `-c copy` mode (see
+    # iptv_relay.py:_encode_args). XCIPTV and every native IPTV player on the
+    # planet plays these upstreams smoothly because they DON'T transcode —
+    # they just wrap raw MPEG-TS into a player-consumable container. We were
+    # forcing q=720p which spent 30-50% of one CPU core per stream on
+    # libx264 software encoding (relay falls back to libx264 when no
+    # hardware encoder is available); on a multi-viewer residential box that
+    # saturates the CPU and ffmpeg falls behind producing segments — surfacing
+    # as mid-stream pause-and-load on the player. Passthrough is <2% CPU per
+    # stream and matches XCIPTV's behaviour exactly.
+    return f"{tunnel}/{endpoint}?u={quote(inner, safe='')}{tq}"
 
 
 async def _fetch_upstream_channels(
