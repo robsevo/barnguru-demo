@@ -7014,6 +7014,9 @@ _NHL_KEYWORDS = [
     "nesn","nbcs","nbcsp","spectrum sportsnet","nhln",
     # CBS Sports family — non-NHL carrier but surfaced in BarnCentre guide
     "cbs",
+    # "fox sports" with a space — kstv & many providers spell it "Fox Sports 1"
+    # rather than the contraction "FS1". Without this, FS1/FS2 chips were 0.
+    "fox sports",
 ]
 
 # ---------------------------------------------------------------------------
@@ -7021,9 +7024,23 @@ _NHL_KEYWORDS = [
 # Each entry: (label, host, port, username, password)
 # ---------------------------------------------------------------------------
 _upstream_ACCOUNTS: list[tuple[str, str, int, str, str]] = [
+    # kstv (puny243) — Bob's premium account, top priority everywhere.
+    # Panel disables get.php (404), but exposes player_api.php — the fetcher
+    # falls back to action=get_live_streams enumeration. ~327 NHL-keyword
+    # channels, max 5 concurrent connections.
+    ("kstv",        "kstv.us",             8080, "puny243",               "2033697598"),
     ("an upstream host",  "an upstream host.ddns.net", 8081, "PNbV7ywsHG",            "u7jmr3xvcM"),
     ("ampztl-a",    "ampztl.xyz",          8080, "arturo",                "YZcm6gw6Ukwt"),
     ("ampztl-b",    "ampztl.xyz",          8080, "webtv1847",             "YsAPRy6Jq8TJ"),
+    # Disabled (DNS-dead 2026-05-02): rexmaximl.shop & subdomain return
+    # "Not Authoritative" from Cloudflare DoH, anadolutv.shop returns SOA
+    # with no A record (registered but unhosted), izletvhd.xyz SERVFAILs.
+    # Domains likely seized or NS-misconfigured. Don't re-add without
+    # re-verifying DNS.
+    # ("rexmaximl",   "piaylgbuslxs8ua98elr7e.rexmaximl.shop", 8080, "rmz2021", "rmz.2021"),
+    # ("anadolu-a",   "anadolutv.shop",      8080, "mstf6192",              "qcy8SyxFHtks"),
+    # ("anadolu-b",   "anadolutv.shop",      8080, "rmzn0781",              "rmzn0781"),
+    # ("izletvhd",    "izletvhd.xyz",        8080, "ft2301",                "cn.2504"),
     # Disabled: tv14s CDN tarpits our IP, lunar returns 403. Re-enable only
     # if providers start accepting requests again.
     # ("tv14s",       "tv14s.xyz",           8080, "Serentiy2@ogbtv.com",   "0306@1954"),
@@ -7077,18 +7094,20 @@ async def _fetch_upstream_channels(
     label: str, host: str, port: int, username: str, password: str,
 ) -> list[dict]:
     """
-    Fetch the M3U playlist from an upstream Codes server and return NHL-relevant
-    channels as standardized channel dicts.
+    Fetch NHL-relevant channels from an upstream Codes panel.
 
-    Prefers HLS (output=m3u8) so the /m3u8 relay can passthrough-rewrite the
-    playlist cheaply. Accounts that only advertise `ts` fall back to the raw
-    MPEG-TS path — the URL rewriter routes those through the relay's /hls
-    endpoint (ffmpeg transmux) so hls.js can still consume them.
+    Tries (in order): get.php?type=m3u_plus&output=m3u8 → output=ts →
+    player_api.php?action=get_live_streams. The last path is needed for panels
+    like kstv.us where get.php is locked down (404) but player_api.php is
+    open. Stream URLs are constructed as /live/<user>/<pass>/<id>.m3u8 (upstream
+    convention). The relay's /m3u8 endpoint follows redirects to whatever
+    CDN the panel hands back.
     """
     base = f"http://{host}:{port}"
     ua   = _BROWSER_HEADERS["User-Agent"]
 
-    output_fmt = "m3u8"
+    primary_fmt = "m3u8"
+    secondary_fmt: str | None = "ts"
     try:
         async with _httpx_backup.AsyncClient(timeout=10.0, follow_redirects=True) as hx:
             probe = await hx.get(
@@ -7098,53 +7117,106 @@ async def _fetch_upstream_channels(
         if probe.status_code == 200:
             fmts = [str(f).lower() for f in
                     (probe.json().get("user_info") or {}).get("allowed_output_formats") or []]
-            if "m3u8" in fmts:
-                output_fmt = "m3u8"
+            if "m3u8" in fmts and "ts" in fmts:
+                primary_fmt, secondary_fmt = "m3u8", "ts"
+            elif "m3u8" in fmts:
+                primary_fmt, secondary_fmt = "m3u8", "ts"  # still try ts as last resort
             elif "ts" in fmts:
-                output_fmt = "ts"
-            else:
+                primary_fmt, secondary_fmt = "ts", "m3u8"
+            elif fmts:
+                # Provider advertises something exotic (rtmp etc) — no path forward.
                 return []
     except Exception:
-        pass  # probe failure is not fatal — fall through to M3U fetch with m3u8 default
+        pass  # probe failure is not fatal — try m3u8 then ts
 
-    url = (
-        f"{base}/get.php?username={username}&password={password}"
-        f"&type=m3u_plus&output={output_fmt}"
-    )
-    try:
-        async with _httpx_backup.AsyncClient(timeout=20.0, follow_redirects=True) as hx:
-            r = await hx.get(url, headers={"User-Agent": ua})
-        if r.status_code != 200:
+    async def _fetch_via_m3u(fmt: str) -> list[dict]:
+        url = (
+            f"{base}/get.php?username={username}&password={password}"
+            f"&type=m3u_plus&output={fmt}"
+        )
+        try:
+            async with _httpx_backup.AsyncClient(timeout=20.0, follow_redirects=True) as hx:
+                r = await hx.get(url, headers={"User-Agent": ua})
+            if r.status_code != 200:
+                return []
+            text = r.text
+        except Exception:
             return []
-        text = r.text
-    except Exception:
-        return []
 
-    results: list[dict] = []
-    lines = text.splitlines()
-    i = 0
-    while i < len(lines) - 1:
-        line = lines[i].strip()
-        if line.startswith("#EXTINF"):
-            # Channel name: last comma-separated segment
-            name_m = _re_iptv.search(r'tvg-name="([^"]+)"', line)
-            ch_name = name_m.group(1) if name_m else line.split(",")[-1].strip()
-            stream_url = lines[i + 1].strip() if i + 1 < len(lines) else ""
-            if (
-                stream_url.startswith("http")
-                and any(k in ch_name.lower() for k in _NHL_KEYWORDS)
-            ):
-                results.append({
-                    "title":      f"{ch_name} ({label})",
-                    "url":        _rewrite_iptv_url(stream_url),
-                    "source":     "upstream",
-                    "feed":       "iptv",
-                    "priority":   1,
-                    "embed_only": False,
-                })
-            i += 2
-        else:
-            i += 1
+        out: list[dict] = []
+        lines = text.splitlines()
+        i = 0
+        while i < len(lines) - 1:
+            line = lines[i].strip()
+            if line.startswith("#EXTINF"):
+                name_m = _re_iptv.search(r'tvg-name="([^"]+)"', line)
+                ch_name = name_m.group(1) if name_m else line.split(",")[-1].strip()
+                stream_url = lines[i + 1].strip() if i + 1 < len(lines) else ""
+                if (
+                    stream_url.startswith("http")
+                    and any(k in ch_name.lower() for k in _NHL_KEYWORDS)
+                ):
+                    out.append({
+                        "title":      f"{ch_name} ({label})",
+                        "url":        _rewrite_iptv_url(stream_url),
+                        "source":     "upstream",
+                        "feed":       "iptv",
+                        "priority":   1,
+                        "embed_only": False,
+                    })
+                i += 2
+            else:
+                i += 1
+        return out
+
+    async def _fetch_via_player_api() -> list[dict]:
+        """Last-resort: enumerate live streams via the JSON API and build
+        upstream-convention URLs. Required for panels (kstv) that 404 get.php.
+        """
+        try:
+            async with _httpx_backup.AsyncClient(timeout=20.0, follow_redirects=True) as hx:
+                r = await hx.get(
+                    f"{base}/player_api.php?username={username}&password={password}"
+                    "&action=get_live_streams",
+                    headers={"User-Agent": ua},
+                )
+            if r.status_code != 200:
+                return []
+            streams = r.json()
+        except Exception:
+            return []
+        if not isinstance(streams, list):
+            return []
+
+        out: list[dict] = []
+        for s in streams:
+            if not isinstance(s, dict):
+                continue
+            ch_name = (s.get("name") or "").strip()
+            sid     = s.get("stream_id")
+            if not ch_name or sid is None:
+                continue
+            if not any(k in ch_name.lower() for k in _NHL_KEYWORDS):
+                continue
+            # Prefer .m3u8 — relay's /m3u8 endpoint passthrough-rewrites cheaply
+            # (no ffmpeg). Panels that only serve raw TS will redirect to a /ts
+            # variant; ffmpeg transmux at the relay handles that fallback.
+            stream_url = f"{base}/live/{username}/{password}/{sid}.m3u8"
+            out.append({
+                "title":      f"{ch_name} ({label})",
+                "url":        _rewrite_iptv_url(stream_url),
+                "source":     "upstream",
+                "feed":       "iptv",
+                "priority":   1,
+                "embed_only": False,
+            })
+        return out
+
+    results = await _fetch_via_m3u(primary_fmt)
+    if not results and secondary_fmt and secondary_fmt != primary_fmt:
+        results = await _fetch_via_m3u(secondary_fmt)
+    if not results:
+        results = await _fetch_via_player_api()
     return results
 
 
@@ -7166,6 +7238,7 @@ _APPROVED_IPTV_HOSTS: tuple[str, ...] = (
     "thetvapp.to",
     "ampztl.xyz",
     "an upstream host.ddns.net",
+    "kstv.us",
 )
 
 
@@ -7497,12 +7570,13 @@ import re as _re_bc
 def _normalize_ch(title: str) -> str:
     """Strip source suffix and HD/SD qualifier for channel name matching.
 
-    Handles three naming styles:
-    - tvpass/thetvapp: "Sportsnet East HD"   → "sportsnet east"
-    - upstream-style:   "CA (FR) RDS HD (B)"  → "rds"
-                      "CA-FR | TVA SPORTS 1" → "tva sports 1"
-                      "CA: RDS (FR)"         → "rds"
-    - upstream label:   "RDS HD (tv14s)"       → "rds"
+    Handles four naming styles:
+    - tvpass/thetvapp: "Sportsnet East HD"        → "sportsnet east"
+    - upstream pipe:    "US | Fox Sports 1 HD"      → "fs1"
+    - upstream dash:    "CA - SPORTSNET EAST"       → "sportsnet east"
+    - upstream colon:   "CA: RDS (FR)"              → "rds"
+    - language flag:  "CA-FR | TVA SPORTS 1"      → "tva sports"
+    - upstream label:   "RDS HD (tv14s)"            → "rds"
     """
     t = title.strip()
     # Strip upstream source labels we append: "(tv14s)", "(an upstream host)", etc.
@@ -7512,8 +7586,12 @@ def _normalize_ch(title: str) -> str:
     # Strip trailing quality flags: HD, SD, FHD, UHD, (B), (R), (E), (D)
     t = _re_bc.sub(r"\s+(?:fhd|uhd|hd|sd)\s*$", "", t, flags=_re_bc.I)
     t = _re_bc.sub(r"\s*\([a-z]\)\s*$", "", t, flags=_re_bc.I)
-    # Strip upstream country/language prefixes: "CA (FR)", "CA:", "CA-FR |", "CA "
-    t = _re_bc.sub(r"^(?:CA|US|UK)(?:[-_\s]+[A-Z]{2})?\s*(?:\([A-Z]{2}\))?\s*[\|:\-]?\s*", "", t, flags=_re_bc.I)
+    # Strip upstream country/language prefixes. The optional language-code group
+    # uses [-_]+ (no whitespace) so it matches "CA-FR" / "CA_EN" but does NOT
+    # accidentally eat into "CA - SPORTSNET" (where the dash is just a
+    # separator, not a language separator). Without this guard the regex was
+    # munching "CA - SP" off "CA - SPORTSNET EAST" and breaking matches.
+    t = _re_bc.sub(r"^(?:CA|US|UK)(?:[-_]+[A-Z]{2})?\s*(?:\([A-Z]{2}\))?\s*[\|:\-]?\s*", "", t, flags=_re_bc.I)
     # Strip trailing language flag "(FR)" / "(EN)" / "(ES)" / "(DE)" — lunar
     # keeps this after "CA:" prefix consumption.
     t = _re_bc.sub(r"\s*\((?:FR|EN|ES|DE)\)\s*$", "", t, flags=_re_bc.I)
@@ -7528,6 +7606,9 @@ def _normalize_ch(title: str) -> str:
     # entries like "TSN1" / "ESPN2" / "FS1". Anchored to whole-string after
     # prefixes/suffixes are stripped so unrelated text never gets mangled.
     t = _re_bc.sub(r"^(tsn|espn|fs)\s+(\d+)$", r"\1\2", t, flags=_re_bc.I)
+    # "Fox Sports 1" / "FOX SPORTS 2" → "fs1" / "fs2". kstv & most US providers
+    # spell out "Fox Sports", but BarnCentre's slate uses the FS contraction.
+    t = _re_bc.sub(r"(?i)^fox\s*sports\s*(\d+)$", r"FS\1", t)
     return t.strip().lower()
 
 
@@ -7628,21 +7709,27 @@ async def _verify_stream_alive(url: str, timeout: float = 10.0) -> bool:
 def _sort_by_url_priority(candidates: list[dict]) -> list[dict]:
     """Sort channel candidates for initial game-page playback.
 
-    Field-tested order (most → least reliable): an upstream host, ampztl, tvpass,
-    thetvapp, other. The relay rewrites an upstream host's /play/TOKEN/m3u8 → /ts
-    and serves it via ffmpeg transmux, so hls.js consumes it fine.
+    Field-tested order (most → least reliable): kstv, an upstream host, ampztl,
+    tvpass, thetvapp, other untested upstream, other. kstv (puny243) is Bob's
+    premium account so it leads on both game pages and BarnCentre. The relay
+    rewrites an upstream host's /play/TOKEN/m3u8 → /ts and serves it via ffmpeg
+    transmux, so hls.js consumes it fine.
     """
     def _prio(m: dict) -> int:
         u = m["url"]
-        if "an upstream host" in u:
+        if "kstv.us" in u:
             return 0
-        if "ampztl" in u:
+        if "an upstream host" in u:
             return 1
-        if "tvpass.org/live" in u:
+        if "ampztl" in u:
             return 2
-        if "thetvapp.to" in u:
+        if "tvpass.org/live" in u:
             return 3
-        return 4
+        if "thetvapp.to" in u:
+            return 4
+        if any(h in u for h in ("rexmaximl.shop", "anadolutv.shop", "izletvhd.xyz")):
+            return 5
+        return 6
     return sorted(candidates, key=_prio)
 
 
