@@ -1055,18 +1055,24 @@ async def standings() -> dict:
     Returns one record per team with division, conference, wildcard, and
     league sequence ranks plus the core stats (GP, W, L, OTL, PTS).
     """
+    cached = _cache_get("standings")
+    if cached is not None:
+        return cached  # type: ignore[return-value]
+
     from data.nhl_client import NHLClient, NHLApiError
 
     from datetime import date as _d, timedelta as _td
     today = _d.today()
 
     # During playoffs / offseason /v1/standings/<today> returns {"standings":[]}.
-    # Walk back up to 14 days until we find a date with real records so the
-    # frontend keeps rendering end-of-regular-season standings.
+    # Walk back day-by-day until we find a date with real records so the frontend
+    # keeps rendering end-of-regular-season standings. Window must cover the full
+    # playoff run + early-offseason gap from the regular-season finale (~75 days
+    # SCF Game 7 → April finale; we add slack for an extended offseason view).
     raw: dict = {"standings": []}
     try:
         async with NHLClient() as client:
-            for back in range(15):
+            for back in range(120):
                 date_str = (today - _td(days=back)).isoformat()
                 raw = await client._get(client._web, f"/v1/standings/{date_str}")
                 if raw.get("standings"):
@@ -1117,7 +1123,10 @@ async def standings() -> dict:
             "regulation_wins":   t.get("regulationWins", 0),
         })
 
-    return {"standings": out}
+    payload = {"standings": out}
+    if out:
+        _cache_set("standings", payload, ttl=600.0)
+    return payload
 
 
 # ===========================================================================
