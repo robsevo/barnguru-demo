@@ -474,14 +474,38 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough") -> _
         # through transient TS packet corruption from flaky upstream upstreams.
         # Copy-mode tolerated this implicitly; once we re-encode the decoder
         # gets stricter and otherwise exits early on the first bad MB.
-        # `-rtbufsize 32M` is a 32 MB real-time input buffer so brief upstream
+        #
+        # Native IPTV-player parity: the gap between us and XCIPTV/VLC for live
+        # smoothness comes down to how aggressively the input layer hides
+        # upstream jitter and timestamp glitches.
+        #
+        # `-rtbufsize 32M` — 32 MB real-time input buffer so brief upstream
         # jitter (upstream CDN backpressure, ISP microbursts) is absorbed
-        # instead of forcing packet drops + reconnects, which were a primary
-        # cause of mid-stream pause-and-load on the player.
+        # instead of forcing packet drops + reconnects.
+        #
+        # `-thread_queue_size 1024` — input demuxer queue. Default is 8
+        # packets, which fills almost instantly on a TS stream and forces
+        # ffmpeg to throttle the upstream read. Native players keep deep
+        # internal queues for exactly this reason.
+        #
+        # `-probesize 1000000 -analyzeduration 1000000` — cap input probing
+        # at 1 MB / 1 s instead of the 5 MB / 5 s default. We KNOW the
+        # upstream is H.264+AAC TS; ffmpeg doesn't need to read 5 s of stream
+        # to confirm that. Cuts cold-start latency proportionally on every
+        # session respawn (idle timeout, reconnect, fresh viewer).
+        #
+        # `+genpts` (added to fflags) — regenerate PTS on the fly when the
+        # upstream drops timestamp markers. Without it, missing PTS causes
+        # ffmpeg to pause output (no segment produced) until the next clean
+        # marker arrives. Native players synthesize timestamps as a matter
+        # of course; we should too.
         args = [
             "ffmpeg", "-hide_banner", "-loglevel", "warning",
-            "-fflags", "+discardcorrupt",
+            "-fflags", "+discardcorrupt+genpts",
             "-rtbufsize", "32M",
+            "-thread_queue_size", "1024",
+            "-probesize", "1000000",
+            "-analyzeduration", "1000000",
             "-err_detect", "ignore_err",
             "-user_agent", _BROWSER_UA,
             "-reconnect", "1",
