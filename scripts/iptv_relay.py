@@ -294,28 +294,111 @@ _UPSTREAM_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
 _UPSTREAM_HTTP: httpx.AsyncClient | None = None
 
 
+# --- KSTV proxy rotation -----------------------------------------------------
+# kstv firewalls our VPS IP at TCP level. Need a residential/3rd-party-datacenter
+# proxy to reach the auth host — but kstv aggressively blocks individual proxy
+# IPs once they're seen doing upstream auth. Rotation buys lifetime: hold a list,
+# round-robin per request, on connection-error / 502 / 503 mark the IP cooled
+# off for KSTV_PROXY_COOLDOWN_S seconds and try the next one. When all IPs are
+# cooling, fall back to direct (will fail, but no worse than no proxy).
+#
+# KSTV_PROXY_LIST format: comma-separated `http://USER:PASS@HOST:PORT` URLs.
+# Backward-compatible: KSTV_PROXY_URL (singular) still works as a 1-item list.
+# Only the kstv.us *auth host* needs the proxy; the CDN it redirects to is
+# reachable direct from the VPS, so segments stream without proxy bandwidth.
+KSTV_PROXY_COOLDOWN_S = 300.0
+_kstv_proxy_state: dict[str, float] = {}    # proxy_url -> cool-until-timestamp
+_kstv_proxy_idx = 0
+_kstv_transports: dict[str, httpx.AsyncHTTPTransport] = {}
+
+
+def _kstv_proxy_pool() -> list[str]:
+    """Parse KSTV_PROXY_LIST (or fall back to KSTV_PROXY_URL)."""
+    raw = os.environ.get("KSTV_PROXY_LIST") or os.environ.get("KSTV_PROXY_URL") or ""
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+def _kstv_get_transport() -> httpx.AsyncHTTPTransport | None:
+    """Pick the next not-cooling proxy and return a cached transport for it.
+    Returns None when no proxy is configured or all are cooling.
+    """
+    global _kstv_proxy_idx
+    pool = _kstv_proxy_pool()
+    if not pool:
+        return None
+    now = time.monotonic()
+    # Walk the list once from the rotation index; first non-cooling wins.
+    for offset in range(len(pool)):
+        idx = (_kstv_proxy_idx + offset) % len(pool)
+        proxy = pool[idx]
+        cool_until = _kstv_proxy_state.get(proxy, 0.0)
+        if now >= cool_until:
+            _kstv_proxy_idx = (idx + 1) % len(pool)
+            t = _kstv_transports.get(proxy)
+            if t is None:
+                t = httpx.AsyncHTTPTransport(proxy=proxy)
+                _kstv_transports[proxy] = t
+            return t
+    return None  # all cooling
+
+
+def _kstv_mark_bad(transport: httpx.AsyncHTTPTransport) -> None:
+    """Find which proxy URL backs this transport and put it on cooldown."""
+    for url, t in _kstv_transports.items():
+        if t is transport:
+            _kstv_proxy_state[url] = time.monotonic() + KSTV_PROXY_COOLDOWN_S
+            return
+
+
+class _KstvRotatingTransport(httpx.AsyncBaseTransport):
+    """A transport that pulls a fresh upstream transport from the rotating
+    pool on every request and demotes it on failure. Mounted only on
+    http(s)://kstv.us via httpx mounts so other hosts are unaffected.
+    """
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        last_exc: Exception | None = None
+        # Try every still-available proxy once before giving up.
+        for _ in range(max(1, len(_kstv_proxy_pool()))):
+            transport = _kstv_get_transport()
+            if transport is None:
+                break
+            try:
+                resp = await transport.handle_async_request(request)
+                # 502/503 from the proxy itself (Webshare returns these when
+                # the destination is blocked at the egress) → demote and retry.
+                if resp.status_code in (502, 503):
+                    await resp.aclose()
+                    _kstv_mark_bad(transport)
+                    continue
+                return resp
+            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadError, httpx.RemoteProtocolError) as e:
+                _kstv_mark_bad(transport)
+                last_exc = e
+                continue
+        if last_exc is not None:
+            raise last_exc
+        # All proxies cooling and no exception — surface a 502 so the caller
+        # logs an error rather than hanging.
+        raise httpx.ConnectError("all kstv proxies on cooldown")
+
+    async def aclose(self) -> None:
+        for t in list(_kstv_transports.values()):
+            try:
+                await t.aclose()
+            except Exception:
+                pass
+        _kstv_transports.clear()
+
+
 async def _get_upstream_http() -> httpx.AsyncClient:
     global _UPSTREAM_HTTP
     if _UPSTREAM_HTTP is None:
-        # KSTV_PROXY_URL: when set, route only kstv.us traffic through this
-        # proxy. kstv firewalls the VPS IP at the network level, so direct
-        # fetches from this box (api/relay both run on the same VPS) get
-        # "All connection attempts failed" before any HTTP. The proxy gives
-        # us a residential/3rd-party-datacenter IP that kstv hasn't blocked.
-        #
-        # Important: only the kstv.us *auth host* is blocked. The CDN it
-        # redirects to (195.181.169.174:25461 etc.) is reachable from the
-        # VPS directly. httpx's mounts dict matches per-request URL, so
-        # when follow_redirects sends the request to the CDN it goes via
-        # the default transport (no proxy) — proxy bandwidth stays at
-        # ~20 MB/month (auth + redirect resolution only, no TS bytes).
-        kstv_proxy = os.environ.get("KSTV_PROXY_URL") or None
         mounts = None
-        if kstv_proxy:
-            kstv_transport = httpx.AsyncHTTPTransport(proxy=kstv_proxy)
+        if _kstv_proxy_pool():
+            rotating = _KstvRotatingTransport()
             mounts = {
-                "http://kstv.us": kstv_transport,
-                "https://kstv.us": kstv_transport,
+                "http://kstv.us": rotating,
+                "https://kstv.us": rotating,
             }
         _UPSTREAM_HTTP = httpx.AsyncClient(
             timeout=httpx.Timeout(connect=4.0, read=FETCH_TIMEOUT, write=FETCH_TIMEOUT, pool=5.0),
