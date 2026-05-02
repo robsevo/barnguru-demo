@@ -297,6 +297,26 @@ _UPSTREAM_HTTP: httpx.AsyncClient | None = None
 async def _get_upstream_http() -> httpx.AsyncClient:
     global _UPSTREAM_HTTP
     if _UPSTREAM_HTTP is None:
+        # KSTV_PROXY_URL: when set, route only kstv.us traffic through this
+        # proxy. kstv firewalls the VPS IP at the network level, so direct
+        # fetches from this box (api/relay both run on the same VPS) get
+        # "All connection attempts failed" before any HTTP. The proxy gives
+        # us a residential/3rd-party-datacenter IP that kstv hasn't blocked.
+        #
+        # Important: only the kstv.us *auth host* is blocked. The CDN it
+        # redirects to (195.181.169.174:25461 etc.) is reachable from the
+        # VPS directly. httpx's mounts dict matches per-request URL, so
+        # when follow_redirects sends the request to the CDN it goes via
+        # the default transport (no proxy) — proxy bandwidth stays at
+        # ~20 MB/month (auth + redirect resolution only, no TS bytes).
+        kstv_proxy = os.environ.get("KSTV_PROXY_URL") or None
+        mounts = None
+        if kstv_proxy:
+            kstv_transport = httpx.AsyncHTTPTransport(proxy=kstv_proxy)
+            mounts = {
+                "http://kstv.us": kstv_transport,
+                "https://kstv.us": kstv_transport,
+            }
         _UPSTREAM_HTTP = httpx.AsyncClient(
             timeout=httpx.Timeout(connect=4.0, read=FETCH_TIMEOUT, write=FETCH_TIMEOUT, pool=5.0),
             limits=httpx.Limits(
@@ -306,6 +326,7 @@ async def _get_upstream_http() -> httpx.AsyncClient:
             ),
             follow_redirects=True,
             headers={"User-Agent": _UPSTREAM_UA},
+            mounts=mounts,
         )
     return _UPSTREAM_HTTP
 
