@@ -281,6 +281,47 @@ _CORS = {
     "Access-Control-Allow-Methods": "GET, OPTIONS",
 }
 
+_UPSTREAM_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+
+# Pooled httpx client for /m3u8 and /ts proxying. The previous code opened
+# a fresh AsyncClient inside every handler, paying a TCP+TLS handshake
+# (~100-300 ms) on EVERY segment fetch from the upstream upstream/CDN. With
+# 3-second segments and concurrent viewers, that handshake cost was draining
+# the player buffer the same way q=720p re-encoding used to. Native IPTV
+# players (XCIPTV) don't have this problem because they hold a persistent
+# connection. Pooled keep-alive matches that behaviour.
+_UPSTREAM_HTTP: httpx.AsyncClient | None = None
+
+
+async def _get_upstream_http() -> httpx.AsyncClient:
+    global _UPSTREAM_HTTP
+    if _UPSTREAM_HTTP is None:
+        _UPSTREAM_HTTP = httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=4.0, read=FETCH_TIMEOUT, write=FETCH_TIMEOUT, pool=5.0),
+            limits=httpx.Limits(
+                max_connections=200,
+                max_keepalive_connections=100,
+                keepalive_expiry=30.0,
+            ),
+            follow_redirects=True,
+            headers={"User-Agent": _UPSTREAM_UA},
+        )
+    return _UPSTREAM_HTTP
+
+
+@app.on_event("startup")
+async def _start_upstream_http() -> None:
+    await _get_upstream_http()
+
+
+@app.on_event("shutdown")
+async def _stop_upstream_http() -> None:
+    global _UPSTREAM_HTTP
+    if _UPSTREAM_HTTP is not None:
+        await _UPSTREAM_HTTP.aclose()
+        _UPSTREAM_HTTP = None
+
 
 @app.get("/health")
 async def health() -> dict:
@@ -294,8 +335,8 @@ async def proxy_m3u8(u: str, request: Request) -> Response:
     _check_host(url)
 
     try:
-        async with httpx.AsyncClient(timeout=FETCH_TIMEOUT, follow_redirects=True) as cl:
-            r = await cl.get(url, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"})
+        cl = await _get_upstream_http()
+        r = await cl.get(url)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"upstream: {e}")
     if r.status_code != 200:
@@ -328,11 +369,15 @@ async def proxy_ts(u: str, request: Request) -> Response:
     cached = seg_cache.get(url)
     if cached is not None:
         data, ct = cached
-        return Response(content=data, media_type=ct, headers={**_CORS, "X-Cache": "HIT"})
+        return Response(
+            content=data,
+            media_type=ct,
+            headers={**_CORS, "X-Cache": "HIT", "Cache-Control": "public, max-age=60, immutable"},
+        )
 
     try:
-        async with httpx.AsyncClient(timeout=FETCH_TIMEOUT, follow_redirects=True) as cl:
-            r = await cl.get(url, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"})
+        cl = await _get_upstream_http()
+        r = await cl.get(url)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"upstream: {e}")
     if r.status_code != 200:
@@ -341,7 +386,11 @@ async def proxy_ts(u: str, request: Request) -> Response:
     data = r.content
     ct   = r.headers.get("content-type") or "video/mp2t"
     seg_cache.put(url, data, ct)
-    return Response(content=data, media_type=ct, headers={**_CORS, "X-Cache": "MISS"})
+    return Response(
+        content=data,
+        media_type=ct,
+        headers={**_CORS, "X-Cache": "MISS", "Cache-Control": "public, max-age=60, immutable"},
+    )
 
 
 # ---------------------------------------------------------------------------
