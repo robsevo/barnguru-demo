@@ -5704,10 +5704,21 @@ def _rewrite_m3u8(content: str, original_url: str, proxy_base: str) -> str:
     """Rewrite .m3u8 and .ts URLs in a manifest to go through our proxy."""
     from urllib.parse import urlparse, urlunparse
 
+    # Fast-path: if the manifest came from our own relay, its segment URLs
+    # already point back at the relay (e.g. localhost:8000/hls-seg/...,
+    # localhost:8000/ts?u=...). The relay has CORS wide open
+    # (Access-Control-Allow-Origin: *) so the browser can fetch those
+    # directly. Rewriting them through /api/stream-proxy adds a wasted
+    # browser→Vercel→localhost:8000→relay hop on EVERY 3-second segment
+    # fetch (~50-150ms each), for hours of viewing. Skip the rewrite —
+    # browser hits the relay direct.
+    parsed_original = urlparse(original_url)
+    if (parsed_original.hostname or "").lower() == "localhost:8000":
+        return content
+
     # If the original URL has query params (e.g. ?token=...&expires=...&user_id=...)
     # those must be inherited by relative segment URLs that have no own params.
     # thetvapp.to tokens are IP-locked and applied per-manifest; all segments share them.
-    parsed_original = urlparse(original_url)
     inherited_query = parsed_original.query  # may be ""
 
     def _abs_with_auth(base: str, relative: str) -> str:
