@@ -5689,7 +5689,7 @@ async def _scrape_bunchatv(
 
 from urllib.parse import urljoin, quote, urlparse, urlunparse
 from fastapi import Request
-from fastapi.responses import Response as FastResponse
+from fastapi.responses import Response as FastResponse, StreamingResponse
 import re as _re_proxy
 
 
@@ -6614,6 +6614,16 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
         or _path_lower.endswith(".mp4")
     )
 
+    # Segments are content-addressed (ffmpeg writes seg00NN.ts once and never
+    # rewrites it; CDN segments are URL-stable for their lifetime). Telling
+    # Cloudflare Tunnel + browser to cache for 60s lets repeat fetches —
+    # back-buffer reads, second-viewer-of-same-chip, hls.js retry-on-blip —
+    # skip the whole API → relay → upstream chain.
+    seg_cors_headers = {
+        **cors_headers,
+        "Cache-Control": "public, max-age=60, immutable",
+    }
+
     cached = _proxy_cache_get(url)
     if cached is not None:
         ct, body, _sc = cached
@@ -6628,8 +6638,43 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
         return FastResponse(
             content=body,
             media_type=ct or "application/octet-stream",
-            headers=cors_headers,
+            headers=seg_cors_headers if looks_like_segment else cors_headers,
         )
+
+    # Segment cache miss: stream the body through instead of buffering ~1 MB
+    # into memory before responding. Avoids ~50-100 ms of Time-To-First-Byte
+    # latency per segment, which compounds across the player's continuous
+    # 3s-segment fetch loop. We deliberately skip the in-flight dedupe + cache
+    # write here — segments are too large to keep in the 32 MB _PROXY_CACHE
+    # without thrashing the manifest entries that actually benefit from
+    # dedupe, and the new immutable Cache-Control above moves dedupe to
+    # Cloudflare + browser where it scales without API memory pressure.
+    if looks_like_segment:
+        try:
+            client = await _get_proxy_http()
+            req = client.build_request("GET", url, headers=_stream_headers)
+            upstream = await client.send(req, stream=True)
+            if upstream.status_code != 200:
+                # Non-200 path: drain + fall through to the existing buffered
+                # branch so 4xx/5xx bodies are surfaced unchanged.
+                await upstream.aclose()
+            else:
+                up_ct = upstream.headers.get("content-type") or "video/mp2t"
+                async def _stream_segment() -> "asyncio.AsyncIterator[bytes]":
+                    try:
+                        async for chunk in upstream.aiter_bytes(64 * 1024):
+                            yield chunk
+                    finally:
+                        await upstream.aclose()
+                return StreamingResponse(
+                    _stream_segment(),
+                    media_type=up_ct,
+                    headers=seg_cors_headers,
+                )
+        except Exception:
+            # Network blip on the streaming path — fall through to the
+            # buffered path, which has its own try/except + 502 handling.
+            pass
 
     # In-flight dedupe: if another request for the same URL is already
     # fetching upstream, await its result instead of opening a second fetch.
@@ -6737,7 +6782,7 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
         return FastResponse(
             content=body,
             media_type=content_type or "application/octet-stream",
-            headers=cors_headers,
+            headers=seg_cors_headers if looks_like_segment and resp.status_code == 200 else cors_headers,
         )
 
     except Exception as exc:

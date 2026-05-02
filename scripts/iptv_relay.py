@@ -58,8 +58,17 @@ FETCH_TIMEOUT = 20.0
 # concurrent feeds.
 HLS_WORKDIR            = Path("/tmp/iptv_relay_hls")
 HLS_SEGMENT_SECONDS    = 3
-HLS_LIST_SIZE          = 6
-HLS_IDLE_TIMEOUT_S     = 30.0
+# 12 segments × 3s = 36s manifest window. Wider than 6×3=18s so the player can
+# prefetch deeply enough to ride out an upstream stall (ffmpeg's
+# -reconnect_delay_max 5 means we lose up to 5s of segment production each
+# hiccup). Each session keeps ~12 segments of disk = 6-18 MB depending on
+# tier; trivial against 300 MB segment cache budget.
+HLS_LIST_SIZE          = 12
+# Tab-switch / ad-break tolerance: 30s was killing sessions when users
+# briefly looked away, forcing a full ffmpeg respawn on resume. 90s is still
+# tight enough that abandoned chips don't pile up but covers normal viewer
+# behavior (phone call, brief tab switch, talking with someone in the room).
+HLS_IDLE_TIMEOUT_S     = 90.0
 HLS_STARTUP_TIMEOUT_S  = 15.0
 
 # (width, height, video_bitrate, video_bufsize, audio_bitrate)
@@ -416,9 +425,14 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough") -> _
         # through transient TS packet corruption from flaky upstream upstreams.
         # Copy-mode tolerated this implicitly; once we re-encode the decoder
         # gets stricter and otherwise exits early on the first bad MB.
+        # `-rtbufsize 32M` is a 32 MB real-time input buffer so brief upstream
+        # jitter (upstream CDN backpressure, ISP microbursts) is absorbed
+        # instead of forcing packet drops + reconnects, which were a primary
+        # cause of mid-stream pause-and-load on the player.
         args = [
             "ffmpeg", "-hide_banner", "-loglevel", "warning",
             "-fflags", "+discardcorrupt",
+            "-rtbufsize", "32M",
             "-err_detect", "ignore_err",
             "-user_agent", _BROWSER_UA,
             "-reconnect", "1",
@@ -533,11 +547,20 @@ async def proxy_hls_segment(session_id: str, segment: str, request: Request) -> 
     if not path.exists():
         raise HTTPException(status_code=404, detail="segment not ready")
 
-    data = path.read_bytes()
+    # Off-loop disk read: ffmpeg writes ~1 MB segments and FastAPI's worker
+    # threadpool absorbs the read without blocking the event loop. With 5+
+    # concurrent BarnCentre tabs (the chip warmup chain is wide), serial
+    # path.read_bytes() inside the async handler would queue segment fetches
+    # and surface as cross-tab stalls.
+    data = await asyncio.to_thread(path.read_bytes)
     return Response(
         content=data,
         media_type="video/mp2t",
-        headers={**_CORS, "Cache-Control": "no-cache"},
+        # Segments are immutable: ffmpeg writes seg00NN.ts once and never
+        # rewrites it. Cloudflare Tunnel + browser cache will reuse them, so
+        # the relay disk stops servicing repeat fetches (back-buffer reads,
+        # second viewer of the same chip).
+        headers={**_CORS, "Cache-Control": "public, max-age=60, immutable"},
     )
 
 
