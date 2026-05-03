@@ -7188,7 +7188,9 @@ _upstream_ACCOUNTS: list[tuple[str, str, int, str, str]] = [
     # channels, max 5 concurrent connections.
     ("kstv",        "kstv.us",             8080, "puny243",               "2033697598"),
     ("an upstream host",  "an upstream host.ddns.net", 8081, "PNbV7ywsHG",            "u7jmr3xvcM"),
-    ("ampztl-a",    "ampztl.xyz",          8080, "arturo",                "YZcm6gw6Ukwt"),
+    # ampztl arturo removed 2026-05-03: player_api.php auth=1 (60K catalog),
+    # but every /arturo/<pw>/<id> stream returned 401 from upstream ffmpeg —
+    # same API-only / no-stream-entitlement pattern as jdarnut an upstream host.
     ("ampztl-b",    "ampztl.xyz",          8080, "webtv1847",             "YsAPRy6Jq8TJ"),
     # bgdc.live — Bob's purchased accounts. Each line is 2 max concurrent.
     # Three accounts → 6 simultaneous streams; channel catalog triplicates
