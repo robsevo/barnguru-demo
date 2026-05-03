@@ -58,13 +58,12 @@ FETCH_TIMEOUT = 20.0
 # concurrent feeds.
 HLS_WORKDIR            = Path("/tmp/iptv_relay_hls")
 HLS_SEGMENT_SECONDS    = 3
-# 24 segments × 3s = 72s manifest window. Per user request: explicitly trade
-# being further from live for bulletproof smoothness — at liveSyncDuration=24
-# the player aims to play 24s behind live with 30+ seconds prefetched ahead;
-# this 72s window keeps ~48s of look-back available so a recovery seek can't
-# fall off the back. Disk cost ~24 MB per session (passthrough TS), trivial
-# against 300 MB cache budget.
-HLS_LIST_SIZE          = 24
+# 36 segments × 3s = 108s manifest window. Final plateau per user request —
+# matches player's liveSyncDuration=36 (36s behind live) with ~72s of look-back
+# room so a recovery seek can't fall off the back of the deleted-segments
+# cliff. Disk cost ~36 MB per session (passthrough TS), trivial against the
+# 300 MB cache budget.
+HLS_LIST_SIZE          = 36
 # Tab-switch / ad-break tolerance: 30s was killing sessions when users
 # briefly looked away, forcing a full ffmpeg respawn on resume. 90s is still
 # tight enough that abandoned chips don't pile up but covers normal viewer
