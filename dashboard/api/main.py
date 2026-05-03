@@ -7186,12 +7186,14 @@ _upstream_ACCOUNTS: list[tuple[str, str, int, str, str]] = [
     ("bgdc",        "bgdc.live",          25461, "ionel.j.popa",          "8107963912"),
     ("bgdc-2",      "bgdc.live",          25461, "4ERkuQAz4t",            "qDvGPL9WV5"),
     ("bgdc-3",      "bgdc.live",          25461, "98nhcH9Ol6",            "XWr6xRtdBP"),
-    # an upstream host.an upstream host.co — Bob's older accounts. Only the two with clean
-    # active_cons profiles added. The other four creds on this panel showed
-    # 60-220 active connections, suggesting they may have been leaked at
-    # some point; left out until we can confirm they're not being shared.
-    ("an upstream host",   "an upstream host.an upstream host.co", 8080, "jdarnut",              "5498e0ca2611122345678"),
-    ("an upstream host-b", "an upstream host.an upstream host.co", 8080, "09145054",             "65339468"),
+    # an upstream host.an upstream host.co — Bob's older account. jdarnut was tested and
+    # removed: player_api.php returned auth=1 but every stream endpoint
+    # returned 401/"Unauthorized access!" — API-only, no stream entitlement.
+    # 09145054 (max=1, active=0) verified end-to-end: 200 OK on /m3u8 with
+    # proper redirect handling to dal3.rocketdns.info CDN, valid MPEG-TS
+    # segments. Other four creds on this panel skipped (60-220 active conns
+    # suggest prior leak).
+    ("an upstream host",   "an upstream host.an upstream host.co", 8080, "09145054",             "65339468"),
     # Disabled (DNS-dead 2026-05-02): rexmaximl.shop & subdomain return
     # "Not Authoritative" from Cloudflare DoH, anadolutv.shop returns SOA
     # with no A record (registered but unhosted), izletvhd.xyz SERVFAILs.
