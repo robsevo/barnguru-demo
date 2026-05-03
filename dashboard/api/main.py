@@ -7978,11 +7978,15 @@ async def _verify_stream_alive(url: str, timeout: float = 4.0) -> bool:
     and incorrectly marks every working an upstream host-routed channel as offline.
     The relay returns a tiny manifest (≤1KB), so the cost is negligible.
 
-    Timeout default is 4s. Slow upstreams in this code path are nearly always
-    dead — the long tail (>4s) almost never converts to "actually online".
-    Combined with _VERIFY_SEM(20) this caps cold-cache verifier latency to
-    ~6-10s instead of 20-25s.
+    Timeout default is 4s for non-relay URLs. Relay /hls URLs get 8s — the
+    relay's ffmpeg cold-start can take 5-7s on first probe of the day, and
+    the previous 4s budget was false-flagging working channels (TSN2, TSN3,
+    NHL Network, FanDuel) as offline. Combined with _VERIFY_SEM(20) this
+    keeps cold-cache verifier latency bounded; once warm, probes return
+    in ~50ms.
     """
+    if "/hls?" in url and "u=" in url:
+        timeout = max(timeout, 8.0)
     sem = _get_verify_sem()
     async with sem:
         return await _verify_stream_alive_inner(url, timeout)
