@@ -7116,9 +7116,13 @@ _upstream_ACCOUNTS: list[tuple[str, str, int, str, str]] = [
     ("an upstream host",  "an upstream host.ddns.net", 8081, "PNbV7ywsHG",            "u7jmr3xvcM"),
     ("ampztl-a",    "ampztl.xyz",          8080, "arturo",                "YZcm6gw6Ukwt"),
     ("ampztl-b",    "ampztl.xyz",          8080, "webtv1847",             "YsAPRy6Jq8TJ"),
-    # bgdc.live — Bob's purchased account, max 2 concurrent, expires ~2026-10-24.
-    # Verified live via player_api.php on 2026-05-03 (auth=1, Active).
+    # bgdc.live — Bob's purchased accounts. Each line is 2 max concurrent.
+    # Three accounts → 6 simultaneous streams; channel catalog triplicates
+    # (one chip per account per channel) so users have failover capacity.
+    # All three verified live via player_api.php on 2026-05-03 (auth=1, Active).
     ("bgdc",        "bgdc.live",          25461, "ionel.j.popa",          "8107963912"),
+    ("bgdc-2",      "bgdc.live",          25461, "4ERkuQAz4t",            "qDvGPL9WV5"),
+    ("bgdc-3",      "bgdc.live",          25461, "98nhcH9Ol6",            "XWr6xRtdBP"),
     # Disabled (DNS-dead 2026-05-02): rexmaximl.shop & subdomain return
     # "Not Authoritative" from Cloudflare DoH, anadolutv.shop returns SOA
     # with no A record (registered but unhosted), izletvhd.xyz SERVFAILs.
