@@ -8594,7 +8594,32 @@ async def _build_barncentre_payload() -> dict:
                     verified_primary = cand["url"]
                     break
 
-        backup_src = [c["url"] for c in candidates if c["url"] != chosen][:8]
+        # Diverse-provider backup list. Without per-host capping a single
+        # provider with multiple accounts (e.g. bgdc.live × 3 accounts × 2
+        # naming variants = 6 URLs) eats every backup slot before other
+        # providers like an upstream host.an upstream host.co get a turn. Cap each upstream
+        # host to 3 backup slots so failover URLs span multiple panels.
+        from urllib.parse import parse_qs as _bc_parse_qs, unquote as _bc_unquote
+        def _backup_upstream_host(u: str) -> str:
+            if "localhost:8000" in u and "u=" in u:
+                try:
+                    inner = _bc_unquote(_bc_parse_qs(urlparse(u).query).get("u", [""])[0])
+                    return urlparse(inner).hostname or ""
+                except Exception:
+                    return ""
+            return urlparse(u).hostname or ""
+        host_used: dict[str, int] = {}
+        backup_src: list[str] = []
+        for c in candidates:
+            if c["url"] == chosen:
+                continue
+            h = _backup_upstream_host(c["url"])
+            if host_used.get(h, 0) >= 3:
+                continue
+            host_used[h] = host_used.get(h, 0) + 1
+            backup_src.append(c["url"])
+            if len(backup_src) >= 12:
+                break
 
         return {
             "name":         ch_name,
