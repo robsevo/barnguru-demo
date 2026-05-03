@@ -181,6 +181,7 @@ ALLOWED_HOSTS = {
     "tvpass.org",
     "thetvapp.to",
     "kstv.us",
+    "bgdc.live",
 }
 ALLOWED_SUFFIXES = tuple(f".{h}" for h in ALLOWED_HOSTS)
 
