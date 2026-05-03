@@ -28,6 +28,8 @@ export const CH_LOGO: Record<string, string> = {
   "RDS Info":   "/logos/rdsinfo.svg",
   "TVA Sports":   "/logos/tvasports.svg",
   "TVA Sports 2": "/logos/tvasports.svg",
+  TNT:          "/logos/tnt.svg",
+  TBS:          "/logos/tbs.svg",
 };
 
 // SVGs with transparent backgrounds need white-silhouette treatment for dark UI.

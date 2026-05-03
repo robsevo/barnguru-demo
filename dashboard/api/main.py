@@ -5365,6 +5365,7 @@ async def _build_game_iptv(game_id: int) -> list[dict] | None:
             "network":  _TEAM_FEED_LABELS.get(team_abbrev, f"{team_abbrev} Feed"),
             "code":     f"FEED-{team_abbrev}",
             "market":   market,
+            "team":     team_abbrev,
             "channels": feed_matched,
         })
 
