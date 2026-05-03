@@ -47,6 +47,17 @@ export const CH_LOGO_LIGHT_BG = new Set([
   "Sportsnet East", "Sportsnet Ontario", "Sportsnet West", "Sportsnet Pacific",
   "Sportsnet 360", "Sportsnet One", "Sportsnet",
   "CBS Sports", "CBS Sports Network",
+  "TNT", "TBS",
+]);
+
+// Wide-wordmark brands whose stock SVG runs ~5:1 aspect — at the default
+// maxWidth (height * 3.5) the chip becomes a long banner. Cap maxWidth
+// tighter so the wordmark scales down and the white pill stays compact,
+// matching the visual weight of square brands like TVA Sports.
+export const CH_LOGO_COMPACT = new Set([
+  "Sportsnet East", "Sportsnet Ontario", "Sportsnet West", "Sportsnet Pacific",
+  "Sportsnet 360", "Sportsnet One", "Sportsnet",
+  "CBS Sports Network",
 ]);
 
 export function ChannelLogo({ name, height = 26 }: { name: string; height?: number }) {
@@ -54,6 +65,8 @@ export function ChannelLogo({ name, height = 26 }: { name: string; height?: numb
   if (!src) return null;
   const invert  = CH_LOGO_INVERT.has(name);
   const lightBg = CH_LOGO_LIGHT_BG.has(name);
+  const compact = CH_LOGO_COMPACT.has(name);
+  const widthRatio = compact ? 2.0 : 3.5;
   const img = (
     // eslint-disable-next-line @next/next/no-img-element
     <img
@@ -62,7 +75,7 @@ export function ChannelLogo({ name, height = 26 }: { name: string; height?: numb
       style={{
         height: `${height}px`,
         width: "auto",
-        maxWidth: `${height * 3.5}px`,
+        maxWidth: `${height * widthRatio}px`,
         objectFit: "contain",
         filter: invert ? "brightness(0) invert(1)" : undefined,
         opacity: invert ? 0.88 : 0.92,
