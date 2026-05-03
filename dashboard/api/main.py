@@ -5217,6 +5217,9 @@ async def _build_game_iptv(game_id: int) -> list[dict] | None:
     if is_playoffs:
         tv_broadcasts = [b for b in tv_broadcasts if b.get("market") == "N"]
 
+    home_abbrev = (landing.get("homeTeam") or {}).get("abbrev", "") or ""
+    away_abbrev = (landing.get("awayTeam") or {}).get("abbrev", "") or ""
+
     if isinstance(iptv_result, dict):
         all_channels: list[dict] = iptv_result.get("channels", []) or []
     else:
@@ -5295,6 +5298,17 @@ async def _build_game_iptv(game_id: int) -> list[dict] | None:
         # only carry NHL on Wed/Thu national windows, no regional overlap.
         if want in ("tnt", "tbs") and norm in (f"{want} east", f"{want} west"):
             return True
+        # CBC regional outlets ("CBC Montreal", "CBC Toronto", etc.) simulcast
+        # the national broadcast — match them to the "CBC" row in regular
+        # season only, and only for the city of either team in this game (so
+        # an MTL game doesn't surface CBC Toronto and vice versa). Excluded
+        # in playoffs because CBC's national rights overlap differently with
+        # the regional schedules and the city feeds may carry filler.
+        if want == "cbc" and not is_playoffs:
+            for team in (home_abbrev, away_abbrev):
+                city = _TEAM_CITY_FOR_CBC.get(team)
+                if city and norm == f"cbc {city}":
+                    return True
         return False
 
     # NHL API casings: "TNT", "TBS", "SN", "CBC" (upper) but also "truTV"
@@ -5327,6 +5341,31 @@ async def _build_game_iptv(game_id: int) -> list[dict] | None:
             "code":     code,
             "market":   market,
             "channels": matched,
+        })
+
+    # Per-team dedicated NHL feeds (e.g. "US : NHL MONTREAL CANADIENS"). These
+    # are independent of NHL API's tvBroadcasts list — they're a per-team
+    # always-on row so users have a fallback when the national/regional slate
+    # is thin (especially during playoffs where the home/away market filter
+    # strips RSNs). Emitted in away→home order so the away team's feed sits
+    # above the home team's feed in the slate, matching how the frontend
+    # already orders Home/Away sections.
+    for team_abbrev, market in ((away_abbrev, "A"), (home_abbrev, "H")):
+        needle = _TEAM_FEED_NEEDLES.get(team_abbrev)
+        if not needle:
+            continue
+        feed_matched = [
+            ch for ch in curated_channels
+            if needle in (ch.get("title", "") or "").lower()
+        ]
+        if not feed_matched:
+            continue
+        feed_matched = _sort_by_url_priority(feed_matched)
+        result.append({
+            "network":  _TEAM_FEED_LABELS.get(team_abbrev, f"{team_abbrev} Feed"),
+            "code":     f"FEED-{team_abbrev}",
+            "market":   market,
+            "channels": feed_matched,
         })
 
     return result
@@ -7098,6 +7137,11 @@ _NHL_KEYWORDS = [
     "nesn","nbcs","nbcsp","spectrum sportsnet","nhln",
     # CBS Sports family — non-NHL carrier but surfaced in BarnCentre guide
     "cbs",
+    # CBC + city variants (e.g. "CBC Montreal", "CBC Toronto"). National CBC
+    # ships as "CBC" in NHL API; regional outlets simulcast the same broadcast
+    # with local cut-ins, so they're surfaced via the per-team CBC city branch
+    # in _matches_broadcast (regular season only).
+    "cbc",
     # "fox sports" with a space — kstv & many providers spell it "Fox Sports 1"
     # rather than the contraction "FS1". Without this, FS1/FS2 chips were 0.
     "fox sports",
@@ -7144,6 +7188,99 @@ _upstream_ACCOUNTS: list[tuple[str, str, int, str, str]] = [
 # tunnel (upstream providers block VPS IPs; the relay punches through from a
 # residential address). Empty ⇒ direct-to-provider fallback.
 _upstream_HOSTS: frozenset[str] = frozenset(h for _, h, *_ in _upstream_ACCOUNTS)
+
+# ---------------------------------------------------------------------------
+# Per-team dedicated NHL feeds. bgdc.live carries a "US : NHL <CITY> <NICK>"
+# series for 28/32 teams. These get added as their own row in the broadcast
+# slate (always shown — regular season AND playoffs), giving viewers a per-
+# team fallback when the standard broadcast slate is thin (e.g. playoffs
+# national-only filter, or an RSN our providers don't carry).
+#
+# Needle is matched as a case-insensitive substring against the raw channel
+# title. The label is what the chip displays.
+# ---------------------------------------------------------------------------
+_TEAM_FEED_NEEDLES: dict[str, str] = {
+    "ANA": "nhl anaheim ducks",
+    "BOS": "nhl boston bruins",
+    "BUF": "nhl buffalo sabres",
+    "CGY": "nhl calgary flames",
+    "CAR": "nhl carolina hurricanes",
+    "CHI": "nhl chicago blackhawks",
+    "COL": "nhl colorado avalanche",
+    "CBJ": "nhl columbus blue jackets",
+    "DAL": "nhl dallas stars",
+    "DET": "nhl detroit red wings",
+    "EDM": "nhl edmonton oilers",
+    "FLA": "nhl florida panthers",
+    "LAK": "nhl los angeles kings",
+    "MIN": "nhl minnesota wild",
+    "MTL": "nhl montreal canadiens",
+    "NSH": "nhl nashville predators",
+    "NJD": "nhl new jersey devils",
+    "NYI": "nhl new york islanders",
+    "NYR": "nhl new york rangers",
+    "OTT": "nhl ottawa senators",
+    "PHI": "nhl philadelphia flyers",
+    "PIT": "nhl pittsburgh penguins",
+    "SJS": "nhl san jose sharks",
+    "SEA": "nhl seattle kraken",
+    "STL": "nhl st louis blues",
+    "TBL": "nhl tampa bay lightning",
+    "TOR": "nhl toronto maple leafs",
+    "UTA": "nhl utah mammoth",
+    "VAN": "nhl vancouver canucks",
+    "VGK": "nhl vegas golden knights",
+    "WSH": "nhl washington capitals",
+    "WPG": "nhl winnipeg jets",
+}
+
+_TEAM_FEED_LABELS: dict[str, str] = {
+    "ANA": "Ducks Feed",
+    "BOS": "Bruins Feed",
+    "BUF": "Sabres Feed",
+    "CGY": "Flames Feed",
+    "CAR": "Hurricanes Feed",
+    "CHI": "Blackhawks Feed",
+    "COL": "Avalanche Feed",
+    "CBJ": "Blue Jackets Feed",
+    "DAL": "Stars Feed",
+    "DET": "Red Wings Feed",
+    "EDM": "Oilers Feed",
+    "FLA": "Panthers Feed",
+    "LAK": "Kings Feed",
+    "MIN": "Wild Feed",
+    "MTL": "Canadiens Feed",
+    "NSH": "Predators Feed",
+    "NJD": "Devils Feed",
+    "NYI": "Islanders Feed",
+    "NYR": "Rangers Feed",
+    "OTT": "Senators Feed",
+    "PHI": "Flyers Feed",
+    "PIT": "Penguins Feed",
+    "SJS": "Sharks Feed",
+    "SEA": "Kraken Feed",
+    "STL": "Blues Feed",
+    "TBL": "Lightning Feed",
+    "TOR": "Maple Leafs Feed",
+    "UTA": "Mammoth Feed",
+    "VAN": "Canucks Feed",
+    "VGK": "Golden Knights Feed",
+    "WSH": "Capitals Feed",
+    "WPG": "Jets Feed",
+}
+
+# CBC regional outlets simulcast the national broadcast with local cut-ins,
+# so they're a valid match for a "CBC" broadcast row in regular season only.
+# Restricted to Canadian teams — US-side CBC variants don't exist.
+_TEAM_CITY_FOR_CBC: dict[str, str] = {
+    "MTL": "montreal",
+    "TOR": "toronto",
+    "OTT": "ottawa",
+    "WPG": "winnipeg",
+    "EDM": "edmonton",
+    "CGY": "calgary",
+    "VAN": "vancouver",
+}
 
 
 def _rewrite_iptv_url(url: str) -> str:
