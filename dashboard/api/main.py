@@ -5369,6 +5369,24 @@ async def _build_game_iptv(game_id: int) -> list[dict] | None:
             "channels": feed_matched,
         })
 
+    # National-row ordering preference. NHL API ships TNT/Sportsnet/TVA/etc.
+    # in roughly broadcast-priority order, but the priority Bob wants in the
+    # UI is: Sportsnet first (densest catalog, most reliable feeds), then TNT,
+    # then TVA Sports — followed by every other national row in original
+    # order. Home/away/team-feed rows are untouched (they're rendered in
+    # their own sections by the frontend).
+    _NATIONAL_PRIORITY = ("SN", "TNT", "TVAS")
+    def _national_sort_key(row: dict) -> tuple[int, int]:
+        if row.get("market") != "N":
+            return (1, 0)
+        code = (row.get("code") or "").upper()
+        try:
+            return (0, _NATIONAL_PRIORITY.index(code))
+        except ValueError:
+            return (0, len(_NATIONAL_PRIORITY))
+    # Stable sort preserves original order within each priority bucket.
+    result.sort(key=_national_sort_key)
+
     return result
 
 
