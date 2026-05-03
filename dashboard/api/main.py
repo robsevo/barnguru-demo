@@ -5241,6 +5241,17 @@ async def _build_game_iptv(game_id: int) -> list[dict] | None:
         if not any(m in (ch.get("title", "") or "") for m in _AMPZTL_DEAD_MARKERS)
     ]
 
+    # 2026-05-03: an upstream host's TVA Sports / TVA Sports 2 slots auth-redirect
+    # successfully but serve 0 bytes (dead upstream channel). Drop those two
+    # specific titles so users don't see a chip that returns "manifest not
+    # yet available" after 30s. Other an upstream host channels are unaffected.
+    def _is_dead_an upstream host_tva(ch: dict) -> bool:
+        title = (ch.get("title", "") or "").lower()
+        if "(an upstream host)" not in title:
+            return False
+        return ("tva sports (an upstream host)" in title) or ("tva sports 2 (an upstream host)" in title)
+    curated_channels = [ch for ch in curated_channels if not _is_dead_an upstream host_tva(ch)]
+
     # Strict exact-match filter. The channel title is normalized (strip HD/FHD,
     # upstream source suffix, CA/US/UK country prefix, trailing region markers)
     # and must equal the network's display name. Prevents a single network like
@@ -8643,9 +8654,13 @@ async def _build_barncentre_payload() -> dict:
     # tarpit / lunar 403 Forbidden), so they're excluded. Stream preference is
     # hard-coded per channel from field testing; only the accounts that play
     # are listed here. The first-seen URL per account wins.
+    #
+    # 2026-05-03: an upstream host TVA Sports auth-redirects but serves 0 bytes
+    # (slot dead) — excluded from TVA Sports until that comes back. an upstream host
+    # added as the new primary on TVA Sports/2 (verified end-to-end).
     _fr_priority: dict[str, list[str]] = {
-        "RDS":          ["an upstream host", "ampztl-a", "ampztl-b"],
-        "RDS 2":        ["an upstream host", "ampztl-a", "ampztl-b"],
+        "RDS":          ["an upstream host", "an upstream host", "ampztl-a", "ampztl-b"],
+        "RDS 2":        ["an upstream host", "an upstream host", "ampztl-a", "ampztl-b"],
         "RDS INFO":     ["an upstream host"],
         "TVA Sports":   ["an upstream host", "ampztl-a", "ampztl-b"],
     }
