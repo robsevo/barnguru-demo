@@ -7888,6 +7888,14 @@ def _normalize_ch(title: str) -> str:
     # with leading "." (e.g. ".NHL Network ✤", ".RDS ☆") which would otherwise
     # leave the dot in front and break matcher equality.
     t = t.strip(" |:-").lstrip(".")
+    # Strip trailing ampztl decoration glyphs (e.g. "TSN 1 ƒ" → "TSN 1",
+    # "RDS ☆" → "RDS"). Without this, the digit-collapse below misses
+    # decorated titles because its $-anchor sees the glyph before the digit.
+    # Uses an ASCII-only character class — Python's \w is unicode-aware so
+    # ƒ (U+0192) and accented letters would otherwise be treated as "words"
+    # and skipped. Requires preceding whitespace, so embedded accents in
+    # legitimate words ("Société") are never touched.
+    t = _re_bc.sub(r"(?:\s+[^a-zA-Z0-9_\s]+)+\s*$", "", t)
     # Collapse digit-spacing for known concatenated channel names so providers
     # emitting "TSN 1" / "ESPN 2" / "FS 1" match _BARNCENTRE_CHANNEL_NAMES
     # entries like "TSN1" / "ESPN2" / "FS1". Anchored to whole-string after
@@ -8579,7 +8587,7 @@ async def _build_barncentre_payload() -> dict:
                     verified_primary = cand["url"]
                     break
 
-        backup_src = [c["url"] for c in candidates if c["url"] != chosen][:4]
+        backup_src = [c["url"] for c in candidates if c["url"] != chosen][:8]
 
         return {
             "name":         ch_name,
