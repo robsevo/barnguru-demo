@@ -509,7 +509,7 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
           <div className="w-0.5 h-4 rounded-full bg-white/25" />
           <h2 className="text-[13px] font-black uppercase tracking-[0.22em] text-white/55">{name}ern Conference</h2>
           <div className="flex-1 h-px bg-white/[0.06]" />
-          <span className="text-[7px] font-black uppercase tracking-[0.22em] text-white/18 border border-white/[0.07] px-2 py-0.5 rounded-full">{roundLabel}</span>
+          <span className="hidden sm:inline-block text-[7px] font-black uppercase tracking-[0.22em] text-white/18 border border-white/[0.07] px-2 py-0.5 rounded-full">{roundLabel}</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
@@ -557,7 +557,7 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
   return (
     <div className="space-y-10">
       {/* Mobile-only round pill — desktop renders all rounds side by side */}
-      <div className="sm:hidden flex justify-center -mb-4">
+      <div className="sm:hidden flex justify-center">
         <div className="flex rounded-lg border border-white/[0.10] overflow-hidden bg-white/[0.02]">
           {[1, 2].map(r => (
             <button
