@@ -282,6 +282,12 @@ function PlayoffRaceConference({ name, rows }: { name: string; rows: StandingRow
 
 function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: BracketData | null }) {
 
+  // Mobile-only round pill state. Null = follow bracket.currentRound automatically; once the
+  // user picks a round we honor that pick. The pill is hidden on desktop where the full
+  // bracket is always visible side-by-side.
+  const [mobileRound, setMobileRound] = useState<number | null>(null);
+  const activeRound = mobileRound ?? bracket?.currentRound ?? 1;
+
   // Build a lookup keyed on unordered team-pair so any matchup can find its series record
   const seriesByPair = new Map<string, SeriesEntry>();
   (bracket?.rounds ?? []).forEach(round => {
@@ -427,18 +433,21 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
 
   // Two matchup cards stacked with bracket connector lines on the right.
   // When `divFinal` is provided the bracket arm feeds into the Round 2 (Division Final) card.
+  // Mobile shows only the selected round; desktop always renders both alongside the arm.
   function BracketGroup({ top, bottom, label, divFinal }: {
     top: React.ReactNode;
     bottom: React.ReactNode;
     label: string;
     divFinal?: React.ReactNode;
   }) {
+    const showR1Mobile = activeRound === 1;
+    const showR2Mobile = activeRound === 2 && !!divFinal;
     return (
       <div>
         <div className="text-[8px] font-black uppercase tracking-[0.28em] text-white/22 mb-2 px-0.5">{label}</div>
         <div className="flex flex-col sm:flex-row sm:items-stretch">
           {/* Round 1 cards */}
-          <div className="flex-1 flex flex-col gap-3 min-w-0">
+          <div className={`flex-1 flex-col gap-3 min-w-0 sm:flex ${showR1Mobile ? "flex" : "hidden"}`}>
             {top}
             {bottom}
           </div>
@@ -453,7 +462,7 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
           </div>
           {/* Round 2 (Division Final) slot */}
           {divFinal && (
-            <div className="mt-3 sm:mt-0 sm:ml-2 sm:flex-1 sm:flex sm:items-center min-w-0">
+            <div className={`min-w-0 sm:ml-2 sm:flex-1 sm:flex sm:items-center sm:mt-0 ${showR2Mobile ? "flex items-center" : "hidden sm:flex"}`}>
               <div className="w-full">{divFinal}</div>
             </div>
           )}
@@ -488,10 +497,9 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
       otherTeams[0]?.team,  wc1?.team, otherTeams[1]?.team,  otherTeams[2]?.team,
     ]);
 
-    const currentRound = bracket?.currentRound ?? 1;
-    const roundLabel = currentRound >= 4 ? "Stanley Cup Final"
-                     : currentRound === 3 ? "Conference Final"
-                     : currentRound === 2 ? "Round 2"
+    const roundLabel = activeRound >= 4 ? "Stanley Cup Final"
+                     : activeRound === 3 ? "Conference Final"
+                     : activeRound === 2 ? "Round 2"
                      : "Round 1";
 
     return (
@@ -548,6 +556,24 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
 
   return (
     <div className="space-y-10">
+      {/* Mobile-only round pill — desktop renders all rounds side by side */}
+      <div className="sm:hidden flex justify-center -mb-4">
+        <div className="flex rounded-lg border border-white/[0.10] overflow-hidden bg-white/[0.02]">
+          {[1, 2].map(r => (
+            <button
+              key={r}
+              onClick={() => setMobileRound(r)}
+              className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-wider transition-colors ${
+                activeRound === r
+                  ? "bg-[#C9A84C]/12 text-[#C9A84C]/85"
+                  : "text-white/35 hover:text-white/55"
+              }`}
+            >
+              Round {r}
+            </button>
+          ))}
+        </div>
+      </div>
       <ConferenceBracket name="East" />
       <div className="border-t border-white/[0.07]" />
       <ConferenceBracket name="West" />
