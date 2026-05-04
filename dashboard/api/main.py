@@ -7874,6 +7874,18 @@ _BARNCENTRE_CHANNEL_NAMES = [
     "TVA Sports",
 ]
 
+# Per-channel upstream-host blocklist. Any candidate whose upstream host (the
+# real provider behind the relay/m3u8 wrapper) matches an entry here is dropped
+# entirely from that channel's primary + backup pool. Use sparingly — for
+# providers that auth fine and verify alive but serve broken content (looped
+# segments, frozen feeds) that the liveness check can't detect.
+#
+# 2026-05-04: TSN1 an upstream host plays the same ~30s clip on repeat. Drop it so
+# ampztl-b webtv1847 takes over as primary; tvpass + bgdc remain as backups.
+_BARNCENTRE_HOST_BLOCKLIST: dict[str, set[str]] = {
+    "TSN1": {"an upstream host.ddns.net"},
+}
+
 import re as _re_bc
 
 def _normalize_ch(title: str) -> str:
@@ -8573,6 +8585,16 @@ async def _build_barncentre_payload() -> dict:
         if not name:
             continue
         channel_candidates.setdefault(name, []).append(ch)
+    from urllib.parse import parse_qs as _bl_parse_qs, unquote as _bl_unquote
+    def _candidate_upstream_host(u: str) -> str:
+        if "localhost:8000" in u and "u=" in u:
+            try:
+                inner = _bl_unquote(_bl_parse_qs(urlparse(u).query).get("u", [""])[0])
+                return urlparse(inner).hostname or ""
+            except Exception:
+                return ""
+        return urlparse(u).hostname or ""
+
     for name, cands in list(channel_candidates.items()):
         seen: set[str] = set()
         unique: list[dict] = []
@@ -8580,6 +8602,9 @@ async def _build_barncentre_payload() -> dict:
             if m["url"] not in seen:
                 seen.add(m["url"])
                 unique.append(m)
+        blocked = _BARNCENTRE_HOST_BLOCKLIST.get(name)
+        if blocked:
+            unique = [c for c in unique if _candidate_upstream_host(c["url"]) not in blocked]
         channel_candidates[name] = _sort_by_url_priority(unique)
 
     # ── 4. Verify each channel's primary stream in parallel ───────────────────

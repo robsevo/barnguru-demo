@@ -431,38 +431,45 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
     );
   }
 
-  // Two matchup cards stacked with bracket connector lines on the right.
-  // When `divFinal` is provided the bracket arm feeds into the Round 2 (Division Final) card.
+  // Two matchup cards stacked with bracket connector lines feeding into the
+  // Round 2 (Division Final) card. `mirror` flips the desktop layout so R2 sits
+  // on the inner side of the page — used for the right-hand column of each
+  // conference so both halves of the bracket point inward toward the Conf Final.
   // Mobile shows only the selected round; desktop always renders both alongside the arm.
-  function BracketGroup({ top, bottom, label, divFinal }: {
+  function BracketGroup({ top, bottom, label, divFinal, mirror }: {
     top: React.ReactNode;
     bottom: React.ReactNode;
     label: string;
     divFinal?: React.ReactNode;
+    mirror?: boolean;
   }) {
     const showR1Mobile = activeRound === 1;
     const showR2Mobile = activeRound === 2 && !!divFinal;
     return (
       <div>
-        <div className="text-[8px] font-black uppercase tracking-[0.28em] text-white/22 mb-2 px-0.5">{label}</div>
-        <div className="flex flex-col sm:flex-row sm:items-stretch">
+        <div className={`text-[8px] font-black uppercase tracking-[0.28em] text-white/22 mb-2 px-0.5 ${mirror ? "sm:text-right" : ""}`}>{label}</div>
+        <div className={`flex flex-col sm:items-stretch ${mirror ? "sm:flex-row-reverse" : "sm:flex-row"}`}>
           {/* Round 1 cards */}
           <div className={`flex-1 flex-col gap-3 min-w-0 sm:flex ${showR1Mobile ? "flex" : "hidden"}`}>
             {top}
             {bottom}
           </div>
-          {/* Bracket arm — desktop only */}
-          <div className="hidden sm:block w-5 shrink-0 ml-2 relative self-stretch">
+          {/* Bracket arm — desktop only. In mirror mode the vertical bar moves to
+              the left edge so the arm visually flows from R1 (outer) to R2 (inner). */}
+          <div className={`hidden sm:block w-5 shrink-0 relative self-stretch ${mirror ? "mr-2" : "ml-2"}`}>
             <div className="absolute left-0 right-0 h-px bg-white/[0.16]" style={{ top: "24%" }} />
             <div className="absolute left-0 right-0 h-px bg-white/[0.16]" style={{ top: "76%" }} />
-            <div className="absolute right-0 w-px bg-white/[0.16]" style={{ top: "24%", bottom: "24%" }} />
+            <div className={`absolute w-px bg-white/[0.16] ${mirror ? "left-0" : "right-0"}`} style={{ top: "24%", bottom: "24%" }} />
             {!divFinal && (
-              <div className="absolute right-0 w-2 h-2 rounded-full bg-white/[0.22] -translate-y-1/2 -mr-[3px]" style={{ top: "50%" }} />
+              <div
+                className={`absolute w-2 h-2 rounded-full bg-white/[0.22] -translate-y-1/2 ${mirror ? "left-0 -ml-[3px]" : "right-0 -mr-[3px]"}`}
+                style={{ top: "50%" }}
+              />
             )}
           </div>
           {/* Round 2 (Division Final) slot */}
           {divFinal && (
-            <div className={`min-w-0 sm:ml-2 sm:flex-1 sm:flex sm:items-center sm:mt-0 ${showR2Mobile ? "flex items-center" : "hidden sm:flex"}`}>
+            <div className={`min-w-0 sm:flex-1 sm:flex sm:items-center sm:mt-0 ${mirror ? "sm:mr-2" : "sm:ml-2"} ${showR2Mobile ? "flex items-center" : "hidden sm:flex"}`}>
               <div className="w-full">{divFinal}</div>
             </div>
           )}
@@ -523,6 +530,7 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
           />
           <BracketGroup
             label={otherDiv}
+            mirror
             top={<MatchupCard top={otherTeams[0]} topSeed={`D${otherTeams[0]?.div_rank ?? 1}`} bottom={wc1} bottomSeed="WC1" />}
             bottom={<MatchupCard top={otherTeams[1]} topSeed={`D${otherTeams[1]?.div_rank ?? 2}`} bottom={otherTeams[2]} bottomSeed={`D${otherTeams[2]?.div_rank ?? 3}`} />}
             divFinal={otherDivFinal && (
