@@ -301,6 +301,18 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
     if (s.bottomSeed.team === team) return s.bottomSeed.wins;
     return null;
   }
+  // Find the round-N series whose two teams are both drawn from the candidate pool.
+  // Used to attach the Division Final / Conference Final card to its feeder matchups.
+  function findSeriesInRound(round: number, candidates: (string | undefined)[]): SeriesEntry | null {
+    const pool = new Set(candidates.filter(Boolean) as string[]);
+    if (pool.size === 0) return null;
+    const r = (bracket?.rounds ?? []).find(x => x.round === round);
+    if (!r) return null;
+    return r.series.find(s => pool.has(s.topSeed.team) && pool.has(s.bottomSeed.team)) ?? null;
+  }
+  function rowFor(team?: string): StandingRow | undefined {
+    return team ? rows.find(r => r.team === team) : undefined;
+  }
 
   function SeedBadge({ seed }: { seed: number | string }) {
     return (
@@ -322,7 +334,7 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
 
   function BracketTeamRow({ row, seed, divider, wins, neededToWin, eliminated, clinched }: {
     row: StandingRow | undefined;
-    seed: number | string;
+    seed?: number | string;
     divider?: boolean;
     wins?: number | null;
     neededToWin?: number;
@@ -331,7 +343,7 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
   }) {
     if (!row) return (
       <div className={`flex items-center gap-2 px-3 py-3 min-h-[52px] ${divider ? "border-b border-[#C9A84C]/[0.15]" : ""}`}>
-        <SeedBadge seed={seed} />
+        {seed !== undefined && seed !== "" && <SeedBadge seed={seed} />}
         <div className="w-0.5 h-6 rounded-full bg-white/[0.07] shrink-0" />
         <span className="text-[11px] text-white/18 italic flex-1">TBD</span>
         <span className="text-[13px] font-black text-white/15">—</span>
@@ -341,7 +353,7 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
     const hasSeries = typeof wins === "number";
     return (
       <div className={`flex items-center gap-2.5 px-3 py-2.5 min-h-[52px] ${divider ? "border-b border-[#C9A84C]/[0.15]" : ""} ${eliminated ? "opacity-50" : ""}`}>
-        <SeedBadge seed={seed} />
+        {seed !== undefined && seed !== "" && <SeedBadge seed={seed} />}
         <div className="w-0.5 h-7 rounded-full shrink-0" style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}bb` }} />
         <TeamLogoImg abbrev={row.team} size={32} smSize={42} linkToTeam />
         <div className="flex-1 min-w-0">
@@ -370,8 +382,8 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
   }
 
   function MatchupCard({ top, topSeed, bottom, bottomSeed }: {
-    top: StandingRow | undefined; topSeed: number | string;
-    bottom: StandingRow | undefined; bottomSeed: number | string;
+    top: StandingRow | undefined; topSeed?: number | string;
+    bottom: StandingRow | undefined; bottomSeed?: number | string;
   }) {
     const series      = lookupSeries(top?.team, bottom?.team);
     const topWins     = winsFor(top?.team ?? "", series);
@@ -413,32 +425,38 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
     );
   }
 
-  // Two matchup cards stacked with bracket connector lines on the right
-  function BracketGroup({ top, bottom, label }: {
+  // Two matchup cards stacked with bracket connector lines on the right.
+  // When `divFinal` is provided the bracket arm feeds into the Round 2 (Division Final) card.
+  function BracketGroup({ top, bottom, label, divFinal }: {
     top: React.ReactNode;
     bottom: React.ReactNode;
     label: string;
+    divFinal?: React.ReactNode;
   }) {
     return (
       <div>
         <div className="text-[8px] font-black uppercase tracking-[0.28em] text-white/22 mb-2 px-0.5">{label}</div>
-        <div className="flex items-stretch">
-          {/* Cards */}
+        <div className="flex flex-col sm:flex-row sm:items-stretch">
+          {/* Round 1 cards */}
           <div className="flex-1 flex flex-col gap-3 min-w-0">
             {top}
             {bottom}
           </div>
-          {/* Bracket arm */}
-          <div className="w-5 shrink-0 ml-2 relative self-stretch">
-            {/* Horizontal line out of top card center (~24% from top) */}
+          {/* Bracket arm — desktop only */}
+          <div className="hidden sm:block w-5 shrink-0 ml-2 relative self-stretch">
             <div className="absolute left-0 right-0 h-px bg-white/[0.16]" style={{ top: "24%" }} />
-            {/* Horizontal line out of bottom card center (~76% from top) */}
             <div className="absolute left-0 right-0 h-px bg-white/[0.16]" style={{ top: "76%" }} />
-            {/* Vertical bar connecting them on right edge */}
             <div className="absolute right-0 w-px bg-white/[0.16]" style={{ top: "24%", bottom: "24%" }} />
-            {/* Output dot at midpoint */}
-            <div className="absolute right-0 w-2 h-2 rounded-full bg-white/[0.22] -translate-y-1/2 -mr-[3px]" style={{ top: "50%" }} />
+            {!divFinal && (
+              <div className="absolute right-0 w-2 h-2 rounded-full bg-white/[0.22] -translate-y-1/2 -mr-[3px]" style={{ top: "50%" }} />
+            )}
           </div>
+          {/* Round 2 (Division Final) slot */}
+          {divFinal && (
+            <div className="mt-3 sm:mt-0 sm:ml-2 sm:flex-1 sm:flex sm:items-center min-w-0">
+              <div className="w-full">{divFinal}</div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -459,6 +477,23 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
     const wc1 = inRows.find(r => r.wildcard_rank === 1);
     const wc2 = inRows.find(r => r.wildcard_rank === 2);
 
+    // Round 2 (Division Final) — find the round-2 series whose teams come from this division's
+    // Round 1 pool. Falls back to null until the NHL API publishes the matchup.
+    const leaderDivFinal = findSeriesInRound(2, [leaderTeams[0]?.team, wc2?.team, leaderTeams[1]?.team, leaderTeams[2]?.team]);
+    const otherDivFinal  = findSeriesInRound(2, [otherTeams[0]?.team,  wc1?.team, otherTeams[1]?.team,  otherTeams[2]?.team]);
+
+    // Round 3 (Conference Final) — pulls from any team that could plausibly come out of either division.
+    const confFinal = findSeriesInRound(3, [
+      leaderTeams[0]?.team, wc2?.team, leaderTeams[1]?.team, leaderTeams[2]?.team,
+      otherTeams[0]?.team,  wc1?.team, otherTeams[1]?.team,  otherTeams[2]?.team,
+    ]);
+
+    const currentRound = bracket?.currentRound ?? 1;
+    const roundLabel = currentRound >= 4 ? "Stanley Cup Final"
+                     : currentRound === 3 ? "Conference Final"
+                     : currentRound === 2 ? "Round 2"
+                     : "Round 1";
+
     return (
       <div>
         {/* Conference header */}
@@ -466,7 +501,7 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
           <div className="w-0.5 h-4 rounded-full bg-white/25" />
           <h2 className="text-[13px] font-black uppercase tracking-[0.22em] text-white/55">{name}ern Conference</h2>
           <div className="flex-1 h-px bg-white/[0.06]" />
-          <span className="text-[7px] font-black uppercase tracking-[0.22em] text-white/18 border border-white/[0.07] px-2 py-0.5 rounded-full">Round 1</span>
+          <span className="text-[7px] font-black uppercase tracking-[0.22em] text-white/18 border border-white/[0.07] px-2 py-0.5 rounded-full">{roundLabel}</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
@@ -474,23 +509,38 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
             label={leaderDiv}
             top={<MatchupCard top={leaderTeams[0]} topSeed={`D${leaderTeams[0]?.div_rank ?? 1}`} bottom={wc2} bottomSeed="WC2" />}
             bottom={<MatchupCard top={leaderTeams[1]} topSeed={`D${leaderTeams[1]?.div_rank ?? 2}`} bottom={leaderTeams[2]} bottomSeed={`D${leaderTeams[2]?.div_rank ?? 3}`} />}
+            divFinal={leaderDivFinal && (
+              <MatchupCard top={rowFor(leaderDivFinal.topSeed.team)} bottom={rowFor(leaderDivFinal.bottomSeed.team)} />
+            )}
           />
           <BracketGroup
             label={otherDiv}
             top={<MatchupCard top={otherTeams[0]} topSeed={`D${otherTeams[0]?.div_rank ?? 1}`} bottom={wc1} bottomSeed="WC1" />}
             bottom={<MatchupCard top={otherTeams[1]} topSeed={`D${otherTeams[1]?.div_rank ?? 2}`} bottom={otherTeams[2]} bottomSeed={`D${otherTeams[2]?.div_rank ?? 3}`} />}
+            divFinal={otherDivFinal && (
+              <MatchupCard top={rowFor(otherDivFinal.topSeed.team)} bottom={rowFor(otherDivFinal.bottomSeed.team)} />
+            )}
           />
         </div>
 
-        {/* Conference Final placeholder */}
-        <div className="mt-5 flex items-center gap-3">
-          <div className="flex-1 h-px bg-white/[0.05]" />
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#C9A84C]/[0.15] bg-white/[0.015]">
-            <span className="text-[7px] font-black uppercase tracking-[0.25em] text-white/18">Conf Final</span>
-            <span className="text-white/10 text-[10px]">·</span>
-            <span className="text-[8px] text-white/12 italic">Winner advances to SCF</span>
-          </div>
-          <div className="flex-1 h-px bg-white/[0.05]" />
+        {/* Conference Final */}
+        <div className="mt-5">
+          {confFinal ? (
+            <div className="max-w-xl mx-auto">
+              <div className="text-[8px] font-black uppercase tracking-[0.28em] text-[#C9A84C]/55 mb-2 text-center">{name}ern Conference Final</div>
+              <MatchupCard top={rowFor(confFinal.topSeed.team)} bottom={rowFor(confFinal.bottomSeed.team)} />
+            </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-px bg-white/[0.05]" />
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#C9A84C]/[0.15] bg-white/[0.015]">
+                <span className="text-[7px] font-black uppercase tracking-[0.25em] text-white/18">Conf Final</span>
+                <span className="text-white/10 text-[10px]">·</span>
+                <span className="text-[8px] text-white/12 italic">Winner advances to SCF</span>
+              </div>
+              <div className="flex-1 h-px bg-white/[0.05]" />
+            </div>
+          )}
         </div>
       </div>
     );
