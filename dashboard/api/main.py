@@ -7880,10 +7880,12 @@ _BARNCENTRE_CHANNEL_NAMES = [
 # providers that auth fine and verify alive but serve broken content (looped
 # segments, frozen feeds) that the liveness check can't detect.
 #
-# 2026-05-04: TSN1 an upstream host plays the same ~30s clip on repeat. Drop it so
-# ampztl-b webtv1847 takes over as primary; tvpass + bgdc remain as backups.
+# 2026-05-04: TSN1 an upstream host played a ~30s loop. Dropped an upstream host; ampztl
+# webtv1847 became primary and was also looping (same upstream feed bug).
+# Drop ampztl too so tvpass.org/live/tsn1/hd promotes to primary; bgdc +
+# an upstream host remain as backups under that.
 _BARNCENTRE_HOST_BLOCKLIST: dict[str, set[str]] = {
-    "TSN1": {"an upstream host.ddns.net"},
+    "TSN1": {"an upstream host.ddns.net", "ampztl.xyz"},
 }
 
 import re as _re_bc
