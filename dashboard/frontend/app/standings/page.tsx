@@ -478,7 +478,7 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
     );
   }
 
-  function ConferenceBracket({ name }: { name: "East" | "West" }) {
+  function ConferenceBracket({ name, flipped }: { name: "East" | "West"; flipped?: boolean }) {
     const divNames = name === "East" ? EAST_DIVS : WEST_DIVS;
     const confRows = rows.filter(r => divNames.includes(r.division));
     const inRows = confRows.filter(r => r.conf_rank <= 8);
@@ -509,54 +509,116 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
                      : activeRound === 2 ? "Round 2"
                      : "Round 1";
 
+    const header = (
+      <div className="flex items-center gap-3 mb-5">
+        <div className="w-0.5 h-4 rounded-full bg-white/25" />
+        <h2 className="text-[13px] font-black uppercase tracking-[0.22em] text-white/55">{name}ern Conference</h2>
+        <div className="flex-1 h-px bg-white/[0.06]" />
+        <span className="hidden sm:inline-block text-[7px] font-black uppercase tracking-[0.22em] text-white/18 border border-white/[0.07] px-2 py-0.5 rounded-full">{roundLabel}</span>
+      </div>
+    );
+
+    const tree = (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        <BracketGroup
+          label={leaderDiv}
+          top={<MatchupCard top={leaderTeams[0]} topSeed={`D${leaderTeams[0]?.div_rank ?? 1}`} bottom={wc2} bottomSeed="WC2" />}
+          bottom={<MatchupCard top={leaderTeams[1]} topSeed={`D${leaderTeams[1]?.div_rank ?? 2}`} bottom={leaderTeams[2]} bottomSeed={`D${leaderTeams[2]?.div_rank ?? 3}`} />}
+          divFinal={leaderDivFinal && (
+            <MatchupCard top={rowFor(leaderDivFinal.topSeed.team)} bottom={rowFor(leaderDivFinal.bottomSeed.team)} />
+          )}
+        />
+        <BracketGroup
+          label={otherDiv}
+          mirror
+          top={<MatchupCard top={otherTeams[0]} topSeed={`D${otherTeams[0]?.div_rank ?? 1}`} bottom={wc1} bottomSeed="WC1" />}
+          bottom={<MatchupCard top={otherTeams[1]} topSeed={`D${otherTeams[1]?.div_rank ?? 2}`} bottom={otherTeams[2]} bottomSeed={`D${otherTeams[2]?.div_rank ?? 3}`} />}
+          divFinal={otherDivFinal && (
+            <MatchupCard top={rowFor(otherDivFinal.topSeed.team)} bottom={rowFor(otherDivFinal.bottomSeed.team)} />
+          )}
+        />
+      </div>
+    );
+
+    const confFinalCard = (
+      <div>
+        {confFinal ? (
+          <div className="max-w-xl mx-auto">
+            <div className="text-[8px] font-black uppercase tracking-[0.28em] text-[#C9A84C]/55 mb-2 text-center">{name}ern Conference Final</div>
+            <MatchupCard top={rowFor(confFinal.topSeed.team)} bottom={rowFor(confFinal.bottomSeed.team)} />
+          </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-white/[0.05]" />
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#C9A84C]/[0.15] bg-white/[0.015]">
+              <span className="text-[7px] font-black uppercase tracking-[0.25em] text-white/18">Conf Final</span>
+              <span className="text-white/10 text-[10px]">·</span>
+              <span className="text-[8px] text-white/12 italic">Winner advances to SCF</span>
+            </div>
+            <div className="flex-1 h-px bg-white/[0.05]" />
+          </div>
+        )}
+      </div>
+    );
+
+    // East renders header → tree → CF (CF sits below, flowing into the centre Cup).
+    // West renders header → CF → tree (CF sits above the tree, mirrored across
+    // the centre Cup so the bracket is symmetric: East climbs down, Cup, West
+    // climbs back up). Same content either way.
     return (
       <div>
-        {/* Conference header */}
-        <div className="flex items-center gap-3 mb-5">
-          <div className="w-0.5 h-4 rounded-full bg-white/25" />
-          <h2 className="text-[13px] font-black uppercase tracking-[0.22em] text-white/55">{name}ern Conference</h2>
-          <div className="flex-1 h-px bg-white/[0.06]" />
-          <span className="hidden sm:inline-block text-[7px] font-black uppercase tracking-[0.22em] text-white/18 border border-white/[0.07] px-2 py-0.5 rounded-full">{roundLabel}</span>
-        </div>
+        {header}
+        {flipped ? (
+          <>
+            <div className="mb-5">{confFinalCard}</div>
+            {tree}
+          </>
+        ) : (
+          <>
+            {tree}
+            <div className="mt-5">{confFinalCard}</div>
+          </>
+        )}
+      </div>
+    );
+  }
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          <BracketGroup
-            label={leaderDiv}
-            top={<MatchupCard top={leaderTeams[0]} topSeed={`D${leaderTeams[0]?.div_rank ?? 1}`} bottom={wc2} bottomSeed="WC2" />}
-            bottom={<MatchupCard top={leaderTeams[1]} topSeed={`D${leaderTeams[1]?.div_rank ?? 2}`} bottom={leaderTeams[2]} bottomSeed={`D${leaderTeams[2]?.div_rank ?? 3}`} />}
-            divFinal={leaderDivFinal && (
-              <MatchupCard top={rowFor(leaderDivFinal.topSeed.team)} bottom={rowFor(leaderDivFinal.bottomSeed.team)} />
-            )}
-          />
-          <BracketGroup
-            label={otherDiv}
-            mirror
-            top={<MatchupCard top={otherTeams[0]} topSeed={`D${otherTeams[0]?.div_rank ?? 1}`} bottom={wc1} bottomSeed="WC1" />}
-            bottom={<MatchupCard top={otherTeams[1]} topSeed={`D${otherTeams[1]?.div_rank ?? 2}`} bottom={otherTeams[2]} bottomSeed={`D${otherTeams[2]?.div_rank ?? 3}`} />}
-            divFinal={otherDivFinal && (
-              <MatchupCard top={rowFor(otherDivFinal.topSeed.team)} bottom={rowFor(otherDivFinal.bottomSeed.team)} />
-            )}
-          />
-        </div>
-
-        {/* Conference Final */}
-        <div className="mt-5">
-          {confFinal ? (
-            <div className="max-w-xl mx-auto">
-              <div className="text-[8px] font-black uppercase tracking-[0.28em] text-[#C9A84C]/55 mb-2 text-center">{name}ern Conference Final</div>
-              <MatchupCard top={rowFor(confFinal.topSeed.team)} bottom={rowFor(confFinal.bottomSeed.team)} />
-            </div>
-          ) : (
-            <div className="flex items-center gap-3">
-              <div className="flex-1 h-px bg-white/[0.05]" />
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#C9A84C]/[0.15] bg-white/[0.015]">
-                <span className="text-[7px] font-black uppercase tracking-[0.25em] text-white/18">Conf Final</span>
-                <span className="text-white/10 text-[10px]">·</span>
-                <span className="text-[8px] text-white/12 italic">Winner advances to SCF</span>
-              </div>
-              <div className="flex-1 h-px bg-white/[0.05]" />
-            </div>
-          )}
+  // Stanley Cup centerpiece — sits between East CF and West CF so the bracket
+  // reads top-to-bottom: East R1 → East R2 → East CF → ⌘ Cup ⌘ → West CF → West R2 → West R1.
+  function StanleyCupCenter() {
+    return (
+      <div className="flex items-center justify-center pt-1 pb-1">
+        <div className="rounded-2xl border border-[#fbbf24]/18 bg-[#fbbf24]/[0.025] px-6 py-4 text-center shadow-[0_0_40px_rgba(251,191,36,0.06)]">
+          <div className="flex justify-center mb-2">
+            <svg width="60" height="82" viewBox="0 0 60 82" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <ellipse cx="30" cy="80" rx="18" ry="2" fill="#cbd5e1" opacity="0.18"/>
+              <rect x="4"  y="74" width="52" height="5"   rx="1.5" fill="#e2e8f0" opacity="0.65"/>
+              <rect x="8"  y="70" width="44" height="4.5" rx="1"   fill="#d1d5db" opacity="0.55"/>
+              <rect x="4"  y="74" width="52" height="1.5" rx="0.5" fill="white"   opacity="0.18"/>
+              <rect x="9"  y="62" width="42" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.52"/>
+              <rect x="9"  y="53" width="42" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.47"/>
+              <rect x="9"  y="44" width="42" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.42"/>
+              <rect x="10" y="35" width="40" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.38"/>
+              <rect x="11" y="26" width="38" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.33"/>
+              <line x1="9"  y1="62" x2="51" y2="62" stroke="white" strokeWidth="0.8" opacity="0.30"/>
+              <line x1="9"  y1="53" x2="51" y2="53" stroke="white" strokeWidth="0.8" opacity="0.26"/>
+              <line x1="9"  y1="44" x2="51" y2="44" stroke="white" strokeWidth="0.8" opacity="0.22"/>
+              <line x1="10" y1="35" x2="50" y2="35" stroke="white" strokeWidth="0.8" opacity="0.20"/>
+              <rect x="9"  y="62" width="42" height="2.5" rx="0.3" fill="white" opacity="0.12"/>
+              <rect x="9"  y="53" width="42" height="2.5" rx="0.3" fill="white" opacity="0.10"/>
+              <rect x="9"  y="44" width="42" height="2.5" rx="0.3" fill="white" opacity="0.09"/>
+              <rect x="10" y="35" width="40" height="2.5" rx="0.3" fill="white" opacity="0.08"/>
+              <rect x="11" y="26" width="38" height="2.5" rx="0.3" fill="white" opacity="0.07"/>
+              <rect x="22" y="18" width="16" height="9"   rx="1"   fill="#cbd5e1" opacity="0.55"/>
+              <line x1="22" y1="22.5" x2="38" y2="22.5"  stroke="white" strokeWidth="0.6" opacity="0.22"/>
+              <path d="M13 5 C11 5 9 18 30 18 C51 18 49 5 47 5 Z" fill="#cbd5e1" opacity="0.42"/>
+              <path d="M18 7 C16 7 15 17 30 17 C45 17 44 7 42 7 Z" fill="white"   opacity="0.08"/>
+              <rect x="11" y="2" width="38" height="5"   rx="2"   fill="#e2e8f0" opacity="0.78"/>
+              <rect x="14" y="2.5" width="32" height="2" rx="0.8" fill="white"   opacity="0.22"/>
+            </svg>
+          </div>
+          <div className="text-[7px] font-black uppercase tracking-[0.35em] text-[#fbbf24]/50 mb-1">Stanley Cup Final</div>
+          <div className="text-[11px] font-bold text-white/25 italic">East Champion vs West Champion</div>
         </div>
       </div>
     );
@@ -583,53 +645,8 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
         </div>
       </div>
       <ConferenceBracket name="East" />
-      <div className="border-t border-white/[0.07]" />
-      <ConferenceBracket name="West" />
-
-      {/* Stanley Cup Final */}
-      <div className="flex items-center justify-center pt-2 pb-1">
-        <div className="rounded-2xl border border-[#fbbf24]/18 bg-[#fbbf24]/[0.025] px-6 py-4 text-center shadow-[0_0_40px_rgba(251,191,36,0.06)]">
-          {/* Stanley Cup SVG */}
-          <div className="flex justify-center mb-2">
-            <svg width="60" height="82" viewBox="0 0 60 82" fill="none" xmlns="http://www.w3.org/2000/svg">
-              {/* Glow */}
-              <ellipse cx="30" cy="80" rx="18" ry="2" fill="#cbd5e1" opacity="0.18"/>
-              {/* Base — two stepped levels */}
-              <rect x="4"  y="74" width="52" height="5"   rx="1.5" fill="#e2e8f0" opacity="0.65"/>
-              <rect x="8"  y="70" width="44" height="4.5" rx="1"   fill="#d1d5db" opacity="0.55"/>
-              <rect x="4"  y="74" width="52" height="1.5" rx="0.5" fill="white"   opacity="0.18"/>
-              {/* 5 name bands — uniform width cylinder (real Cup bands are wide) */}
-              <rect x="9"  y="62" width="42" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.52"/>
-              <rect x="9"  y="53" width="42" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.47"/>
-              <rect x="9"  y="44" width="42" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.42"/>
-              <rect x="10" y="35" width="40" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.38"/>
-              <rect x="11" y="26" width="38" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.33"/>
-              {/* Band separators */}
-              <line x1="9"  y1="62" x2="51" y2="62" stroke="white" strokeWidth="0.8" opacity="0.30"/>
-              <line x1="9"  y1="53" x2="51" y2="53" stroke="white" strokeWidth="0.8" opacity="0.26"/>
-              <line x1="9"  y1="44" x2="51" y2="44" stroke="white" strokeWidth="0.8" opacity="0.22"/>
-              <line x1="10" y1="35" x2="50" y2="35" stroke="white" strokeWidth="0.8" opacity="0.20"/>
-              {/* Metallic sheen on each band */}
-              <rect x="9"  y="62" width="42" height="2.5" rx="0.3" fill="white" opacity="0.12"/>
-              <rect x="9"  y="53" width="42" height="2.5" rx="0.3" fill="white" opacity="0.10"/>
-              <rect x="9"  y="44" width="42" height="2.5" rx="0.3" fill="white" opacity="0.09"/>
-              <rect x="10" y="35" width="40" height="2.5" rx="0.3" fill="white" opacity="0.08"/>
-              <rect x="11" y="26" width="38" height="2.5" rx="0.3" fill="white" opacity="0.07"/>
-              {/* Collar — narrow neck connecting bands to bowl */}
-              <rect x="22" y="18" width="16" height="9"   rx="1"   fill="#cbd5e1" opacity="0.55"/>
-              <line x1="22" y1="22.5" x2="38" y2="22.5"  stroke="white" strokeWidth="0.6" opacity="0.22"/>
-              {/* Bowl — wide shallow */}
-              <path d="M13 5 C11 5 9 18 30 18 C51 18 49 5 47 5 Z" fill="#cbd5e1" opacity="0.42"/>
-              <path d="M18 7 C16 7 15 17 30 17 C45 17 44 7 42 7 Z" fill="white"   opacity="0.08"/>
-              {/* Rim */}
-              <rect x="11" y="2" width="38" height="5"   rx="2"   fill="#e2e8f0" opacity="0.78"/>
-              <rect x="14" y="2.5" width="32" height="2" rx="0.8" fill="white"   opacity="0.22"/>
-            </svg>
-          </div>
-          <div className="text-[7px] font-black uppercase tracking-[0.35em] text-[#fbbf24]/50 mb-1">Stanley Cup Final</div>
-          <div className="text-[11px] font-bold text-white/25 italic">East Champion vs West Champion</div>
-        </div>
-      </div>
+      <StanleyCupCenter />
+      <ConferenceBracket name="West" flipped />
     </div>
   );
 }
