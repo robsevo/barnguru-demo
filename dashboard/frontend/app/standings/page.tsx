@@ -562,19 +562,20 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
     );
 
     // East renders header → tree → CF (CF sits below, flowing into the centre Cup).
-    // West renders header → CF → tree (CF sits above the tree, mirrored across
-    // the centre Cup so the bracket is symmetric: East climbs down, Cup, West
-    // climbs back up). Same content either way.
+    // West renders CF → header → tree (CF sits above the header, mirrored
+    // across the centre Cup so the bracket is symmetric: East climbs down,
+    // Cup, West climbs back up). Same content either way.
     return (
       <div>
-        {header}
         {flipped ? (
           <>
             <div className="mb-5">{confFinalCard}</div>
+            {header}
             {tree}
           </>
         ) : (
           <>
+            {header}
             {tree}
             <div className="mt-5">{confFinalCard}</div>
           </>
