@@ -5345,6 +5345,15 @@ async def _build_game_iptv(game_id: int) -> list[dict] | None:
         # upstream → an upstream host). Same ordering /barncentre-channels uses — keeps
         # TVA Sports from picking an upstream host's dead /play/TOKEN/m3u8 as primary.
         matched = _sort_by_url_priority(matched)
+        # Force `q=720p` re-encode on relay /hls URLs for TSN broadcasts. Their
+        # source MPEG-TS has irregular GOPs that produce variable-duration
+        # segments under passthrough; hls.js misreads those as live-edge drift
+        # and triggers buffer/resync cycles. Game-page parity with BarnCentre.
+        if _needs_recode("", code) or _needs_recode("", display):
+            matched = [
+                {**ch, "url": _apply_recode(ch["url"], force=True)}
+                for ch in matched
+            ]
         # Always emit a row — the frontend renders unmatched rows as disabled
         # chips so Bob sees the full broadcast slate, not just what we resolved.
         result.append({
@@ -7972,6 +7981,60 @@ def _add_to_blocklist(name: str, host: str) -> None:
         return
     _BARNCENTRE_HOST_BLOCKLIST.setdefault(name, {})[host] = _time.time()
 
+
+# Channels whose source MPEG-TS has irregular keyframe spacing — the
+# encoder swings GOP length around (e.g. 2s/4s alternating), so under
+# passthrough (`-c copy`) the relay's HLS muxer can only split at keyframes
+# and produces variable-duration segments (4.0s/2.0s/4.0s/2.0s ...). hls.js
+# tolerates that poorly: the live edge advances unevenly, the watchdog's
+# drift heuristic fires spuriously, and users see what looks like buffering
+# but is actually the player resyncing every few seconds.
+#
+# Forcing `q=720p` makes ffmpeg re-encode with `-g 60 -keyint_min 60`
+# (deterministic 2s GOP) which aligns cleanly with `-hls_time 3` → steady 3s
+# segments. The historical comment in `_rewrite_iptv_url` notes this was
+# removed globally because libx264 software encoding burned 30-50% of one
+# core per stream on the residential relay; we re-add it ONLY for channels
+# that actually need it. With ~5 TSN feeds and at most a handful of
+# concurrent viewers per feed, total CPU is bounded.
+#
+# Live evidence (2026-05-05): TSN1 manifest from an upstream host `/play/.../ts`
+# emitted alternating 4.004/2.002s segments; Sportsnet East from the same
+# provider emitted steady 3.000s segments. Same provider, same relay path,
+# same encoder config — the only difference is the upstream feed's GOP.
+_RECODE_CHANNELS: set[str] = {"TSN1", "TSN2", "TSN3", "TSN4", "TSN5"}
+
+
+def _needs_recode(ch_name: str = "", broadcast_code: str = "") -> bool:
+    """Decide whether a channel/broadcast belongs to the irregular-GOP set.
+
+    Channel-side callers (BarnCentre / Lounge) pass a canonical name like
+    "TSN1". Game-page callers know only the NHL broadcast code ("TSN", "TSN1",
+    sometimes the network display string) — those land here too, where any
+    "TSN..." prefix qualifies.
+    """
+    if ch_name in _RECODE_CHANNELS:
+        return True
+    bc = (broadcast_code or "").upper()
+    return bc.startswith("TSN")
+
+
+def _apply_recode(url: str, ch_name: str = "", *, force: bool = False) -> str:
+    """Append `&q=720p` to a relay /hls URL when the channel needs re-encoding.
+
+    Leaves /m3u8 URLs (already-HLS sources, no transmux happens) and URLs
+    that already carry a q= parameter untouched. `force=True` lets callers
+    that already determined the recode requirement (e.g. game page knowing the
+    broadcast code is TSN) bypass the channel-name lookup.
+    """
+    if not (force or ch_name in _RECODE_CHANNELS):
+        return url
+    if "q=" in url:
+        return url
+    if "localhost:8000/hls?" not in url and "/hls?u=" not in url:
+        return url
+    return url + ("&q=720p" if "?" in url else "?q=720p")
+
 import re as _re_bc
 
 def _normalize_ch(title: str) -> str:
@@ -8918,10 +8981,15 @@ async def _build_barncentre_payload() -> dict:
             if len(backup_src) >= 12:
                 break
 
+        # Force re-encode for channels with irregular GOPs (TSN). See the
+        # comment on _RECODE_CHANNELS for the live-evidence write-up.
+        chosen_out  = _apply_recode(chosen, ch_name)
+        backups_out = [_apply_recode(u, ch_name) for u in backup_src]
+
         return {
             "name":         ch_name,
-            "primary_url":  chosen,
-            "backup_urls":  backup_src,
+            "primary_url":  chosen_out,
+            "backup_urls":  backups_out,
             "programs":     programs.get(ch_name, []),
             "online":       verified_primary is not None,
         }
@@ -9250,10 +9318,13 @@ async def _build_lounge_payload() -> dict:
             if len(backup_src) >= 12:
                 break
 
+        chosen_out  = _apply_recode(chosen, ch_name)
+        backups_out = [_apply_recode(u, ch_name) for u in backup_src]
+
         return {
             "name":        ch_name,
-            "primary_url": chosen,
-            "backup_urls": backup_src,
+            "primary_url": chosen_out,
+            "backup_urls": backups_out,
             "category":    "live",
             "programs":    programs.get(ch_name, []),
             "online":      verified_primary is not None,
