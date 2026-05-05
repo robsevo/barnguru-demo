@@ -8203,6 +8203,16 @@ async def _verify_stream_alive(url: str, timeout: float = 4.0) -> bool:
     # 502 verdict so we can promote a verified alternate.
     if "/hls?" in url and "u=" in url:
         timeout = max(timeout, 18.0)
+    # Relay /m3u8 wraps an upstream HLS manifest through the residential
+    # tunnel: API → CF tunnel → relay → upstream provider. Each hop adds
+    # 50-200ms; cold-cache the cumulative latency can flirt with the 4s
+    # default. an upstream host TSN1 routinely measures ~1s warm but spiked over
+    # 4s on the build that just deployed (verifier rejected it, alternate
+    # got promoted to bgdc instead). 10s headroom keeps an upstream host eligible
+    # without slowing the response noticeably (responses still cap at
+    # cold ~2s in practice).
+    elif "/m3u8?" in url and "u=" in url:
+        timeout = max(timeout, 10.0)
     sem = _get_verify_sem()
     async with sem:
         return await _verify_stream_alive_inner(url, timeout)
