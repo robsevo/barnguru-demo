@@ -7928,19 +7928,49 @@ _BARNCENTRE_CHANNEL_NAMES = [
     "TVA Sports",
 ]
 
-# Per-channel upstream-host blocklist. Any candidate whose upstream host (the
-# real provider behind the relay/m3u8 wrapper) matches an entry here is dropped
-# entirely from that channel's primary + backup pool. Use sparingly — for
-# providers that auth fine and verify alive but serve broken content (looped
-# segments, frozen feeds) that the liveness check can't detect.
+# Per-channel upstream-host blocklist with TTL. Entries map host → epoch
+# timestamp at which the host was last flagged as broken; an entry is "active"
+# only while now - timestamp < _BARNCENTRE_BLOCKLIST_TTL_S. After that it
+# auto-expires and the host re-enters the candidate pool. The loop-detector
+# probe (`_probe_manifest_loop` below) re-adds fresh entries whenever a host
+# is caught replaying segments, so a transient upstream hiccup doesn't
+# permanently demote a fast source.
 #
-# 2026-05-04: TSN1 an upstream host played a ~30s loop. Dropped an upstream host; ampztl
-# webtv1847 became primary and was also looping (same upstream feed bug).
-# Drop ampztl too so tvpass.org/live/tsn1/hd promotes to primary; bgdc +
-# an upstream host remain as backups under that.
-_BARNCENTRE_HOST_BLOCKLIST: dict[str, set[str]] = {
-    "TSN1": {"an upstream host.ddns.net", "ampztl.xyz"},
+# 2026-05-04: TSN1 an upstream host served a ~30s loop; ampztl-b webtv1847 carried
+# the same upstream feed and inherited the bug. Both timestamps are 24h+ old
+# now, so they auto-expire on the next /barncentre-channels request — if the
+# upstream is still broken, the loop probe re-adds them with a fresh stamp.
+_BARNCENTRE_BLOCKLIST_TTL_S = 24 * 60 * 60  # 24h
+_BARNCENTRE_HOST_BLOCKLIST: dict[str, dict[str, float]] = {
+    "TSN1": {
+        "an upstream host.ddns.net": 1714780000.0,  # 2026-05-04
+        "ampztl.xyz":          1714810000.0,  # 2026-05-04
+    },
 }
+
+
+def _active_blocklist(name: str) -> set[str]:
+    """Return hosts currently blocked for `name`, dropping any expired entries.
+
+    Mutates the underlying dict to evict expired entries so the structure
+    self-cleans over time. Safe to call from async contexts (the dict update
+    is sync and contention-free in CPython).
+    """
+    entries = _BARNCENTRE_HOST_BLOCKLIST.get(name)
+    if not entries:
+        return set()
+    now = _time.time()
+    expired = [h for h, t in entries.items() if now - t >= _BARNCENTRE_BLOCKLIST_TTL_S]
+    for h in expired:
+        entries.pop(h, None)
+    return set(entries.keys())
+
+
+def _add_to_blocklist(name: str, host: str) -> None:
+    """Mark `host` as broken for channel `name`. Resets the TTL window."""
+    if not host:
+        return
+    _BARNCENTRE_HOST_BLOCKLIST.setdefault(name, {})[host] = _time.time()
 
 import re as _re_bc
 
@@ -8117,6 +8147,115 @@ async def _verify_stream_alive_inner(url: str, timeout: float) -> bool:
         if "tvpass.org/live/" in url:
             return True
         return False
+
+
+# ── Loop-detector probe ──────────────────────────────────────────────────────
+# Strict liveness ("the manifest returns 200") doesn't catch the failure mode
+# we care most about: a feed that auth-passes and serves bytes but is replaying
+# the same ~30s of content forever. We see this when an upstream provider's
+# encoder dies mid-stream and the panel keeps the session "alive" with cached
+# segments — every probe says "fine," but viewers see a stuck or looping
+# picture. The fix that prompted this rewrite was a hard-coded TSN1 host
+# blocklist; the probe below replaces that with auto-detection so any channel
+# benefits, not just the one Bob noticed.
+#
+# Mechanism: pull the manifest twice, 30s apart, and parse #EXT-X-MEDIA-SEQUENCE.
+# In a healthy live stream the sequence number advances monotonically as new
+# segments are produced. Equal-or-regressed seq across a 30s window means the
+# manifest is stale (replay). When detected, the upstream host is added to
+# `_BARNCENTRE_HOST_BLOCKLIST` with a fresh timestamp; the TTL helper above
+# auto-evicts after 24h so a transient hiccup doesn't permanently demote a
+# fast source.
+#
+# Cost-bounding: per-URL probe is cached for `_LOOP_PROBE_INTERVAL_S`. With
+# ~25 BarnCentre channels and a 6h interval, the relay sees at most one probe
+# pair per channel every six hours — negligible.
+_LOOP_PROBE_INTERVAL_S = 6 * 60 * 60
+_LOOP_PROBE_GAP_S      = 30
+_loop_probe_cache: dict[str, float] = {}
+
+
+def _extract_upstream_host(url: str) -> str:
+    """Return the real provider host behind a candidate URL.
+
+    Relay-wrapped URLs (`localhost:8000/hls?u=<urlencoded-upstream>`) hide
+    the actual provider; pull it out of the `u=` query param. Non-relay URLs
+    are returned as-is. Returns empty string on parse failure so callers can
+    short-circuit cheaply.
+    """
+    if not url:
+        return ""
+    try:
+        if "localhost:8000" in url and "u=" in url:
+            from urllib.parse import parse_qs as _pq, unquote as _uq
+            inner = _uq(_pq(urlparse(url).query).get("u", [""])[0])
+            return urlparse(inner).hostname or ""
+        return urlparse(url).hostname or ""
+    except Exception:
+        return ""
+
+
+async def _read_media_sequence(url: str, timeout: float = 10.0) -> int | None:
+    """GET the HLS manifest and return its `#EXT-X-MEDIA-SEQUENCE` value.
+
+    Returns None on network failure, non-200, or absence of the tag (e.g. a
+    master playlist instead of a media playlist — those don't carry a
+    sequence number, so we conservatively skip them).
+    """
+    import httpx as _hx_l
+    try:
+        async with _hx_l.AsyncClient(
+            follow_redirects=True,
+            timeout=timeout,
+            headers={"User-Agent": "Grtzky-LoopProbe/1.0"},
+        ) as cl:
+            r = await cl.get(url)
+        if r.status_code != 200 or not r.text:
+            return None
+        for raw in r.text.splitlines():
+            line = raw.strip()
+            if line.startswith("#EXT-X-MEDIA-SEQUENCE:"):
+                try:
+                    return int(line.split(":", 1)[1].strip())
+                except ValueError:
+                    return None
+        return None
+    except Exception:
+        return None
+
+
+async def _probe_manifest_loop(url: str, channel_name: str) -> None:
+    """Detect a looping manifest and quarantine its upstream host.
+
+    Pulls the manifest twice `_LOOP_PROBE_GAP_S` apart and compares
+    `#EXT-X-MEDIA-SEQUENCE`. Equal-or-regressed seq → host added to
+    `_BARNCENTRE_HOST_BLOCKLIST` for 24h. Cached per-URL so a single page
+    load doesn't re-probe the same channel multiple times.
+    """
+    if not url or not channel_name:
+        return
+    now = _time.time()
+    last = _loop_probe_cache.get(url, 0.0)
+    if now - last < _LOOP_PROBE_INTERVAL_S:
+        return
+    _loop_probe_cache[url] = now  # claim the slot regardless of outcome
+
+    seq1 = await _read_media_sequence(url)
+    if seq1 is None:
+        return
+    await asyncio.sleep(_LOOP_PROBE_GAP_S)
+    seq2 = await _read_media_sequence(url)
+    if seq2 is None:
+        return
+    if seq2 > seq1:
+        return  # advancing healthily
+    host = _extract_upstream_host(url)
+    if host:
+        _add_to_blocklist(channel_name, host)
+        # Drop the cache entry so the next page load re-evaluates from
+        # scratch — if the loop was a one-time hiccup that recovered before
+        # the TTL expires, we still want fresh data when the host re-enters.
+        _loop_probe_cache.pop(url, None)
 
 
 _QUALITY_TAG_RE = _re_iptv.compile(r"\b(4K|UHD|FHD|HD|SD)\b", _re_iptv.I)
@@ -8706,7 +8845,7 @@ async def _build_barncentre_payload() -> dict:
             if m["url"] not in seen:
                 seen.add(m["url"])
                 unique.append(m)
-        blocked = _BARNCENTRE_HOST_BLOCKLIST.get(name)
+        blocked = _active_blocklist(name)
         if blocked:
             unique = [c for c in unique if _candidate_upstream_host(c["url"]) not in blocked]
         channel_candidates[name] = _sort_by_url_priority(unique)
@@ -8741,6 +8880,16 @@ async def _build_barncentre_payload() -> dict:
                 if await _verify_stream_alive(cand["url"]):
                     verified_primary = cand["url"]
                     break
+
+        # Loop-detector: kick off a background probe of the chosen primary so
+        # any host that's serving stale content gets quarantined for 24h.
+        # Fire-and-forget; cached per-URL by `_LOOP_PROBE_INTERVAL_S` so this
+        # doesn't fire on every page load.
+        if verified_primary:
+            try:
+                asyncio.create_task(_probe_manifest_loop(verified_primary, ch_name))
+            except RuntimeError:
+                pass  # no running loop (e.g. import-time call) — skip
 
         # Diverse-provider backup list. Without per-host capping a single
         # provider with multiple accounts (e.g. bgdc.live × 3 accounts × 2
@@ -9052,7 +9201,7 @@ async def _build_lounge_payload() -> dict:
             if c["url"] not in seen_urls:
                 seen_urls.add(c["url"])
                 unique.append(c)
-        blocked = _LOUNGE_HOST_BLOCKLIST.get(name) or _BARNCENTRE_HOST_BLOCKLIST.get(name)
+        blocked = _LOUNGE_HOST_BLOCKLIST.get(name) or _active_blocklist(name)
         if blocked:
             unique = [c for c in unique if _candidate_upstream_host(c["url"]) not in blocked]
         channel_candidates[name] = _sort_by_url_priority(unique)
