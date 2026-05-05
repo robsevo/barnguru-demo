@@ -6562,11 +6562,20 @@ _PROXY_INFLIGHT: dict[str, "asyncio.Future[tuple[str, bytes, int]]"] = {}
 
 
 async def _get_proxy_http() -> httpx.AsyncClient:
-    """Return the pooled client; lazy-init in case startup didn't run."""
+    """Return the pooled client; lazy-init in case startup didn't run.
+
+    read=30s is a deliberate bump over the old 15s. The relay's /hls
+    endpoint blocks for up to HLS_STARTUP_TIMEOUT_S (15s) waiting for
+    ffmpeg to produce the first manifest on cold start. With both timers
+    set to 15s the API client gave up at exactly 15.04s and surfaced a
+    502, killing the player before the relay even finished spinning up —
+    the "video doesn't load unless we press Cast" symptom. 30s gives the
+    relay headroom while still failing reasonably fast on a dead chip.
+    """
     global _PROXY_HTTP
     if _PROXY_HTTP is None:
         _PROXY_HTTP = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=4.0, read=15.0, write=15.0, pool=5.0),
+            timeout=httpx.Timeout(connect=4.0, read=30.0, write=15.0, pool=5.0),
             limits=httpx.Limits(
                 max_connections=200,
                 max_keepalive_connections=100,
@@ -6795,6 +6804,21 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
     try:
         client = await _get_proxy_http()
         resp = await client.get(url, headers=_stream_headers)
+
+        # Relay cold-start race — the relay's /hls endpoint can return 503
+        # "manifest not yet available" when ffmpeg has spawned but hasn't
+        # produced the first segment yet. Retry once after a short wait
+        # before surfacing the error. This is the same race that used to
+        # show as "video doesn't load until you press Cast" — Cast went
+        # direct to the relay and the browser tolerated the wait, but the
+        # proxy path saw the 503 and gave up.
+        if (
+            resp.status_code == 503
+            and "/hls" in url.lower()
+            and b"manifest not yet available" in resp.content
+        ):
+            await asyncio.sleep(2.0)
+            resp = await client.get(url, headers=_stream_headers)
 
         content_type = resp.headers.get("content-type", "")
         body = resp.content
