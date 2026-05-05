@@ -7177,6 +7177,36 @@ _NHL_KEYWORDS = [
     "fox sports",
 ]
 
+# Cable channels carried by Origin Lounge (the personal at-home Fire TV app).
+# These get pulled into the same iptv_channels() candidate pool — downstream
+# filters (`_BARNCENTRE_CHANNEL_NAMES` vs `_LOUNGE_CHANNEL_NAMES`) decide
+# which app surfaces which channel, so broadening the enumeration keyword
+# set doesn't change BarnCentre output.
+_LOUNGE_CABLE_KEYWORDS = [
+    # Premium movie networks
+    "hbo", "cinemax", "starz", "showtime",
+    # General entertainment
+    "amc", " fx ", "fx hd", "fx movies", "fxx", "tnt", "a&e", "ae hd", "a e ",
+    "comedy central", "comedy", "mtv",
+    # Kids / animation
+    "cartoon network", "adult swim", "teletoon", "boomerang",
+    "pokemon", "sailor moon", "yu gi", "yu-gi",
+    # Factual
+    "discovery", "national geographic", "nat geo", "history",
+    # Lifestyle
+    "tlc", "food network", "hgtv", "oxygen",
+    # Canadian premium cable
+    "stack tv", "stack hd", "stacktv", "w network", "showcase", "slice",
+    # Streaming-services-as-channel
+    "paramount",
+]
+
+# Combined filter used at IPTV-channel enumeration time. Sources upstream of
+# this filter (upstream, M3U playlists, tvpass, etc.) get scanned for any of
+# these substrings; BarnCentre + Lounge then pick what they need from the
+# resulting candidate pool.
+_IPTV_CHANNEL_KEYWORDS = _NHL_KEYWORDS + _LOUNGE_CABLE_KEYWORDS
+
 # ---------------------------------------------------------------------------
 # upstream Codes IPTV accounts — fetched at startup, cached 1hr alongside tvpass
 # Each entry: (label, host, port, username, password)
@@ -7458,7 +7488,7 @@ async def _fetch_upstream_channels(
                 stream_url = lines[i + 1].strip() if i + 1 < len(lines) else ""
                 if (
                     stream_url.startswith("http")
-                    and any(k in ch_name.lower() for k in _NHL_KEYWORDS)
+                    and any(k in ch_name.lower() for k in _IPTV_CHANNEL_KEYWORDS)
                 ):
                     out.append({
                         "title":      f"{ch_name} ({label})",
@@ -7503,7 +7533,7 @@ async def _fetch_upstream_channels(
             sid     = s.get("stream_id")
             if not ch_name or sid is None:
                 continue
-            if not any(k in ch_name.lower() for k in _NHL_KEYWORDS):
+            if not any(k in ch_name.lower() for k in _IPTV_CHANNEL_KEYWORDS):
                 continue
             # Prefer .m3u8 — relay's /m3u8 endpoint passthrough-rewrites cheaply
             # (no ffmpeg). Panels that only serve raw TS will redirect to a /ts
@@ -7641,7 +7671,7 @@ async def _src_streams_json() -> list[dict]:
                 if (
                     entry.get("status") == "working"
                     and use_url.startswith("http")
-                    and any(k in name_lower for k in _NHL_KEYWORDS)
+                    and any(k in name_lower for k in _IPTV_CHANNEL_KEYWORDS)
                 ):
                     out.append({
                         "title": f"{entry['name']} (thetvapp)",
@@ -7682,7 +7712,7 @@ async def _src_m3u_playlists() -> list[dict]:
                     display = name_match.group(1) if name_match else line.split(",")[-1].strip()
                     url_line = lines[i + 1].strip()
                     if (
-                        any(k in display.lower() for k in _NHL_KEYWORDS)
+                        any(k in display.lower() for k in _IPTV_CHANNEL_KEYWORDS)
                         and url_line.startswith("http")
                         and _is_approved_iptv_url(url_line)
                     ):
@@ -8812,3 +8842,869 @@ async def _build_barncentre_payload() -> dict:
     _barncentre_cache["data"] = result
     _barncentre_cache["ts"]   = now_ts
     return {"channels": result, "cached": False}
+
+
+# ===========================================================================
+# /lounge/* — Origin Lounge personal Fire TV app endpoints
+# ===========================================================================
+#
+# At-home Fire TV companion app. Reuses the same upstream accounts, the same
+# relay, and the same `grtzky_session` cookie auth as BarnCentre. Surfaces
+# premium cable + sports for Live TV, plus the full upstream VOD catalog
+# (movies + series) organised Netflix-style by streaming service.
+#
+# All endpoints are gated by Next.js cookie middleware (`/api/lounge/*`
+# proxies to `http://localhost:8000/lounge/*`), so reaching this code from
+# the public internet without a session is impossible.
+
+_LOUNGE_CHANNEL_NAMES: list[str] = [
+    # All BarnCentre sports channels carry over verbatim.
+    *_BARNCENTRE_CHANNEL_NAMES,
+    # Premium movie networks
+    "HBO", "HBO Max", "Cinemax", "Starz",
+    # General entertainment
+    "AMC", "FX", "FXX", "TNT", "A&E", "Comedy Central", "MTV",
+    # Kids / animation
+    "Cartoon Network", "Adult Swim", "Teletoon", "Boomerang",
+    "24/7 Pokemon", "24/7 Sailor Moon",
+    # Factual
+    "Discovery", "National Geographic", "History",
+    # Lifestyle
+    "TLC", "Food Network", "HGTV", "Oxygen",
+    # Canadian premium cable
+    "Stack TV", "W Network", "Showcase", "Slice",
+    # Streaming-services-as-channel
+    "Paramount+",
+]
+
+# Per-channel upstream-host blocklist. Same semantics as
+# _BARNCENTRE_HOST_BLOCKLIST — drop hosts that auth-pass + serve broken
+# content (looped/frozen/auth-only) on this specific channel. Start empty;
+# Bob populates as he discovers them.
+_LOUNGE_HOST_BLOCKLIST: dict[str, set[str]] = {}
+
+_LOUNGE_TTL = _BARNCENTRE_TTL  # share the same staleness window
+
+_lounge_cache: dict = {"data": None, "ts": 0.0}
+_LOUNGE_REFRESH_TASK: asyncio.Task | None = None
+
+
+def _kick_lounge_refresh() -> None:
+    global _LOUNGE_REFRESH_TASK
+    if _LOUNGE_REFRESH_TASK is not None and not _LOUNGE_REFRESH_TASK.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+
+        async def _refresh():
+            try:
+                await _build_lounge_payload()
+            except Exception:
+                pass
+
+        _LOUNGE_REFRESH_TASK = loop.create_task(_refresh())
+    except RuntimeError:
+        pass
+
+
+@app.get("/lounge/live-channels")
+async def lounge_live_channels() -> dict:
+    """Curated cable + sports channel list for Origin Lounge.
+
+    Same SWR semantics as /barncentre-channels. Reuses the IPTV channel
+    candidate pool (filtered through `_IPTV_CHANNEL_KEYWORDS` which now
+    includes cable substrings on top of NHL ones), then matches to
+    `_LOUNGE_CHANNEL_NAMES` and ranks each chip via the quality-aware
+    `_sort_by_url_priority`.
+    """
+    import time as _t_lc
+
+    now_ts = _t_lc.time()
+    have   = _lounge_cache["data"] is not None
+    fresh  = have and (now_ts - _lounge_cache["ts"] < _LOUNGE_TTL)
+
+    if fresh:
+        return {"channels": _lounge_cache["data"], "cached": True}
+    if have:
+        _kick_lounge_refresh()
+        return {"channels": _lounge_cache["data"], "cached": True, "stale": True}
+
+    return await _build_lounge_payload()
+
+
+async def _build_lounge_payload() -> dict:
+    """Builder for /lounge/live-channels. Models `_build_barncentre_payload`
+    closely — same IPTV pool, same matching/normalisation, but uses the
+    lounge's broader curated list and per-channel blocklist.
+    """
+    import time as _t_lp
+    import asyncio as _aio_lp
+    now_ts = _t_lp.time()
+
+    iptv_result = await iptv_channels()
+    all_channels: list[dict] = iptv_result.get("channels", [])
+
+    # Programs source: today's NHL/ESPN/MLB/NBA from the existing helpers
+    # (sports channels in _LOUNGE_CHANNEL_NAMES still want their game guide).
+    # Cable channels get programs[] populated by the EPG endpoint
+    # (/lounge/epg) once it lands; the channel list itself stays light.
+    import datetime as _dt_lp
+    today = _dt_lp.date.today().isoformat()
+    programs: dict[str, list] = {}
+    try:
+        import httpx as _hx_lp
+        async with _hx_lp.AsyncClient(timeout=8) as _cl:
+            resp = await _cl.get(f"https://api-web.nhle.com/v1/score/{today}")
+            if resp.status_code == 200:
+                for game in (resp.json().get("games") or []):
+                    gid        = game.get("id")
+                    away       = (game.get("awayTeam") or {}).get("abbrev", "")
+                    home       = (game.get("homeTeam") or {}).get("abbrev", "")
+                    start_utc  = game.get("startTimeUTC", "")
+                    game_state = game.get("gameState", "PRE")
+                    away_score = (game.get("awayTeam") or {}).get("score")
+                    home_score = (game.get("homeTeam") or {}).get("score")
+                    for b in (game.get("tvBroadcasts") or []):
+                        code    = b.get("network", "")
+                        display = _BROADCAST_CODE_MAP.get(code, code)
+                        programs.setdefault(display, []).append({
+                            "game_id":    gid,
+                            "title":      f"{away} @ {home}",
+                            "start_utc":  start_utc,
+                            "state":      game_state,
+                            "market":     b.get("market", "N"),
+                            "away_score": away_score,
+                            "home_score": home_score,
+                        })
+    except Exception:
+        pass
+
+    epg_data, mlb_data, nba_data = await _aio_lp.gather(
+        _fetch_espn_schedule(), _fetch_mlb_schedule(), _fetch_nba_schedule(),
+    )
+    for sport in (epg_data, mlb_data, nba_data):
+        for ch_name, progs in sport.items():
+            programs.setdefault(ch_name, []).extend(progs)
+    for ch_name in programs:
+        programs[ch_name].sort(key=lambda p: p.get("start_utc", ""))
+
+    # Match candidates to curated names — longer/more-specific names first
+    # so "HBO Max" and "FXX" claim before "HBO" / "FX".
+    sorted_names = sorted(_LOUNGE_CHANNEL_NAMES, key=lambda n: -len(n))
+    assigned: dict[int, str] = {}
+    for ch_name in sorted_names:
+        for ch in all_channels:
+            if id(ch) in assigned:
+                continue
+            if _ch_matches(ch.get("title", ""), ch_name):
+                assigned[id(ch)] = ch_name
+
+    channel_candidates: dict[str, list[dict]] = {}
+    for ch in all_channels:
+        name = assigned.get(id(ch))
+        if not name:
+            continue
+        channel_candidates.setdefault(name, []).append(ch)
+
+    # Backup-host capping helper — same logic as the barncentre builder so
+    # one provider with N accounts doesn't eat the whole backup chain.
+    from urllib.parse import parse_qs as _bl_parse_qs, unquote as _bl_unquote
+    def _backup_upstream_host(u: str) -> str:
+        if "localhost:8000" in u and "u=" in u:
+            try:
+                inner = _bl_unquote(_bl_parse_qs(urlparse(u).query).get("u", [""])[0])
+                return urlparse(inner).hostname or ""
+            except Exception:
+                return ""
+        return urlparse(u).hostname or ""
+
+    def _candidate_upstream_host(u: str) -> str:
+        return _backup_upstream_host(u)
+
+    for name, cands in list(channel_candidates.items()):
+        seen_urls: set[str] = set()
+        unique: list[dict] = []
+        for c in cands:
+            if c["url"] not in seen_urls:
+                seen_urls.add(c["url"])
+                unique.append(c)
+        blocked = _LOUNGE_HOST_BLOCKLIST.get(name) or _BARNCENTRE_HOST_BLOCKLIST.get(name)
+        if blocked:
+            unique = [c for c in unique if _candidate_upstream_host(c["url"]) not in blocked]
+        channel_candidates[name] = _sort_by_url_priority(unique)
+
+    async def _build_one(ch_name: str, candidates: list[dict]) -> dict:
+        # Same upstream-bias logic as barncentre — the verifier's 10s window
+        # routinely demotes valid upstream chips on cold start, so we trust
+        # the field-tested order.
+        def _is_upstream(u: str) -> bool:
+            return ("an upstream host" in u) or ("ampztl" in u) or ("kstv.us" in u)
+
+        if not candidates:
+            return {
+                "name":        ch_name,
+                "primary_url": "",
+                "backup_urls": [],
+                "category":    "live",
+                "programs":    programs.get(ch_name, []),
+                "online":      False,
+            }
+
+        upstream_cands = [c for c in candidates if _is_upstream(c["url"])]
+        chosen = (upstream_cands[0] if upstream_cands else candidates[0])["url"]
+
+        verified_primary: str | None = None
+        if await _verify_stream_alive(chosen):
+            verified_primary = chosen
+        else:
+            for cand in candidates[:3]:
+                if cand["url"] == chosen:
+                    continue
+                if await _verify_stream_alive(cand["url"]):
+                    verified_primary = cand["url"]
+                    break
+
+        host_used: dict[str, int] = {}
+        backup_src: list[str] = []
+        for c in candidates:
+            if c["url"] == chosen:
+                continue
+            h = _backup_upstream_host(c["url"])
+            if host_used.get(h, 0) >= 3:
+                continue
+            host_used[h] = host_used.get(h, 0) + 1
+            backup_src.append(c["url"])
+            if len(backup_src) >= 12:
+                break
+
+        return {
+            "name":        ch_name,
+            "primary_url": chosen,
+            "backup_urls": backup_src,
+            "category":    "live",
+            "programs":    programs.get(ch_name, []),
+            "online":      verified_primary is not None,
+        }
+
+    tasks  = [_build_one(n, c) for n, c in channel_candidates.items()]
+    result = list(await _aio_lp.gather(*tasks))
+    order  = {n: i for i, n in enumerate(_LOUNGE_CHANNEL_NAMES)}
+    result.sort(key=lambda ch: order.get(ch["name"], 999))
+
+    # Pre-warm relay ffmpeg sessions on the resolved primaries (same trick
+    # as BarnCentre — saves 4-7s cold-start on the first click).
+    try:
+        warmup_input = [
+            {"network": ch["name"], "channels": [{"url": ch["primary_url"]}]}
+            for ch in result if ch.get("primary_url")
+        ]
+        _kick_chip_warmups(warmup_input)
+    except Exception:
+        pass
+
+    _lounge_cache["data"] = result
+    _lounge_cache["ts"]   = now_ts
+    return {"channels": result, "cached": False}
+
+
+# ─── /lounge/epg — TV guide for the cable + sports channels ───────────────
+#
+# Source priority (highest first):
+#   1. Sports channels: existing programs[] from /lounge/live-channels (NHL +
+#      ESPN + MLB + NBA schedules, populated by `_build_lounge_payload`)
+#   2. Each upstream account's `xmltv.php` — many panels expose this and it's
+#      the cheapest source for cable EPG. Fetched per-account in parallel,
+#      cached 6h.
+#   3. iptv-org/epg fallback (deferred — runs as a nightly cron writing
+#      Parquet to data/lounge_epg/, glued in here once it ships).
+
+_lounge_epg_cache: dict = {"data": None, "ts": 0.0}
+_LOUNGE_EPG_TTL = 6 * 3600  # 6h
+
+
+async def _fetch_upstream_xmltv(label: str, host: str, port: int, user: str, pw: str) -> dict[str, list[dict]]:
+    """Hit one upstream account's xmltv.php and return {channel_id: [programmes]}.
+
+    Returns empty dict on auth failure / parse error / network timeout —
+    each panel either supports XMLTV or it doesn't, and we don't retry the
+    failures inline (the 6h cache absorbs them).
+    """
+    import httpx as _hx_xmltv
+    import xml.etree.ElementTree as ET
+
+    base = f"http://{host}:{port}"
+    url  = f"{base}/xmltv.php?username={user}&password={pw}"
+    try:
+        async with _hx_xmltv.AsyncClient(timeout=20.0, follow_redirects=True) as hx:
+            r = await hx.get(url, headers={"User-Agent": _BROWSER_HEADERS["User-Agent"]})
+        if r.status_code != 200 or not r.content or not r.content.lstrip().startswith(b"<"):
+            return {}
+        root = ET.fromstring(r.content)
+    except Exception:
+        return {}
+
+    # Map channel id → display-name (XMLTV uses tvg-id which we'll also
+    # match against). Programmes reference the channel id as `channel="…"`.
+    chan_names: dict[str, str] = {}
+    for ch in root.findall("channel"):
+        cid = ch.get("id") or ""
+        dn  = ch.findtext("display-name") or cid
+        chan_names[cid] = dn
+
+    out: dict[str, list[dict]] = {}
+    for prog in root.findall("programme"):
+        cid    = prog.get("channel") or ""
+        start  = prog.get("start") or ""
+        stop   = prog.get("stop") or ""
+        title  = prog.findtext("title") or ""
+        desc   = prog.findtext("desc")
+        if not cid or not title:
+            continue
+        # Convert XMLTV start/stop ("20260504220000 +0000") to ISO 8601.
+        def _parse(ts: str) -> str:
+            try:
+                if not ts:
+                    return ""
+                dt_part, _, tz_part = ts.partition(" ")
+                from datetime import datetime, timezone, timedelta
+                dt = datetime.strptime(dt_part, "%Y%m%d%H%M%S")
+                if tz_part and len(tz_part) == 5:
+                    sign = 1 if tz_part[0] == "+" else -1
+                    hh = int(tz_part[1:3])
+                    mm = int(tz_part[3:5])
+                    dt = dt.replace(tzinfo=timezone(sign * timedelta(hours=hh, minutes=mm)))
+                else:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            except Exception:
+                return ts
+
+        # Key the output by both id and display name so we can match either.
+        keys = {cid}
+        if cid in chan_names:
+            keys.add(chan_names[cid])
+        for k in keys:
+            out.setdefault(k, []).append({
+                "title":     title,
+                "start_utc": _parse(start),
+                "stop_utc":  _parse(stop),
+                "desc":      desc,
+            })
+    return out
+
+
+@app.get("/lounge/epg")
+async def lounge_epg(channels: str = "") -> dict:
+    """Programme listings for the next ~48h on the requested channels.
+
+    Returns `{channel_name: [programmes]}`. `channels` is a comma-separated
+    list of names from /lounge/live-channels (e.g. "HBO,FX,AMC"). Empty
+    string returns all known programmes.
+    """
+    import time as _t_epg
+    now_ts = _t_epg.time()
+    have   = _lounge_epg_cache["data"] is not None
+    fresh  = have and (now_ts - _lounge_epg_cache["ts"] < _LOUNGE_EPG_TTL)
+
+    if not fresh:
+        # Refresh inline — keeps the response simple. SWR pattern fits
+        # /lounge/live-channels (called every screen mount); EPG is hit far
+        # less often (one fetch per Live-TV view).
+        per_account = await asyncio.gather(
+            *[
+                _fetch_upstream_xmltv(label, host, port, user, pw)
+                for label, host, port, user, pw in _upstream_ACCOUNTS
+            ],
+            return_exceptions=True,
+        )
+        merged: dict[str, list[dict]] = {}
+        for r in per_account:
+            if not isinstance(r, dict):
+                continue
+            for k, v in r.items():
+                merged.setdefault(k, []).extend(v)
+        # Fold in sports programs from the Lounge channel list (already
+        # populated when /lounge/live-channels last ran).
+        if isinstance(_lounge_cache.get("data"), list):
+            for ch in _lounge_cache["data"]:
+                ch_name = ch.get("name", "")
+                progs   = ch.get("programs", []) or []
+                if ch_name and progs:
+                    merged.setdefault(ch_name, []).extend(progs)
+        # Dedup + sort each channel's programmes
+        for k in list(merged.keys()):
+            seen: set[tuple] = set()
+            unique: list[dict] = []
+            for p in merged[k]:
+                key = (p.get("title", ""), p.get("start_utc", ""))
+                if key in seen:
+                    continue
+                seen.add(key)
+                unique.append(p)
+            unique.sort(key=lambda p: p.get("start_utc", ""))
+            merged[k] = unique
+        _lounge_epg_cache["data"] = merged
+        _lounge_epg_cache["ts"]   = now_ts
+
+    data: dict[str, list[dict]] = _lounge_epg_cache["data"] or {}
+    if channels:
+        wanted = {c.strip() for c in channels.split(",") if c.strip()}
+        # Match by channel name OR by tvg-id (some panels use ids in the
+        # XMLTV `channel` attribute that don't equal the display name).
+        filtered: dict[str, list[dict]] = {}
+        for w in wanted:
+            if w in data:
+                filtered[w] = data[w]
+                continue
+            # Loose match — strip non-alpha from both sides
+            wl = "".join(c for c in w.lower() if c.isalnum())
+            for k, v in data.items():
+                kl = "".join(c for c in k.lower() if c.isalnum())
+                if wl == kl or wl in kl or kl in wl:
+                    filtered.setdefault(w, []).extend(v)
+        return {"programmes": filtered, "cached": fresh}
+
+    return {"programmes": data, "cached": fresh}
+
+
+# ─── /lounge/vod/* — Movies + Series catalog from upstream VOD APIs ────────
+#
+# Pipeline:
+#   1. Each upstream account exposes action=get_vod_streams + action=get_series.
+#      We cache the union (deduped by tmdb_id when present, else by title +
+#      year) for 24h in `_lounge_vod_cache`.
+#   2. TMDB fills posters / overview / release_date when TMDB_API_KEY is set.
+#      Without the key, we fall back to the upstream-supplied metadata
+#      (often poster URL is set; overview rarely is). Endpoint flags
+#      `metadata_source: "tmdb"` vs `"upstream_only"` so the UI can render
+#      the gap honestly.
+#   3. Watchmode classifies titles by streaming service (Netflix / Disney+ /
+#      Paramount+ / Apple TV+ / Crave / Prime CA) when WATCHMODE_API_KEY is
+#      set. Without the key, we group by upstream's category name (panels
+#      typically tag titles as "VOD - Netflix" / "Netflix Movies" etc., so
+#      this is a decent fallback).
+
+_lounge_vod_cache: dict = {"data": None, "ts": 0.0}
+_LOUNGE_VOD_TTL = 24 * 3600  # 24h — VOD catalog is slow-moving
+
+# Streaming services we expose on the Movies/Series picker. Order is the
+# order the UI renders them.
+_LOUNGE_VOD_SERVICES: list[str] = [
+    "Netflix", "Disney+", "Paramount+", "Apple TV+", "HBO Max",
+    "Prime Video", "Crave", "Hulu", "Peacock", "Other",
+]
+
+# Service-name fragments used to classify upstream category names in the
+# fallback path (no Watchmode key). All checks lowercase.
+_LOUNGE_VOD_CATEGORY_HINTS: dict[str, list[str]] = {
+    "Netflix":      ["netflix", "nflx"],
+    "Disney+":      ["disney", "disney+", "disney plus"],
+    "Paramount+":   ["paramount", "paramount+", "paramount plus", "p+"],
+    "Apple TV+":    ["apple tv", "apple tv+", "appletv", "atv+"],
+    "HBO Max":      ["hbo max", "hbo-max", "hbomax", "max only"],
+    "Prime Video":  ["amazon prime", "prime video", "amazon", "prime"],
+    "Crave":        ["crave"],
+    "Hulu":         ["hulu"],
+    "Peacock":      ["peacock"],
+}
+
+
+def _classify_vod_service(category_name: str) -> str:
+    """Assign a streaming service from an upstream category label. Falls back
+    to "Other" when nothing matches — the UI groups Other into a generic
+    rail at the end of the service picker."""
+    if not category_name:
+        return "Other"
+    cl = category_name.lower()
+    for svc, hints in _LOUNGE_VOD_CATEGORY_HINTS.items():
+        if any(h in cl for h in hints):
+            return svc
+    return "Other"
+
+
+async def _fetch_upstream_vod(label: str, host: str, port: int, user: str, pw: str) -> dict:
+    """Pull one account's VOD catalog. Returns
+    {"categories": {category_id: name}, "movies": [...], "series": [...]}.
+    """
+    import httpx as _hx_vod
+
+    base = f"http://{host}:{port}"
+    out: dict = {"label": label, "categories": {}, "movies": [], "series": []}
+    try:
+        async with _hx_vod.AsyncClient(timeout=30.0, follow_redirects=True) as hx:
+            cat_r, mov_r, ser_r = await asyncio.gather(
+                hx.get(f"{base}/player_api.php?username={user}&password={pw}&action=get_vod_categories",
+                       headers={"User-Agent": _BROWSER_HEADERS["User-Agent"]}),
+                hx.get(f"{base}/player_api.php?username={user}&password={pw}&action=get_vod_streams",
+                       headers={"User-Agent": _BROWSER_HEADERS["User-Agent"]}),
+                hx.get(f"{base}/player_api.php?username={user}&password={pw}&action=get_series",
+                       headers={"User-Agent": _BROWSER_HEADERS["User-Agent"]}),
+                return_exceptions=True,
+            )
+
+        if hasattr(cat_r, "status_code") and cat_r.status_code == 200:
+            try:
+                cats = cat_r.json()
+                if isinstance(cats, list):
+                    out["categories"] = {
+                        str(c.get("category_id")): c.get("category_name", "")
+                        for c in cats if isinstance(c, dict)
+                    }
+            except Exception:
+                pass
+
+        if hasattr(mov_r, "status_code") and mov_r.status_code == 200:
+            try:
+                streams = mov_r.json()
+                if isinstance(streams, list):
+                    for s in streams:
+                        if not isinstance(s, dict):
+                            continue
+                        sid       = s.get("stream_id")
+                        cat_id    = str(s.get("category_id", ""))
+                        cat_name  = out["categories"].get(cat_id, "")
+                        ext       = s.get("container_extension") or "mp4"
+                        out["movies"].append({
+                            "kind":              "movie",
+                            "label":             label,
+                            "stream_id":         sid,
+                            "name":              s.get("name") or "",
+                            "tmdb_id":           s.get("tmdb") or s.get("tmdb_id"),
+                            "year":              s.get("year"),
+                            "rating":            s.get("rating"),
+                            "added":             s.get("added"),
+                            "category_name":     cat_name,
+                            "service":           _classify_vod_service(cat_name),
+                            "url":               f"{base}/movie/{user}/{pw}/{sid}.{ext}",
+                            "poster":            s.get("stream_icon"),
+                        })
+            except Exception:
+                pass
+
+        if hasattr(ser_r, "status_code") and ser_r.status_code == 200:
+            try:
+                series = ser_r.json()
+                if isinstance(series, list):
+                    for s in series:
+                        if not isinstance(s, dict):
+                            continue
+                        sid       = s.get("series_id")
+                        cat_id    = str(s.get("category_id", ""))
+                        cat_name  = out["categories"].get(cat_id, "")
+                        out["series"].append({
+                            "kind":              "series",
+                            "label":             label,
+                            "series_id":         sid,
+                            "name":              s.get("name") or "",
+                            "tmdb_id":           s.get("tmdb") or s.get("tmdb_id"),
+                            "year":              s.get("year"),
+                            "rating":            s.get("rating"),
+                            "added":             s.get("last_modified") or s.get("releaseDate"),
+                            "category_name":     cat_name,
+                            "service":           _classify_vod_service(cat_name),
+                            "poster":            s.get("cover"),
+                            "host":              host,
+                            "port":              port,
+                            "user":              user,
+                            "pw":                pw,
+                        })
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return out
+
+
+async def _build_vod_catalog() -> dict:
+    """Aggregate VOD catalogs across all upstream accounts. Result shape:
+
+        {
+          "by_service": {"Netflix": {"movies": [...], "series": [...]},
+                         "Disney+": {...}, ...},
+          "movies_by_id":  {tmdb_id: [movie_dict, ...]},  # for instance fallback
+          "series_by_id":  {series_id_str: series_dict},
+          "metadata_source": "tmdb" | "upstream_only",
+          "fetched_at": <unix_ts>,
+        }
+    """
+    import time as _t_vod
+    per_account = await asyncio.gather(
+        *[
+            _fetch_upstream_vod(label, host, port, user, pw)
+            for label, host, port, user, pw in _upstream_ACCOUNTS
+        ],
+        return_exceptions=True,
+    )
+
+    movies: list[dict] = []
+    series: list[dict] = []
+    for r in per_account:
+        if not isinstance(r, dict):
+            continue
+        movies.extend(r.get("movies", []))
+        series.extend(r.get("series", []))
+
+    # Group by service.
+    by_service: dict[str, dict[str, list[dict]]] = {
+        svc: {"movies": [], "series": []} for svc in _LOUNGE_VOD_SERVICES
+    }
+    for m in movies:
+        by_service.setdefault(m["service"], {"movies": [], "series": []})["movies"].append(m)
+    for s in series:
+        by_service.setdefault(s["service"], {"movies": [], "series": []})["series"].append(s)
+
+    # Sort each rail by added/release date desc — newest first.
+    def _date_key(item: dict) -> str:
+        return str(item.get("added") or item.get("year") or "")
+    for svc in by_service:
+        by_service[svc]["movies"].sort(key=_date_key, reverse=True)
+        by_service[svc]["series"].sort(key=_date_key, reverse=True)
+
+    # Multi-instance index — maps a tmdb_id (or fallback name+year) to all
+    # movie dicts that have it. The /lounge/vod/details endpoint uses this
+    # to assemble the backup-URL chain.
+    movies_by_id: dict[str, list[dict]] = {}
+    for m in movies:
+        key = str(m.get("tmdb_id") or "") or f"name:{(m.get('name') or '').lower().strip()}|year:{m.get('year') or ''}"
+        movies_by_id.setdefault(key, []).append(m)
+
+    series_by_id: dict[str, dict] = {}
+    for s in series:
+        sid = str(s.get("series_id") or "")
+        if sid:
+            series_by_id[sid] = s
+
+    return {
+        "by_service":     by_service,
+        "movies_by_id":   movies_by_id,
+        "series_by_id":   series_by_id,
+        "metadata_source": "upstream_only",  # TMDB join is a future Phase 3.5 step
+        "fetched_at":     _t_vod.time(),
+    }
+
+
+@app.get("/lounge/vod/catalog")
+async def lounge_vod_catalog(service: str = "") -> dict:
+    """Movies + series catalog grouped by streaming service.
+
+    `service` filters to a single service (case-insensitive). Empty returns
+    every service. Sort: newest first within each rail.
+    """
+    import time as _t_vc
+    now_ts = _t_vc.time()
+    have   = _lounge_vod_cache["data"] is not None
+    fresh  = have and (now_ts - _lounge_vod_cache["ts"] < _LOUNGE_VOD_TTL)
+
+    if not fresh:
+        try:
+            data = await _build_vod_catalog()
+            _lounge_vod_cache["data"] = data
+            _lounge_vod_cache["ts"]   = now_ts
+        except Exception as e:
+            if not have:
+                return {"error": f"vod build failed: {e}", "by_service": {}}
+            data = _lounge_vod_cache["data"]
+    else:
+        data = _lounge_vod_cache["data"]
+
+    by_service = data.get("by_service", {})
+    if service:
+        # Case-insensitive match
+        sl = service.lower()
+        match = next((k for k in by_service if k.lower() == sl), None)
+        if not match:
+            return {"service": service, "movies": [], "series": [], "metadata_source": data.get("metadata_source")}
+        return {
+            "service": match,
+            "movies":  by_service[match]["movies"][:200],   # cap to keep payload tame
+            "series":  by_service[match]["series"][:200],
+            "metadata_source": data.get("metadata_source"),
+            "cached":  fresh,
+        }
+
+    # Whole catalog — return per-service counts so the picker can show
+    # numbers, plus a small preview rail (top 20 newest per service).
+    summary = {
+        svc: {
+            "movies_count": len(rails["movies"]),
+            "series_count": len(rails["series"]),
+            "preview":      rails["movies"][:20] + rails["series"][:20],
+        }
+        for svc, rails in by_service.items()
+    }
+    return {
+        "services":         _LOUNGE_VOD_SERVICES,
+        "summary":          summary,
+        "metadata_source":  data.get("metadata_source"),
+        "cached":           fresh,
+    }
+
+
+@app.get("/lounge/vod/details/{tmdb_id}")
+async def lounge_vod_details(tmdb_id: str) -> dict:
+    """Movie detail + every upstream account that carries it, primary first.
+
+    `tmdb_id` is the TMDB integer for movies that have one, or a "name:…
+    |year:…" composite key for those that don't (the catalog endpoint
+    returns this composite when needed)."""
+    if _lounge_vod_cache["data"] is None:
+        await lounge_vod_catalog()  # forces a build
+    data = _lounge_vod_cache["data"] or {}
+    instances = data.get("movies_by_id", {}).get(tmdb_id, [])
+    if not instances:
+        return {"error": "not_found", "urls": []}
+
+    # Primary = first instance from the (already sorted) list. Backup URLs
+    # come from the rest. _sort_by_url_priority isn't quite right here
+    # (we don't have the same dict shape), so we fall through in catalog
+    # order — usually the same ordering as _upstream_ACCOUNTS which puts
+    # premium accounts first.
+    urls = [m["url"] for m in instances if m.get("url")]
+    head = instances[0]
+    return {
+        "title":         head.get("name", ""),
+        "year":          head.get("year"),
+        "rating":        head.get("rating"),
+        "service":       head.get("service"),
+        "poster":        head.get("poster"),
+        "category":      head.get("category_name"),
+        "instance_count": len(urls),
+        "urls":          urls,
+    }
+
+
+@app.get("/lounge/vod/series/{series_key}")
+async def lounge_vod_series(series_key: str) -> dict:
+    """Episode list for one series.
+
+    `series_key` is the upstream `series_id` as a string (per-account
+    namespaced — same id can mean different shows on different accounts,
+    so it's prefixed with the account label, e.g. `kstv:1234`)."""
+    if _lounge_vod_cache["data"] is None:
+        await lounge_vod_catalog()
+    data = _lounge_vod_cache["data"] or {}
+    series_by_id = data.get("series_by_id", {})
+
+    s = series_by_id.get(series_key)
+    if not s:
+        return {"error": "not_found", "seasons": []}
+
+    import httpx as _hx_se
+    host, port, user, pw = s.get("host"), s.get("port"), s.get("user"), s.get("pw")
+    try:
+        async with _hx_se.AsyncClient(timeout=20.0, follow_redirects=True) as hx:
+            r = await hx.get(
+                f"http://{host}:{port}/player_api.php?username={user}&password={pw}"
+                f"&action=get_series_info&series_id={s.get('series_id')}",
+                headers={"User-Agent": _BROWSER_HEADERS["User-Agent"]},
+            )
+        if r.status_code != 200:
+            return {"error": f"http_{r.status_code}", "seasons": []}
+        info = r.json()
+    except Exception as e:
+        return {"error": f"fetch_failed: {e}", "seasons": []}
+
+    eps_by_season = info.get("episodes") or {}
+    seasons: list[dict] = []
+    for season_key in sorted(eps_by_season.keys(), key=lambda k: int(k) if str(k).isdigit() else 999):
+        eps = eps_by_season[season_key] or []
+        episodes: list[dict] = []
+        for e in eps:
+            if not isinstance(e, dict):
+                continue
+            ep_id = e.get("id")
+            ext   = e.get("container_extension") or "mp4"
+            episodes.append({
+                "episode_number": e.get("episode_num"),
+                "title":          (e.get("title") or "").strip(),
+                "overview":       (e.get("info") or {}).get("plot"),
+                "still_url":      (e.get("info") or {}).get("movie_image"),
+                "url":            f"http://{host}:{port}/series/{user}/{pw}/{ep_id}.{ext}",
+            })
+        seasons.append({
+            "season_number": int(season_key) if str(season_key).isdigit() else 0,
+            "episodes":      episodes,
+        })
+
+    return {
+        "title":   s.get("name", ""),
+        "year":    s.get("year"),
+        "rating":  s.get("rating"),
+        "service": s.get("service"),
+        "poster":  s.get("poster"),
+        "seasons": seasons,
+    }
+
+
+# ─── /lounge/vod-stream-proxy ─────────────────────────────────────────────
+#
+# Range-aware byte-stream proxy for upstream VOD .mp4 / .mkv files. The
+# existing /stream-proxy is HLS-only (it rewrites manifests + segments).
+# VOD is a single-file download where the player needs Range header
+# forwarding so seek works.
+
+@app.get("/lounge/vod-stream-proxy")
+async def lounge_vod_stream_proxy(url: str, request: Request):
+    """Stream a VOD file from an upstream upstream, with Range header
+    forwarded both ways so ExoPlayer / hls.js seek work.
+
+    Only allows whitelisted upstream hosts (same allowlist the relay uses)
+    so this can't be turned into an open proxy.
+    """
+    from fastapi.responses import StreamingResponse, JSONResponse
+
+    # Allowlist — same hosts the relay accepts. Rejects anything else with
+    # 403 so a leaked URL can't proxy arbitrary destinations.
+    parsed = urlparse(url)
+    if parsed.hostname not in _upstream_HOSTS:
+        return JSONResponse(
+            status_code=403,
+            content={"error": "host_not_allowed", "host": parsed.hostname},
+        )
+
+    import httpx as _hx_vsp
+    fwd_headers: dict[str, str] = {
+        "User-Agent": _BROWSER_HEADERS["User-Agent"],
+    }
+    range_hdr = request.headers.get("range")
+    if range_hdr:
+        fwd_headers["Range"] = range_hdr
+
+    client = _hx_vsp.AsyncClient(timeout=httpx.Timeout(30.0, read=None), follow_redirects=True)
+    upstream = await client.send(
+        client.build_request("GET", url, headers=fwd_headers),
+        stream=True,
+    )
+
+    if upstream.status_code >= 400:
+        await upstream.aclose()
+        await client.aclose()
+        return JSONResponse(
+            status_code=upstream.status_code,
+            content={"error": f"upstream_status_{upstream.status_code}"},
+        )
+
+    pass_headers: dict[str, str] = {}
+    for h in ("content-type", "content-length", "content-range",
+              "accept-ranges", "etag", "last-modified", "cache-control"):
+        v = upstream.headers.get(h)
+        if v:
+            pass_headers[h] = v
+    if "content-type" not in pass_headers:
+        pass_headers["content-type"] = "video/mp4"
+    pass_headers.setdefault("accept-ranges", "bytes")
+
+    async def _gen():
+        try:
+            async for chunk in upstream.aiter_raw():
+                yield chunk
+        finally:
+            await upstream.aclose()
+            await client.aclose()
+
+    return StreamingResponse(
+        _gen(),
+        status_code=upstream.status_code,
+        headers=pass_headers,
+    )
