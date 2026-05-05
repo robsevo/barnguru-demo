@@ -9003,8 +9003,20 @@ async def _build_barncentre_payload() -> dict:
         def _is_upstream(u: str) -> bool:
             return ("an upstream host" in u) or ("ampztl" in u)
 
-        upstream_cands = [c for c in candidates if _is_upstream(c["url"])]
-        chosen = (upstream_cands[0] if upstream_cands else candidates[0])["url"]
+        # BarnCentre primary preference (Bob, 2026-05-05): an upstream host leads.
+        # an upstream host.an upstream host.co has been the most reliable provider in live
+        # tests today (TSN1 picture, Sportsnet East alternate). an upstream host +
+        # ampztl remain in the upstream-bias chain as fallback when an upstream host
+        # isn't available for a given channel. The verifier-promotion path
+        # below still applies, so a stale an upstream host slot doesn't get stuck.
+        # NOTE: this only affects /barncentre-channels — game page and
+        # /lounge/* keep the existing an upstream host/ampztl-first ordering.
+        an upstream host_cands = [c for c in candidates if "an upstream host.an upstream host.co" in c["url"]]
+        if an upstream host_cands:
+            chosen = an upstream host_cands[0]["url"]
+        else:
+            upstream_cands = [c for c in candidates if _is_upstream(c["url"])]
+            chosen = (upstream_cands[0] if upstream_cands else candidates[0])["url"]
 
         # Run liveness check on the chosen primary. If it's alive, keep it.
         # On a real failure (502 ffmpeg-died, 503 manifest-not-yet, body
