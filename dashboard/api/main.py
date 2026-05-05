@@ -5226,10 +5226,14 @@ async def _build_game_iptv(game_id: int) -> list[dict] | None:
         all_channels = []
 
     # Match each broadcast network to IPTV channels by title tokens.
-    # Only match against approved sources: tvpass static slugs, thetvapp redirects
-    # (which resolve to tvpass.org/live/* URLs), and upstream accounts (ampztl +
-    # an upstream host only — lunar/tv14s are disabled in _upstream_ACCOUNTS).
-    curated_channels = [ch for ch in all_channels if ch.get("source") in ("tvpass", "thetvapp", "upstream")]
+    # Approved sources: thetvapp redirects (resolve to v4.thetvapp.to tokens),
+    # and upstream accounts (ampztl + an upstream host + bgdc + an upstream host + kstv).
+    # tvpass.org dropped 2026-05-05 — both the static slugs and any
+    # GitHub-mirrored tvpass entries are filtered out via _drop_tvpass below.
+    # The previous comment noted "tvpass static slugs" as approved; we now
+    # rely on thetvapp + upstream alone.
+    curated_channels = [ch for ch in all_channels if ch.get("source") in ("thetvapp", "upstream")]
+    curated_channels = [ch for ch in curated_channels if not _is_tvpass(ch)]
 
     # ampztl publishes several feeds per channel marked with different glyphs.
     # Field-tested: `ƒ` and `≋` feeds don't play; `✪` plays fine (often the
@@ -7982,6 +7986,20 @@ def _add_to_blocklist(name: str, host: str) -> None:
     _BARNCENTRE_HOST_BLOCKLIST.setdefault(name, {})[host] = _time.time()
 
 
+def _is_tvpass(ch: dict) -> bool:
+    """Return True if a candidate channel originates from tvpass.org.
+
+    tvpass entries are dropped wholesale (Bob, 2026-05-05): they're slow,
+    flake on token refresh, and the better thetvapp tokens we get via
+    direct thetvapp playlists cover every channel they did. Catches both
+    the source-tagged static slugs and any GitHub-mirrored entries whose
+    URL still points back at tvpass.org even when source != "tvpass".
+    """
+    if ch.get("source") == "tvpass":
+        return True
+    return "tvpass.org" in (ch.get("url", "") or "")
+
+
 # Channels whose source MPEG-TS has irregular keyframe spacing — the
 # encoder swings GOP length around (e.g. 2s/4s alternating), so under
 # passthrough (`-c copy`) the relay's HLS muxer can only split at keyframes
@@ -8212,12 +8230,9 @@ async def _verify_stream_alive_inner(url: str, timeout: float) -> bool:
             # Other 2xx destinations (embed pages) — treat as available
             return r.status_code < 400
     except Exception:
-        # tvpass is our most reliable source; a transient timeout from the
-        # verifier shouldn't flip the chip to "No signal" when the stream
-        # actually plays (Bob saw FS2 marked offline while it was live).
-        # Be optimistic for tvpass; strict for everything else.
-        if "tvpass.org/live/" in url:
-            return True
+        # tvpass dropped 2026-05-05; the optimistic fallback that used to
+        # live here ("trust tvpass on transient timeout") is gone. Strict
+        # for everything else.
         return False
 
 
@@ -8818,6 +8833,8 @@ async def _build_barncentre_payload() -> dict:
     # ── 1. Full IPTV channel list (shared 1-hr cache) ─────────────────────────
     iptv_result  = await iptv_channels()
     all_channels: list[dict] = iptv_result.get("channels", [])
+    # Drop tvpass entirely (2026-05-05). See `_is_tvpass` for rationale.
+    all_channels = [ch for ch in all_channels if not _is_tvpass(ch)]
 
     # ── 2. Today's NHL schedule → program guide ───────────────────────────────
     import httpx as _hx_bc
@@ -9219,7 +9236,10 @@ async def _build_lounge_payload() -> dict:
     now_ts = _t_lp.time()
 
     iptv_result = await iptv_channels()
+    # tvpass dropped wholesale; see `_is_tvpass` for context. Filter happens
+    # here too so /lounge/* mirrors /barncentre-channels.
     all_channels: list[dict] = iptv_result.get("channels", [])
+    all_channels = [ch for ch in all_channels if not _is_tvpass(ch)]
 
     # Programs source: today's NHL/ESPN/MLB/NBA from the existing helpers
     # (sports channels in _LOUNGE_CHANNEL_NAMES still want their game guide).
