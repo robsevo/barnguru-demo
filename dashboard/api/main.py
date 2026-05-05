@@ -8065,16 +8065,60 @@ async def _verify_stream_alive_inner(url: str, timeout: float) -> bool:
         return False
 
 
+_QUALITY_TAG_RE = _re_iptv.compile(r"\b(4K|UHD|FHD|HD|SD)\b", _re_iptv.I)
+
+
+def _quality_score(title: str, url: str) -> int:
+    """Higher score = lower quality (sorts first = best). Two signals:
+
+    1. **Title tag** — providers tag titles with 4K / UHD / FHD / HD / SD.
+       UHD ≈ 4K (typically 2160p), FHD = 1080p, HD = 720p, SD ≤ 480p. An
+       untagged title is treated as HD-equivalent (most providers default
+       to HD without saying so). 4K event-only feeds are scored as UHD —
+       they're great when the event is live, otherwise they're a black
+       screen, so we don't want them universally first.
+
+    2. **Relay quality knob** — relay URLs include `?q=720p` / `q=480p` /
+       (default) `q=passthrough`. Passthrough = original encode, no
+       re-transcode = best quality + lowest CPU. 720p is a deliberate
+       downgrade we apply mid-stream when bandwidth tanks, so a URL that
+       arrives already pinned to 720p is worse than passthrough.
+    """
+    t_score = 4  # default: untagged ≈ HD
+    m = _QUALITY_TAG_RE.search(title)
+    if m:
+        tag = m.group(1).upper()
+        t_score = {"UHD": 0, "4K": 1, "FHD": 2, "HD": 3, "SD": 5}.get(tag, 4)
+
+    if "q=480p" in url:
+        q_score = 2
+    elif "q=720p" in url:
+        q_score = 1
+    else:
+        q_score = 0  # passthrough or non-relay direct manifest
+
+    # Title tag is a stronger signal than the relay knob (a UHD chip pinned
+    # to 720p still streams a much higher source than an SD chip at
+    # passthrough), so weight it more.
+    return t_score * 10 + q_score
+
+
 def _sort_by_url_priority(candidates: list[dict]) -> list[dict]:
     """Sort channel candidates for initial game-page playback.
 
-    Field-tested order (most → least reliable): kstv, an upstream host, ampztl,
-    tvpass, thetvapp, other untested upstream, other. kstv (puny243) is Bob's
-    premium account so it leads on both game pages and BarnCentre. The relay
-    rewrites an upstream host's /play/TOKEN/m3u8 → /ts and serves it via ffmpeg
-    transmux, so hls.js consumes it fine.
+    Two-axis sort. Primary axis: stream quality (UHD > FHD > untagged ≈ HD
+    > 480p-pinned > SD). Secondary axis: host reliability (most → least
+    reliable: kstv, an upstream host, ampztl, tvpass, thetvapp, other untested
+    upstream, other). The quality axis dominates because users notice picture
+    quality immediately; host reliability only matters as a tiebreaker
+    among same-quality candidates.
+
+    kstv (puny243) returned auth=0 as of 2026-05-04 (Bob's premium panel
+    appears to have lapsed). It still leads the host-priority tier so when
+    the account comes back online its candidates re-enter the top of each
+    quality bucket without code changes.
     """
-    def _prio(m: dict) -> int:
+    def _host_prio(m: dict) -> int:
         u = m["url"]
         if "kstv.us" in u:
             return 0
@@ -8089,7 +8133,11 @@ def _sort_by_url_priority(candidates: list[dict]) -> list[dict]:
         if any(h in u for h in ("rexmaximl.shop", "anadolutv.shop", "izletvhd.xyz")):
             return 5
         return 6
-    return sorted(candidates, key=_prio)
+
+    def _key(m: dict) -> tuple[int, int]:
+        return (_quality_score(m.get("title", ""), m["url"]), _host_prio(m))
+
+    return sorted(candidates, key=_key)
 
 
 # ESPN broadcast name → BarnCentre channel name
