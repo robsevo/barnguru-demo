@@ -7961,22 +7961,41 @@ _BARNCENTRE_HOST_BLOCKLIST: dict[str, dict[str, float]] = {
     },
 }
 
+# Permanent host-blocklist for BarnCentre / Lounge. These are Bob-curated
+# entries: "this provider's slot for this channel is bad and we don't want
+# auto-recovery." Does NOT apply to /game-iptv-streams — game broadcasts
+# match against a wider candidate pool and benefit from having ampztl as a
+# fallback even when its BarnCentre version is unwatchable. The TTL blocklist
+# above is the auto-detection / self-healing layer; this one is the manual
+# override that doesn't expire.
+#
+# 2026-05-05: ampztl.xyz removed from TSN1 (Bob — picture buffers worse than
+# the an upstream host / bgdc alternatives even after the player buffer tuning).
+_BARNCENTRE_PERMANENT_HOST_BLOCKLIST: dict[str, set[str]] = {
+    "TSN1": {"ampztl.xyz"},
+}
+
 
 def _active_blocklist(name: str) -> set[str]:
-    """Return hosts currently blocked for `name`, dropping any expired entries.
+    """Return hosts currently blocked for `name` — TTL entries that haven't
+    expired, unioned with the permanent (Bob-curated) blocklist.
 
-    Mutates the underlying dict to evict expired entries so the structure
-    self-cleans over time. Safe to call from async contexts (the dict update
-    is sync and contention-free in CPython).
+    Mutates the TTL dict to evict expired entries so it self-cleans over
+    time. Safe to call from async contexts (dict update is sync and
+    contention-free in CPython).
     """
     entries = _BARNCENTRE_HOST_BLOCKLIST.get(name)
-    if not entries:
-        return set()
-    now = _time.time()
-    expired = [h for h, t in entries.items() if now - t >= _BARNCENTRE_BLOCKLIST_TTL_S]
-    for h in expired:
-        entries.pop(h, None)
-    return set(entries.keys())
+    blocked: set[str] = set()
+    if entries:
+        now = _time.time()
+        expired = [h for h, t in entries.items() if now - t >= _BARNCENTRE_BLOCKLIST_TTL_S]
+        for h in expired:
+            entries.pop(h, None)
+        blocked.update(entries.keys())
+    permanent = _BARNCENTRE_PERMANENT_HOST_BLOCKLIST.get(name)
+    if permanent:
+        blocked.update(permanent)
+    return blocked
 
 
 def _add_to_blocklist(name: str, host: str) -> None:
