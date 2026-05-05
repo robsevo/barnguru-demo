@@ -8267,12 +8267,14 @@ def _extract_upstream_host(url: str) -> str:
         return ""
 
 
-async def _read_media_sequence(url: str, timeout: float = 10.0) -> int | None:
+async def _read_media_sequence(url: str, timeout: float = 10.0) -> int | None | str:
     """GET the HLS manifest and return its `#EXT-X-MEDIA-SEQUENCE` value.
 
-    Returns None on network failure, non-200, or absence of the tag (e.g. a
-    master playlist instead of a media playlist — those don't carry a
-    sequence number, so we conservatively skip them).
+    Returns:
+      - int  : the sequence number (healthy manifest)
+      - "ffmpeg_dead" : relay returned 502 with "ffmpeg did not produce" (a
+        broken upstream — quarantinable failure even on a single probe)
+      - None : transient (timeout, master playlist, missing tag) — skip
     """
     import httpx as _hx_l
     try:
@@ -8282,6 +8284,13 @@ async def _read_media_sequence(url: str, timeout: float = 10.0) -> int | None:
             headers={"User-Agent": "Grtzky-LoopProbe/1.0"},
         ) as cl:
             r = await cl.get(url)
+        # Relay's 502 body for a stuck ffmpeg session looks like
+        # `{"detail":"ffmpeg did not produce manifest in time"}` — when we
+        # see that, the upstream feed itself is broken (the relay can't
+        # produce segments because the source doesn't deliver). Treat this
+        # as a hard, single-probe quarantine signal.
+        if r.status_code in (502, 504) and "ffmpeg did not produce" in (r.text or ""):
+            return "ffmpeg_dead"
         if r.status_code != 200 or not r.text:
             return None
         for raw in r.text.splitlines():
@@ -8312,22 +8321,32 @@ async def _probe_manifest_loop(url: str, channel_name: str) -> None:
         return
     _loop_probe_cache[url] = now  # claim the slot regardless of outcome
 
+    def _quarantine(reason: str) -> None:
+        host = _extract_upstream_host(url)
+        if host:
+            _add_to_blocklist(channel_name, host)
+            # Drop the cache so the next page load re-evaluates from
+            # scratch; if the host recovers before the TTL expires we want
+            # fresh data when it re-enters the candidate pool.
+            _loop_probe_cache.pop(url, None)
+        _ = reason  # kept for future logging once we wire structured logs
+
     seq1 = await _read_media_sequence(url)
+    if seq1 == "ffmpeg_dead":
+        _quarantine("ffmpeg_dead_probe1")
+        return
     if seq1 is None:
         return
     await asyncio.sleep(_LOOP_PROBE_GAP_S)
     seq2 = await _read_media_sequence(url)
+    if seq2 == "ffmpeg_dead":
+        _quarantine("ffmpeg_dead_probe2")
+        return
     if seq2 is None:
         return
-    if seq2 > seq1:
+    if isinstance(seq1, int) and isinstance(seq2, int) and seq2 > seq1:
         return  # advancing healthily
-    host = _extract_upstream_host(url)
-    if host:
-        _add_to_blocklist(channel_name, host)
-        # Drop the cache entry so the next page load re-evaluates from
-        # scratch — if the loop was a one-time hiccup that recovered before
-        # the TTL expires, we still want fresh data when the host re-enters.
-        _loop_probe_cache.pop(url, None)
+    _quarantine("seq_not_advancing")
 
 
 _QUALITY_TAG_RE = _re_iptv.compile(r"\b(4K|UHD|FHD|HD|SD)\b", _re_iptv.I)
@@ -8939,9 +8958,16 @@ async def _build_barncentre_payload() -> dict:
         upstream_cands = [c for c in candidates if _is_upstream(c["url"])]
         chosen = (upstream_cands[0] if upstream_cands else candidates[0])["url"]
 
-        # Run liveness check on the chosen primary — purely informational. If
-        # the verifier comes back negative, fall through the rest of the
-        # candidates so the badge reflects actual reachability for any source.
+        # Run liveness check on the chosen primary. If it's alive, we keep it
+        # — the cold-start tolerance in `_verify_stream_alive_inner` (returns
+        # True on transient httpx exceptions for /hls? URLs) already absorbs
+        # the ffmpeg cold-start case the hard-bias was built for. If we get a
+        # *real* failure (HTTP 502 from the relay, e.g. "ffmpeg did not
+        # produce manifest in time" when the upstream feed is broken), fall
+        # through to a verified alternate AND promote it to primary_url.
+        # Previously the alternate was only used to set the `online` badge
+        # while primary_url stayed pointed at the broken upstream URL — the
+        # player paid that 10-15s failover cost on every page load.
         verified_primary: str | None = None
         if await _verify_stream_alive(chosen):
             verified_primary = chosen
@@ -8951,6 +8977,7 @@ async def _build_barncentre_payload() -> dict:
                     continue
                 if await _verify_stream_alive(cand["url"]):
                     verified_primary = cand["url"]
+                    chosen = verified_primary  # promote alternate to primary
                     break
 
         # Loop-detector: kick off a background probe of the chosen primary so
@@ -9303,6 +9330,9 @@ async def _build_lounge_payload() -> dict:
         upstream_cands = [c for c in candidates if _is_upstream(c["url"])]
         chosen = (upstream_cands[0] if upstream_cands else candidates[0])["url"]
 
+        # Promote a verified alternate to primary when the upstream-bias chip
+        # actually fails the liveness check — same correctness fix as
+        # _build_channel above. See its comment for context.
         verified_primary: str | None = None
         if await _verify_stream_alive(chosen):
             verified_primary = chosen
@@ -9312,6 +9342,7 @@ async def _build_lounge_payload() -> dict:
                     continue
                 if await _verify_stream_alive(cand["url"]):
                     verified_primary = cand["url"]
+                    chosen = verified_primary
                     break
 
         host_used: dict[str, int] = {}
