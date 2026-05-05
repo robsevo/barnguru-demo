@@ -8020,12 +8020,21 @@ def _needs_recode(ch_name: str = "", broadcast_code: str = "") -> bool:
 
 
 def _apply_recode(url: str, ch_name: str = "", *, force: bool = False) -> str:
-    """Append `&q=720p` to a relay /hls URL when the channel needs re-encoding.
+    """Append `&q=480p` to a relay /hls URL when the channel needs re-encoding.
 
     Leaves /m3u8 URLs (already-HLS sources, no transmux happens) and URLs
     that already carry a q= parameter untouched. `force=True` lets callers
     that already determined the recode requirement (e.g. game page knowing the
     broadcast code is TSN) bypass the channel-name lookup.
+
+    480p (1.2 Mbps) chosen over 720p (2.5 Mbps) because TSN's source is
+    a high-bitrate 1080i feed: live tests against the residential relay
+    showed q=720p ffmpeg sessions timing out before producing the first
+    manifest ("ffmpeg did not produce manifest in time"), while q=480p
+    emitted steady 3.003s segments cleanly. The CPU on the residential
+    relay can't keep up with 720p re-encode of TSN's source. The watchdog
+    + auto-downgrade in the player will still flip 720p→480p mid-stream
+    on other channels; this just makes 480p the *starting* tier for TSN.
     """
     if not (force or ch_name in _RECODE_CHANNELS):
         return url
@@ -8033,7 +8042,7 @@ def _apply_recode(url: str, ch_name: str = "", *, force: bool = False) -> str:
         return url
     if "localhost:8000/hls?" not in url and "/hls?u=" not in url:
         return url
-    return url + ("&q=720p" if "?" in url else "?q=720p")
+    return url + ("&q=480p" if "?" in url else "?q=480p")
 
 import re as _re_bc
 
