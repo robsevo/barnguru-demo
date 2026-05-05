@@ -8987,23 +8987,31 @@ async def _build_barncentre_payload() -> dict:
         upstream_cands = [c for c in candidates if _is_upstream(c["url"])]
         chosen = (upstream_cands[0] if upstream_cands else candidates[0])["url"]
 
-        # Run liveness check on the chosen primary. If it's alive, we keep it
-        # — the cold-start tolerance in `_verify_stream_alive_inner` (returns
-        # True on transient httpx exceptions for /hls? URLs) already absorbs
-        # the ffmpeg cold-start case the hard-bias was built for. If we get a
-        # *real* failure (HTTP 502 from the relay, e.g. "ffmpeg did not
-        # produce manifest in time" when the upstream feed is broken), fall
-        # through to a verified alternate AND promote it to primary_url.
-        # Previously the alternate was only used to set the `online` badge
-        # while primary_url stayed pointed at the broken upstream URL — the
-        # player paid that 10-15s failover cost on every page load.
+        # Run liveness check on the chosen primary. If it's alive, keep it.
+        # On a real failure (502 ffmpeg-died, 503 manifest-not-yet, body
+        # missing #EXTINF), fall through to a verified alternate AND
+        # promote it to primary_url. Walk DISTINCT upstream hosts rather
+        # than just `candidates[:3]` — when one provider has multiple
+        # accounts (3× an upstream host variants on top of the candidate list),
+        # iterating by index can leave the working alternate (an upstream host at
+        # index 4+) untried. Capped at 6 hosts so verification never blocks
+        # the response indefinitely.
         verified_primary: str | None = None
         if await _verify_stream_alive(chosen):
             verified_primary = chosen
         else:
-            for cand in candidates[:3]:
+            tried_hosts: set[str] = set()
+            chosen_host = _candidate_upstream_host(chosen)
+            tried_hosts.add(chosen_host)
+            for cand in candidates:
+                if len(tried_hosts) >= 6:
+                    break
                 if cand["url"] == chosen:
                     continue
+                cand_host = _candidate_upstream_host(cand["url"])
+                if cand_host in tried_hosts:
+                    continue
+                tried_hosts.add(cand_host)
                 if await _verify_stream_alive(cand["url"]):
                     verified_primary = cand["url"]
                     chosen = verified_primary  # promote alternate to primary
@@ -9363,15 +9371,25 @@ async def _build_lounge_payload() -> dict:
         chosen = (upstream_cands[0] if upstream_cands else candidates[0])["url"]
 
         # Promote a verified alternate to primary when the upstream-bias chip
-        # actually fails the liveness check — same correctness fix as
-        # _build_channel above. See its comment for context.
+        # fails the liveness check. Walk distinct upstream hosts rather than
+        # candidates[:3] so a working alternate at index 4+ (e.g. an upstream host
+        # behind 3 an upstream host account variants) actually gets tried. Same
+        # logic as _build_channel above; see that comment for context.
         verified_primary: str | None = None
         if await _verify_stream_alive(chosen):
             verified_primary = chosen
         else:
-            for cand in candidates[:3]:
+            tried_hosts: set[str] = set()
+            tried_hosts.add(_candidate_upstream_host(chosen))
+            for cand in candidates:
+                if len(tried_hosts) >= 6:
+                    break
                 if cand["url"] == chosen:
                     continue
+                cand_host = _candidate_upstream_host(cand["url"])
+                if cand_host in tried_hosts:
+                    continue
+                tried_hosts.add(cand_host)
                 if await _verify_stream_alive(cand["url"]):
                     verified_primary = cand["url"]
                     chosen = verified_primary
