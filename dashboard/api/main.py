@@ -8175,8 +8175,15 @@ async def _verify_stream_alive(url: str, timeout: float = 4.0) -> bool:
     keeps cold-cache verifier latency bounded; once warm, probes return
     in ~50ms.
     """
+    # Relay /hls calls block until ffmpeg produces the first manifest, up to
+    # HLS_STARTUP_TIMEOUT_S=15s on the relay side. Our verifier needs >15s of
+    # headroom or it times out before the relay decides — and we used to
+    # treat that timeout as "optimistically alive," which is exactly how
+    # broken upstreams (TSN's an upstream host slot today) kept getting picked as
+    # primary_url. 18s gives the relay a 3s buffer to actually return its
+    # 502 verdict so we can promote a verified alternate.
     if "/hls?" in url and "u=" in url:
-        timeout = max(timeout, 8.0)
+        timeout = max(timeout, 18.0)
     sem = _get_verify_sem()
     async with sem:
         return await _verify_stream_alive_inner(url, timeout)
@@ -8185,13 +8192,15 @@ async def _verify_stream_alive(url: str, timeout: float = 4.0) -> bool:
 async def _verify_stream_alive_inner(url: str, timeout: float) -> bool:
     import httpx as _hx_v
 
-    # Relay /hls passthrough — probe the relay URL itself. The relay returns
-    # a tiny manifest, but ffmpeg may not have written #EXTM3U yet on a cold
-    # start (the upstream takes 1-2s to attach). Earlier strict checks
-    # ("body must start with #EXTM3U") false-rejected working channels —
-    # NHL Network and FanDuel were demoted to broken tvpass slugs because of
-    # this. Now: any 2xx/206 with non-empty body counts as alive. Optimistic
-    # on transient timeout errors for the same reason.
+    # Relay /hls passthrough — probe the relay URL itself. We verify the
+    # response is an actual HLS media playlist with at least one segment
+    # line (#EXTINF or #EXT-X-MEDIA-SEQUENCE). A 200 with just `#EXTM3U`
+    # passed the old "non-empty body" check but means ffmpeg never produced
+    # a real segment. Strict on real failures (502 ffmpeg-died, 503
+    # manifest-not-yet) → falls through to the verified-alternate path in
+    # _build_channel. No more optimistic-on-timeout: with the 18s budget
+    # set in the wrapper, a timeout here means the upstream is genuinely
+    # unreachable, not a slow cold-start.
     if "/hls?" in url and "u=" in url:
         try:
             async with _hx_v.AsyncClient(
@@ -8199,13 +8208,16 @@ async def _verify_stream_alive_inner(url: str, timeout: float) -> bool:
                 timeout=timeout,
                 headers={
                     "User-Agent": "Grtzky-StreamVerifier/1.0",
-                    "Range":      "bytes=0-1023",
+                    "Range":      "bytes=0-2047",
                 },
             ) as cl:
                 r = await cl.get(url)
-            return r.status_code in (200, 206) and len(r.content) > 0
+            if r.status_code not in (200, 206) or not r.text:
+                return False
+            body = r.text
+            return ("#EXTINF" in body) or ("#EXT-X-MEDIA-SEQUENCE" in body)
         except Exception:
-            return True
+            return False
 
     try:
         async with _hx_v.AsyncClient(
