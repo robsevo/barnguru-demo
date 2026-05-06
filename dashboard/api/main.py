@@ -10414,6 +10414,9 @@ _VIDSRC_EMBED_HOSTS: list[str] = [
     "https://vidsrc.in",
     "https://vidsrc.pm",
     "https://vidsrc.net",
+    "https://vidsrc.to",
+    "https://embed.su",
+    "https://autoembed.cc",
 ]
 
 
@@ -10587,6 +10590,7 @@ _VIDSRC_RESOLVED_HOST_SUFFIXES: tuple[str, ...] = (
     ".smashy.stream", ".smashystream.com",
     ".embed.su", ".embedsu.com",
     ".2embed.cc", ".2embed.org",
+    ".autoembed.cc",
     # Akamai / Cloudfront / Fastly fronts that vidsrc-family upstreams hide
     # behind. We don't enumerate every shard — match on the parent.
     ".akamaized.net", ".cloudfront.net", ".fastly.net", ".bunnycdn.com",
