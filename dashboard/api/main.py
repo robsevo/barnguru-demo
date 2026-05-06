@@ -9321,6 +9321,12 @@ async def lounge_live_channels() -> dict:
     have   = _lounge_cache["data"] is not None
     fresh  = have and (now_ts - _lounge_cache["ts"] < _LOUNGE_TTL)
 
+    # Fire-and-forget EPG warm. By the time the user navigates from
+    # Home → Live TV the cache is hot, so the EpgActivity load is instant.
+    # Cheap: hits the cached path if already fresh, otherwise builds in
+    # the background while we serve channels immediately.
+    _kick_epg_prewarm()
+
     if fresh:
         return {"channels": _lounge_cache["data"], "cached": True}
     if have:
@@ -9328,6 +9334,35 @@ async def lounge_live_channels() -> dict:
         return {"channels": _lounge_cache["data"], "cached": True, "stale": True}
 
     return await _build_lounge_payload()
+
+
+_epg_prewarm_inflight: bool = False
+
+
+def _kick_epg_prewarm() -> None:
+    """Fire-and-forget EPG cache build. No-op if cache is fresh or another
+    prewarm is already running. Always safe to call repeatedly."""
+    global _epg_prewarm_inflight
+    import time as _t_pw
+    have  = _lounge_epg_cache["data"] is not None
+    fresh = have and (_t_pw.time() - _lounge_epg_cache["ts"] < _LOUNGE_EPG_TTL)
+    if fresh or _epg_prewarm_inflight:
+        return
+    _epg_prewarm_inflight = True
+
+    async def _run() -> None:
+        global _epg_prewarm_inflight
+        try:
+            await lounge_epg("")  # builds + caches
+        except Exception:
+            pass
+        finally:
+            _epg_prewarm_inflight = False
+
+    try:
+        asyncio.create_task(_run())
+    except Exception:
+        _epg_prewarm_inflight = False
 
 
 async def _build_lounge_payload() -> dict:
@@ -10076,7 +10111,7 @@ _LOUNGE_VOD_PROVIDER_IDS_CA: dict[str, list[int]] = {
 
 # Pages per service per kind. TMDB returns 20 results per page, so 3 pages
 # = 60 titles per rail — matches the 60-cap the UI renders today.
-_TMDB_DISCOVER_PAGES = 3
+_TMDB_DISCOVER_PAGES = 10
 
 
 async def _tmdb_discover_titles(
@@ -10163,7 +10198,7 @@ async def _build_vod_catalog_tmdb() -> dict:
     """TMDB-sourced catalog. Replaces the upstream VOD intake entirely.
 
     Pulls /discover/{movie,tv} per streaming service for region CA, sorted
-    by popularity desc. Each rail caps at ~60 titles (3 TMDB pages × 20).
+    by popularity desc. Each rail caps at ~200 titles (10 TMDB pages × 20).
     No upstream VOD calls — upstream is only used for live channels now.
 
     Returns the same shape as the legacy _build_vod_catalog so the client
@@ -10591,6 +10626,20 @@ _VIDSRC_RESOLVED_HOST_SUFFIXES: tuple[str, ...] = (
     ".embed.su", ".embedsu.com",
     ".2embed.cc", ".2embed.org",
     ".autoembed.cc",
+    # Streaming hosts vidsrc-family embeds commonly resolve to. Each is a
+    # real HLS or progressive-mp4 CDN — not a generic open relay. Add new
+    # ones here when the [vod-proxy] BLOCKED log surfaces them.
+    ".streamruby.com", ".streamhg.com", ".streamzy.com", ".streamzy.cc",
+    ".streamlare.com", ".sltube.org", ".slmaxed.com", ".slwatch.co",
+    ".streamwish.com", ".streamwish.to", ".swdyu.com",
+    ".vidcloud9.com", ".vidcloud.lol", ".vidcloud.life",
+    ".kerapoxy.cc", ".feurl.com", ".fembed.com", ".gomo.to",
+    ".uqload.com", ".uqload.io", ".uqload.co",
+    ".videovard.sx", ".videovard.to",
+    ".zoechip.com", ".zorox.cc", ".zorox.fans",
+    ".vidplay.online", ".vidplay.lol", ".vidplay.site",
+    ".filelions.to", ".filelions.live", ".filelions.online",
+    ".smashy.cloud", ".smashy.work",
     # Akamai / Cloudfront / Fastly fronts that vidsrc-family upstreams hide
     # behind. We don't enumerate every shard — match on the parent.
     ".akamaized.net", ".cloudfront.net", ".fastly.net", ".bunnycdn.com",
@@ -10628,6 +10677,10 @@ async def lounge_vod_stream_proxy(url: str, request: Request):
 
     parsed = urlparse(url)
     if not _vod_proxy_host_allowed(parsed.hostname):
+        # Log rejections so we can see which CDNs vidsrc-family embeds
+        # are actually resolving to. Add these to
+        # _VIDSRC_RESOLVED_HOST_SUFFIXES once observed.
+        print(f"[vod-proxy] BLOCKED host={parsed.hostname!r} url={url[:200]!r}", flush=True)
         return JSONResponse(
             status_code=403,
             content={"error": "host_not_allowed", "host": parsed.hostname},
