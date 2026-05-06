@@ -9213,23 +9213,27 @@ async def _build_barncentre_payload() -> dict:
 # the public internet without a session is impossible.
 
 _LOUNGE_CHANNEL_NAMES: list[str] = [
-    # All BarnCentre sports channels carry over verbatim.
+    # ── Sports (1-19) ── inherits BarnCentre lineup, channel 1+ ──
     *_BARNCENTRE_CHANNEL_NAMES,
-    # Premium movie networks
-    "HBO", "HBO Max", "Cinemax", "Starz",
-    # General entertainment
-    "AMC", "FX", "FXX", "TNT", "A&E", "Comedy Central", "MTV",
-    # Kids / animation
+    # ── Core Premium (20-29) — always-on movie networks ──
+    "HBO Max", "HBO", "Cinemax", "Starz", "Showtime", "MGM+",
+    "Paramount+", "Apple TV+", "Prime Video",
+    # ── Dark Humor / Edgy / Late Night (30-39) ──
+    "AMC", "FX", "FXX", "TNT", "A&E", "Comedy Central",
+    "Vice TV", "Shudder", "Investigation Discovery", "Reelz",
+    # ── Sci-Fi / Space / Tech (40-49) ──
+    "Syfy", "Discovery Science", "NASA TV", "National Geographic",
+    "History", "Curiosity Stream",
+    # ── Music (50-59) — heavy rotation ──
+    "MTV", "MTV Live", "MuchMusic", "Vevo Hits", "CMT Music",
+    "Stingray Music", "Music Choice",
+    # ── Anime / Animation (60-69) ──
     "Cartoon Network", "Adult Swim", "Teletoon", "Boomerang",
-    "24/7 Pokemon", "24/7 Sailor Moon",
-    # Factual
-    "Discovery", "National Geographic", "History",
-    # Lifestyle
-    "TLC", "Food Network", "HGTV", "Oxygen",
-    # Canadian premium cable
+    "Crunchyroll", "24/7 Pokemon", "24/7 Sailor Moon",
+    # ── Factual / Lifestyle (70-79) ──
+    "Discovery", "TLC", "Food Network", "HGTV", "Oxygen",
+    # ── Canadian premium cable (80-89) ──
     "Stack TV", "W Network", "Showcase", "Slice",
-    # Streaming-services-as-channel
-    "Paramount+",
 ]
 
 # Per-channel upstream-host blocklist. Same semantics as
@@ -9238,7 +9242,46 @@ _LOUNGE_CHANNEL_NAMES: list[str] = [
 # Bob populates as he discovers them.
 _LOUNGE_HOST_BLOCKLIST: dict[str, set[str]] = {}
 
+# Channel number = position in the curated list (1-indexed). Surfaced on
+# the API as `channel_number` so the client can sort the EPG by it.
+_LOUNGE_CHANNEL_NUMBER: dict[str, int] = {
+    name: i + 1 for i, name in enumerate(_LOUNGE_CHANNEL_NAMES)
+}
+
 _LOUNGE_TTL = _BARNCENTRE_TTL  # share the same staleness window
+
+# Channel logo CDN base. Each channel's logo lives at
+# `{base}/{slug}.png` where slug is the lowercased channel name with
+# non-alphanumerics → "-". The static folder is hosted alongside the API
+# (Cloudflare-cached), so adding a new logo is a drop-in operation; no
+# code change. Missing assets 404 cleanly — the client is responsible
+# for graceful degradation when the URL doesn't resolve.
+_LOUNGE_LOGO_BASE = "http://localhost:3000/static/channel-logos"
+
+
+def _lounge_channel_slug(name: str) -> str:
+    """Stable filesystem slug for a channel name.
+
+    Lowercase, non-alphanumerics collapsed to single "-", trimmed.
+    Example: "HBO Max" → "hbo-max", "24/7 Pokemon" → "24-7-pokemon",
+    "A&E" → "a-e", "Paramount+" → "paramount-plus".
+    """
+    s = (name or "").strip().lower().replace("+", "-plus")
+    out: list[str] = []
+    last_dash = False
+    for ch in s:
+        if ch.isalnum():
+            out.append(ch)
+            last_dash = False
+        elif not last_dash:
+            out.append("-")
+            last_dash = True
+    return "".join(out).strip("-")
+
+
+def _lounge_logo_url(name: str) -> str:
+    return f"{_LOUNGE_LOGO_BASE}/{_lounge_channel_slug(name)}.png"
+
 
 _lounge_cache: dict = {"data": None, "ts": 0.0}
 _LOUNGE_REFRESH_TASK: asyncio.Task | None = None
@@ -9400,12 +9443,14 @@ async def _build_lounge_payload() -> dict:
 
         if not candidates:
             return {
-                "name":        ch_name,
-                "primary_url": "",
-                "backup_urls": [],
-                "category":    "live",
-                "programs":    programs.get(ch_name, []),
-                "online":      False,
+                "name":           ch_name,
+                "channel_number": _LOUNGE_CHANNEL_NUMBER.get(ch_name, 999),
+                "logo_url":       _lounge_logo_url(ch_name),
+                "primary_url":    "",
+                "backup_urls":    [],
+                "category":       "live",
+                "programs":       programs.get(ch_name, []),
+                "online":         False,
             }
 
         upstream_cands = [c for c in candidates if _is_upstream(c["url"])]
@@ -9453,12 +9498,14 @@ async def _build_lounge_payload() -> dict:
         backups_out = [_apply_recode(u, ch_name) for u in backup_src]
 
         return {
-            "name":        ch_name,
-            "primary_url": chosen_out,
-            "backup_urls": backups_out,
-            "category":    "live",
-            "programs":    programs.get(ch_name, []),
-            "online":      verified_primary is not None,
+            "name":           ch_name,
+            "channel_number": _LOUNGE_CHANNEL_NUMBER.get(ch_name, 999),
+            "logo_url":       _lounge_logo_url(ch_name),
+            "primary_url":    chosen_out,
+            "backup_urls":    backups_out,
+            "category":       "live",
+            "programs":       programs.get(ch_name, []),
+            "online":         verified_primary is not None,
         }
 
     tasks  = [_build_one(n, c) for n, c in channel_candidates.items()]
@@ -9669,38 +9716,248 @@ _LOUNGE_VOD_SERVICES: list[str] = [
     "Prime Video", "Crave", "Hulu", "Peacock", "Other",
 ]
 
-# Service-name fragments used to classify upstream category names in the
-# fallback path (no Watchmode key). All checks lowercase.
+# Service-name fragments used to classify upstream category names + TMDB
+# provider names. All checks lowercase. Order matters: more specific keys
+# first (HBO Max before "max", "disney+" before bare "disney").
 _LOUNGE_VOD_CATEGORY_HINTS: dict[str, list[str]] = {
-    "Netflix":      ["netflix", "nflx"],
-    "Disney+":      ["disney", "disney+", "disney plus"],
-    "Paramount+":   ["paramount", "paramount+", "paramount plus", "p+"],
-    "Apple TV+":    ["apple tv", "apple tv+", "appletv", "atv+"],
-    "HBO Max":      ["hbo max", "hbo-max", "hbomax", "max only"],
-    "Prime Video":  ["amazon prime", "prime video", "amazon", "prime"],
-    "Crave":        ["crave"],
+    "Netflix":      ["netflix", "nflx", "n+"],
+    "Disney+":      ["disney+", "disney plus", "disneyplus", "disney "],
+    "Paramount+":   ["paramount+", "paramount plus", "paramountplus",
+                     "paramount", "p+ "],
+    "Apple TV+":    ["apple tv+", "apple tv plus", "appletv+", "apple+",
+                     "apple tv", "appletv", "atv+", "atv plus"],
+    "HBO Max":      ["hbo max", "hbo-max", "hbomax", "hbo", "max only",
+                     "max series", "max original", "max:"],
+    "Prime Video":  ["amazon prime", "prime video", "primevideo", "amazon",
+                     "prime"],
+    "Crave":        ["crave", "crave tv", "cravetv"],
     "Hulu":         ["hulu"],
     "Peacock":      ["peacock"],
 }
 
+# Title-prefix tags that some IPTV panels use on individual titles, e.g.
+# "[NF] Stranger Things", "[DSN] Loki". Checked when the category name
+# alone doesn't classify (very common for series, where panels group
+# everything under generic buckets like "TV - English").
+_LOUNGE_VOD_TITLE_PREFIXES: dict[str, list[str]] = {
+    "Netflix":      ["[nf]", "[net]", "[netflix]", "[n]"],
+    "Disney+":      ["[dsn]", "[dsny]", "[disn]", "[disney]", "[d+]", "[dp]"],
+    "Paramount+":   ["[p+]", "[par]", "[parm]", "[pmt]", "[paramount]",
+                     "[pp]"],
+    "Apple TV+":    ["[apl]", "[atv]", "[atv+]", "[apple]", "[at+]"],
+    "HBO Max":      ["[hbo]", "[max]", "[hbom]", "[hb]"],
+    "Prime Video":  ["[amz]", "[prime]", "[ama]", "[ap]", "[pv]"],
+    "Crave":        ["[crv]", "[crave]"],
+    "Hulu":         ["[hu]", "[hulu]"],
+    "Peacock":      ["[pk]", "[peacock]"],
+}
 
-def _classify_vod_service(category_name: str) -> str:
-    """Assign a streaming service from an upstream category label. Falls back
-    to "Other" when nothing matches — the UI groups Other into a generic
-    rail at the end of the service picker."""
-    if not category_name:
-        return "Other"
-    cl = category_name.lower()
-    for svc, hints in _LOUNGE_VOD_CATEGORY_HINTS.items():
-        if any(h in cl for h in hints):
-            return svc
+
+# Lounge is English-only. The upstream provider tags many Netflix/HBO/etc.
+# Latin-American mirrors with strings like "VOD - Netflix LAT", which the
+# service classifier still routes into the English Netflix bucket because
+# the word "netflix" is in there. We drop those at intake.
+_LOUNGE_VOD_SPANISH_CATEGORY_HINTS: list[str] = [
+    "español", "espanol", "castellano",
+    "latino", "latinoamerica", "latinoamérica", "latam",
+    "spanish", "mexican", "argentin", "colombian", "venezolan",
+    " lat ", " esp ", " mex ", " arg ", " col ",
+    "lat -", "esp -", "lat–", "esp–",
+    "- lat", "- esp", "- mex", "- arg",
+    " lat]", " esp]", "(lat)", "(esp)", "(spa)", "(mex)",
+    "[lat]", "[esp]", "[spa]", "[mex]",
+    "vodlat", "vodes", "voddub", "doblada", "doblaje", "subtitulada",
+]
+
+_LOUNGE_VOD_SPANISH_TITLE_HINTS: list[str] = [
+    "(lat)", "(esp)", "(spa)", "(mex)", "(arg)", "(col)", "(ven)",
+    "[lat]", "[esp]", "[spa]", "[mex]", "[arg]", "[col]", "[ven]",
+    "doblada", "doblaje", "castellano", "español", "espanol",
+    "latinoamérica", "latinoamerica",
+]
+
+
+def _is_spanish_category(name: str) -> bool:
+    nl = (name or "").lower()
+    if not nl:
+        return False
+    return any(h in nl for h in _LOUNGE_VOD_SPANISH_CATEGORY_HINTS)
+
+
+def _is_spanish_title(name: str) -> bool:
+    nl = (name or "").lower()
+    if not nl:
+        return False
+    return any(h in nl for h in _LOUNGE_VOD_SPANISH_TITLE_HINTS)
+
+
+def _classify_vod_service(category_name: str, title: str = "") -> str:
+    """Assign a streaming service from an upstream category label and/or
+    title prefix. Returns "Other" when nothing matches — the UI groups
+    Other into a generic rail at the end of the service picker.
+
+    Series categories from most IPTV providers don't include service
+    names (panels lump them under "TV - English"), so the title-prefix
+    pass is what saves them from the Other bucket — many panels tag
+    individual titles with "[NF] Show Name" / "[HBO] Show Name".
+    """
+    cl = (category_name or "").lower()
+    if cl:
+        for svc, hints in _LOUNGE_VOD_CATEGORY_HINTS.items():
+            if any(h in cl for h in hints):
+                return svc
+    tl = (title or "").lower().lstrip()
+    if tl:
+        for svc, prefixes in _LOUNGE_VOD_TITLE_PREFIXES.items():
+            if any(tl.startswith(p) for p in prefixes):
+                return svc
     return "Other"
+
+
+# Concurrency cap on the TMDB fallback. TMDB allows 50 req/s on the public
+# API; 8 in flight + 24h cache TTL is well under the limit.
+_TMDB_PROVIDER_CONCURRENCY = 8
+
+
+async def _tmdb_provider_for(
+    hx: "httpx.AsyncClient",
+    api_key: str,
+    kind: str,
+    tmdb_id: str,
+) -> str | None:
+    """Look up TMDB watch providers (region CA) and translate to one of
+    our service buckets. Returns None on miss / non-CA-only / errors."""
+    path = "tv" if kind == "series" else "movie"
+    try:
+        r = await hx.get(
+            f"https://api.themoviedb.org/3/{path}/{tmdb_id}/watch/providers",
+            params={"api_key": api_key},
+            timeout=10.0,
+        )
+        if r.status_code != 200:
+            return None
+        ca = ((r.json() or {}).get("results") or {}).get("CA") or {}
+    except Exception:
+        return None
+    # flatrate (subscription) is the strongest signal. ads/free are accepted
+    # too — Peacock and Pluto often only show under those tiers in CA.
+    for tier in ("flatrate", "ads", "free", "buy", "rent"):
+        for p in ca.get(tier) or []:
+            pn = (p.get("provider_name") or "").lower()
+            if not pn:
+                continue
+            for svc, hints in _LOUNGE_VOD_CATEGORY_HINTS.items():
+                if any(h in pn for h in hints):
+                    return svc
+    return None
+
+
+async def _tmdb_classify_unknowns(items: list[dict], kind: str) -> int:
+    """In-place reassign service for items currently tagged "Other" that
+    have a tmdb_id. Returns how many were reclassified. No-op without
+    TMDB_API_KEY env var.
+    """
+    api_key = os.environ.get("TMDB_API_KEY")
+    if not api_key:
+        return 0
+    targets = [it for it in items if it.get("service") == "Other" and it.get("tmdb_id")]
+    if not targets:
+        return 0
+    import httpx as _hx_tp
+    sem = asyncio.Semaphore(_TMDB_PROVIDER_CONCURRENCY)
+    reclassified = 0
+    async def _one(hx: _hx_tp.AsyncClient, item: dict) -> None:
+        nonlocal reclassified
+        async with sem:
+            svc = await _tmdb_provider_for(hx, api_key, kind, str(item["tmdb_id"]))
+            if svc:
+                item["service"] = svc
+                reclassified += 1
+    async with _hx_tp.AsyncClient(timeout=15.0, follow_redirects=True) as hx:
+        await asyncio.gather(*[_one(hx, t) for t in targets], return_exceptions=True)
+    return reclassified
+
+
+async def _tmdb_english_title(
+    hx: "httpx.AsyncClient",
+    api_key: str,
+    kind: str,
+    tmdb_id: str,
+) -> tuple[str | None, str | None]:
+    """Fetch the English-localized title + poster path for one TMDB id.
+    Returns (english_title, english_poster_url) — either may be None on miss.
+    """
+    path = "tv" if kind == "series" else "movie"
+    try:
+        r = await hx.get(
+            f"https://api.themoviedb.org/3/{path}/{tmdb_id}",
+            params={"api_key": api_key, "language": "en-US"},
+            timeout=10.0,
+        )
+        if r.status_code != 200:
+            return None, None
+        body = r.json() or {}
+    except Exception:
+        return None, None
+    title = (body.get("title") or body.get("name") or "").strip() or None
+    poster = body.get("poster_path")
+    poster_url = f"https://image.tmdb.org/t/p/w500{poster}" if poster else None
+    return title, poster_url
+
+
+async def _tmdb_apply_english_titles(items: list[dict], kind: str) -> int:
+    """In-place set `english_name` (and replace `poster` with TMDB art when
+    we get one) for every item that has a tmdb_id. Returns how many got an
+    English title. No-op without TMDB_API_KEY.
+
+    The upstream `name` is kept around as the fallback. The client-side
+    PosterCardPresenter prefers `english_name` when present.
+    """
+    api_key = os.environ.get("TMDB_API_KEY")
+    if not api_key:
+        return 0
+    targets = [it for it in items if it.get("tmdb_id") and not it.get("english_name")]
+    if not targets:
+        return 0
+    import httpx as _hx_en
+    # English-title pass is per-title — we may issue 1k+ calls on a fresh
+    # cache build. Bigger semaphore than the watch-providers pass; TMDB
+    # tolerates ~50 req/s on the public API.
+    sem = asyncio.Semaphore(16)
+    applied = 0
+    async def _one(hx: _hx_en.AsyncClient, item: dict) -> None:
+        nonlocal applied
+        async with sem:
+            title, poster = await _tmdb_english_title(hx, api_key, kind, str(item["tmdb_id"]))
+            if title:
+                item["english_name"] = title
+                applied += 1
+            if poster:
+                # Prefer TMDB poster over the panel's stream_icon — it's
+                # cleaner art and almost always English-language design.
+                item["poster"] = poster
+    async with _hx_en.AsyncClient(timeout=15.0, follow_redirects=True) as hx:
+        await asyncio.gather(*[_one(hx, t) for t in targets], return_exceptions=True)
+    return applied
 
 
 async def _fetch_upstream_vod(label: str, host: str, port: int, user: str, pw: str) -> dict:
     """Pull one account's VOD catalog. Returns
     {"categories": {category_id: name}, "movies": [...], "series": [...]}.
+
+    DISABLED — kept as a no-op for the legacy _build_vod_catalog_legacy_upstream
+    path. The active VOD catalog source is TMDB
+    (see _build_vod_catalog_tmdb). Calling get_vod_streams/get_series
+    against the IPTV panels was returning Spanish-dubbed titles and
+    chewing up auth quota; live channels (a different endpoint) are not
+    affected. To re-enable: restore the function body and point
+    _build_vod_catalog at _build_vod_catalog_legacy_upstream.
     """
+    return {"label": label, "categories": {}, "movies": [], "series": []}
+
+
+async def _fetch_upstream_vod_legacy(label: str, host: str, port: int, user: str, pw: str) -> dict:
+    """Original upstream VOD fetcher. See _fetch_upstream_vod docstring."""
     import httpx as _hx_vod
 
     base = f"http://{host}:{port}"
@@ -9738,6 +9995,13 @@ async def _fetch_upstream_vod(label: str, host: str, port: int, user: str, pw: s
                         sid       = s.get("stream_id")
                         cat_id    = str(s.get("category_id", ""))
                         cat_name  = out["categories"].get(cat_id, "")
+                        nm        = s.get("name") or ""
+                        # English-only catalog: drop LAT/ESP/Latino entries
+                        # at intake — they otherwise leak into the Netflix /
+                        # HBO buckets because the classifier matches the
+                        # service-name half of "Netflix LAT" labels.
+                        if _is_spanish_category(cat_name) or _is_spanish_title(nm):
+                            continue
                         ext       = s.get("container_extension") or "mp4"
                         out["movies"].append({
                             "kind":              "movie",
@@ -9749,7 +10013,7 @@ async def _fetch_upstream_vod(label: str, host: str, port: int, user: str, pw: s
                             "rating":            s.get("rating"),
                             "added":             s.get("added"),
                             "category_name":     cat_name,
-                            "service":           _classify_vod_service(cat_name),
+                            "service":           _classify_vod_service(cat_name, s.get("name") or ""),
                             "url":               f"{base}/movie/{user}/{pw}/{sid}.{ext}",
                             "poster":            s.get("stream_icon"),
                         })
@@ -9766,6 +10030,9 @@ async def _fetch_upstream_vod(label: str, host: str, port: int, user: str, pw: s
                         sid       = s.get("series_id")
                         cat_id    = str(s.get("category_id", ""))
                         cat_name  = out["categories"].get(cat_id, "")
+                        nm        = s.get("name") or ""
+                        if _is_spanish_category(cat_name) or _is_spanish_title(nm):
+                            continue
                         out["series"].append({
                             "kind":              "series",
                             "label":             label,
@@ -9776,7 +10043,7 @@ async def _fetch_upstream_vod(label: str, host: str, port: int, user: str, pw: s
                             "rating":            s.get("rating"),
                             "added":             s.get("last_modified") or s.get("releaseDate"),
                             "category_name":     cat_name,
-                            "service":           _classify_vod_service(cat_name),
+                            "service":           _classify_vod_service(cat_name, s.get("name") or ""),
                             "poster":            s.get("cover"),
                             "host":              host,
                             "port":              port,
@@ -9791,6 +10058,200 @@ async def _fetch_upstream_vod(label: str, host: str, port: int, user: str, pw: s
     return out
 
 
+# TMDB watch-provider IDs per streaming service (region CA). These let us
+# query "what's on Netflix in Canada right now" via /discover endpoints,
+# which is the cleanest catalog source we have post-upstream. IDs are stable
+# TMDB primary keys; verified via /watch/providers/regions.
+_LOUNGE_VOD_PROVIDER_IDS_CA: dict[str, list[int]] = {
+    "Netflix":      [8],
+    "Disney+":      [337],
+    "Paramount+":   [531],
+    "Apple TV+":    [350],
+    "HBO Max":      [1825, 1899],   # Max + legacy "HBO Max"
+    "Prime Video":  [9, 119],       # Amazon (US id 9 + worldwide 119, both surface)
+    "Crave":        [230],
+    "Hulu":         [15],           # mostly US-only; CA gets a thin slice
+    "Peacock":      [386],
+}
+
+# Pages per service per kind. TMDB returns 20 results per page, so 3 pages
+# = 60 titles per rail — matches the 60-cap the UI renders today.
+_TMDB_DISCOVER_PAGES = 3
+
+
+async def _tmdb_discover_titles(
+    hx: "httpx.AsyncClient",
+    api_key: str,
+    kind: str,
+    service: str,
+    provider_ids: list[int],
+) -> list[dict]:
+    """Pull popular titles for one (service, kind) from TMDB /discover.
+
+    `kind` is "movie" or "series". Returns a list of VodTitle-shaped dicts
+    matching the existing VodCatalogResponse schema so the client doesn't
+    change. `service` is set on every returned item so the rail picker
+    keeps working.
+    """
+    path = "tv" if kind == "series" else "movie"
+    out: list[dict] = []
+    seen: set[int] = set()
+    for page in range(1, _TMDB_DISCOVER_PAGES + 1):
+        try:
+            r = await hx.get(
+                f"https://api.themoviedb.org/3/discover/{path}",
+                params={
+                    "api_key": api_key,
+                    "language": "en-US",
+                    "watch_region": "CA",
+                    "with_watch_providers": "|".join(str(x) for x in provider_ids),
+                    "sort_by": "popularity.desc",
+                    "page": page,
+                    # Drop adult content and completely unrated items.
+                    "include_adult": "false",
+                },
+                timeout=12.0,
+            )
+            if r.status_code != 200:
+                break
+            results = (r.json() or {}).get("results") or []
+        except Exception:
+            break
+        if not results:
+            break
+        for it in results:
+            tid = it.get("id")
+            if not tid or tid in seen:
+                continue
+            seen.add(int(tid))
+            poster_path = it.get("poster_path")
+            poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None
+            backdrop_path = it.get("backdrop_path")
+            backdrop_url = f"https://image.tmdb.org/t/p/w780{backdrop_path}" if backdrop_path else None
+            release_date = it.get("release_date") or it.get("first_air_date") or ""
+            year = release_date[:4] if release_date else None
+            name = (it.get("title") or it.get("name") or "").strip()
+            rating_n = it.get("vote_average")
+            rating = f"{rating_n:.1f}" if isinstance(rating_n, (int, float)) else None
+            out.append({
+                "kind":          kind,
+                "name":          name,
+                "english_name":  name,
+                "tmdb_id":       int(tid),
+                "year":          year,
+                "rating":        rating,
+                "added":         release_date or None,
+                "category_name": None,
+                "service":       service,
+                # url/stream_id/series_id are unused now — playback goes
+                # through the WebView resolver keyed on tmdb_id. Keep the
+                # fields nullable so the existing client model stays
+                # compatible.
+                "url":           None,
+                "poster":        poster_url,
+                "backdrop":      backdrop_url,
+                "stream_id":     None,
+                # Use the tmdb_id as the series_id so the existing
+                # SeriesDetailActivity flow keeps working.
+                "series_id":     int(tid) if kind == "series" else None,
+                "overview":      (it.get("overview") or "").strip() or None,
+            })
+    return out
+
+
+async def _build_vod_catalog_tmdb() -> dict:
+    """TMDB-sourced catalog. Replaces the upstream VOD intake entirely.
+
+    Pulls /discover/{movie,tv} per streaming service for region CA, sorted
+    by popularity desc. Each rail caps at ~60 titles (3 TMDB pages × 20).
+    No upstream VOD calls — upstream is only used for live channels now.
+
+    Returns the same shape as the legacy _build_vod_catalog so the client
+    `VodCatalogResponse` model needs no changes.
+    """
+    import time as _t_vod
+    api_key = os.environ.get("TMDB_API_KEY")
+    if not api_key:
+        # No TMDB key → empty catalog. Honest gap rather than silently
+        # serving stale upstream data. Operator notices via the Movies/Series
+        # tile being empty and the metadata_source field.
+        return {
+            "by_service":      {svc: {"movies": [], "series": []} for svc in _LOUNGE_VOD_SERVICES},
+            "movies_by_id":    {},
+            "series_by_id":    {},
+            "metadata_source": "missing_tmdb_key",
+            "fetched_at":      _t_vod.time(),
+        }
+
+    import httpx as _hx_tmdb_cat
+    movies: list[dict] = []
+    series: list[dict] = []
+
+    async with _hx_tmdb_cat.AsyncClient(timeout=20.0, follow_redirects=True) as hx:
+        # Per-service, per-kind discovery in parallel. ~9 services × 2 kinds
+        # × 3 pages = ~54 TMDB calls; with httpx pooling that's ~5s end-to-end.
+        tasks = []
+        for svc, ids in _LOUNGE_VOD_PROVIDER_IDS_CA.items():
+            tasks.append(_tmdb_discover_titles(hx, api_key, "movie",  svc, ids))
+            tasks.append(_tmdb_discover_titles(hx, api_key, "series", svc, ids))
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for r in results:
+            if isinstance(r, Exception) or not r:
+                continue
+            for item in r:
+                (movies if item["kind"] == "movie" else series).append(item)
+
+    # Group by service and dedup by tmdb_id within a service rail (a title
+    # may appear under multiple provider ids, e.g. Crave + HBO Max).
+    by_service: dict[str, dict[str, list[dict]]] = {
+        svc: {"movies": [], "series": []} for svc in _LOUNGE_VOD_SERVICES
+    }
+    seen: dict[tuple[str, str], set[int]] = {}
+    for it in movies + series:
+        svc = it["service"]
+        kind = it["kind"]
+        bucket_key = "movies" if kind == "movie" else "series"
+        if svc not in by_service:
+            by_service[svc] = {"movies": [], "series": []}
+        seen_key = (svc, kind)
+        if seen_key not in seen:
+            seen[seen_key] = set()
+        if it["tmdb_id"] in seen[seen_key]:
+            continue
+        seen[seen_key].add(it["tmdb_id"])
+        by_service[svc][bucket_key].append(it)
+
+    # Sort each rail by added (release_date) desc within service.
+    def _date_key(item: dict) -> str:
+        return str(item.get("added") or item.get("year") or "")
+    for svc in by_service:
+        by_service[svc]["movies"].sort(key=_date_key, reverse=True)
+        by_service[svc]["series"].sort(key=_date_key, reverse=True)
+
+    # Index by tmdb_id for the /details endpoint. Movies map to a
+    # single-element list to keep the legacy shape; we don't have a
+    # "primary + backup" notion when there's only one source.
+    movies_by_id: dict[str, list[dict]] = {}
+    for m in movies:
+        key = str(m.get("tmdb_id") or "")
+        if key:
+            movies_by_id.setdefault(key, []).append(m)
+
+    series_by_id: dict[str, dict] = {}
+    for s in series:
+        sid = str(s.get("tmdb_id") or "")
+        if sid:
+            series_by_id[sid] = s
+
+    return {
+        "by_service":      by_service,
+        "movies_by_id":    movies_by_id,
+        "series_by_id":    series_by_id,
+        "metadata_source": "tmdb",
+        "fetched_at":      _t_vod.time(),
+    }
+
+
 async def _build_vod_catalog() -> dict:
     """Aggregate VOD catalogs across all upstream accounts. Result shape:
 
@@ -9802,6 +10263,19 @@ async def _build_vod_catalog() -> dict:
           "metadata_source": "tmdb" | "upstream_only",
           "fetched_at": <unix_ts>,
         }
+
+    NOTE: upstream VOD intake is disabled — see _fetch_upstream_vod docstring.
+    Movies/Series come from _build_vod_catalog_tmdb now. This wrapper is
+    kept only so the cache-build path doesn't change shape and any other
+    callers of _build_vod_catalog continue to work.
+    """
+    return await _build_vod_catalog_tmdb()
+
+
+async def _build_vod_catalog_legacy_upstream() -> dict:
+    """Legacy upstream VOD aggregation. Kept for emergency revert only —
+    not invoked by the current cache build. To re-enable, swap
+    _build_vod_catalog body to call this instead of _build_vod_catalog_tmdb.
     """
     import time as _t_vod
     per_account = await asyncio.gather(
@@ -9819,6 +10293,22 @@ async def _build_vod_catalog() -> dict:
             continue
         movies.extend(r.get("movies", []))
         series.extend(r.get("series", []))
+
+    # Second-pass service classification for items still tagged "Other" that
+    # have a tmdb_id — TMDB watch-providers (region CA) catches series that
+    # IPTV panels lump under generic "TV - English" categories without a
+    # title-prefix tag. No-op without TMDB_API_KEY.
+    movies_reclassified = await _tmdb_classify_unknowns(movies, "movie")
+    series_reclassified = await _tmdb_classify_unknowns(series, "series")
+
+    # Third pass — English-localized titles + posters for everything with a
+    # tmdb_id. The IPTV panel often labels titles with their Spanish dub
+    # name ("El Padrino" instead of "The Godfather"); TMDB returns the
+    # English release title which is what the user actually wants to see.
+    await _tmdb_apply_english_titles(movies, "movie")
+    await _tmdb_apply_english_titles(series, "series")
+
+    metadata_source = "tmdb_providers" if (movies_reclassified or series_reclassified) else "upstream_only"
 
     # Group by service.
     by_service: dict[str, dict[str, list[dict]]] = {
@@ -9854,7 +10344,7 @@ async def _build_vod_catalog() -> dict:
         "by_service":     by_service,
         "movies_by_id":   movies_by_id,
         "series_by_id":   series_by_id,
-        "metadata_source": "upstream_only",  # TMDB join is a future Phase 3.5 step
+        "metadata_source": metadata_source,
         "fetched_at":     _t_vod.time(),
     }
 
@@ -9916,98 +10406,158 @@ async def lounge_vod_catalog(service: str = "") -> dict:
     }
 
 
+# Vidsrc-family embed providers, in fallback order. The client's WebView
+# resolver tries each in turn until one yields an m3u8. These all accept
+# /embed/{movie|tv}/{tmdb_id} and (for series) /embed/tv/{tmdb_id}/{season}/{episode}.
+_VIDSRC_EMBED_HOSTS: list[str] = [
+    "https://vidsrc.xyz",
+    "https://vidsrc.in",
+    "https://vidsrc.pm",
+    "https://vidsrc.net",
+]
+
+
+def _vidsrc_movie_embeds(tmdb_id: str) -> list[str]:
+    return [f"{h}/embed/movie/{tmdb_id}" for h in _VIDSRC_EMBED_HOSTS]
+
+
+def _vidsrc_episode_embeds(tmdb_id: str, season: int, episode: int) -> list[str]:
+    return [f"{h}/embed/tv/{tmdb_id}/{season}/{episode}" for h in _VIDSRC_EMBED_HOSTS]
+
+
 @app.get("/lounge/vod/details/{tmdb_id}")
 async def lounge_vod_details(tmdb_id: str) -> dict:
-    """Movie detail + every upstream account that carries it, primary first.
+    """Movie detail keyed on TMDB id.
 
-    `tmdb_id` is the TMDB integer for movies that have one, or a "name:…
-    |year:…" composite key for those that don't (the catalog endpoint
-    returns this composite when needed)."""
+    Returns metadata + the list of vidsrc-family embed URLs the client's
+    WebView resolver should try in order. Playback URL resolution happens
+    on-device — the backend just hands back the embed URLs.
+    """
     if _lounge_vod_cache["data"] is None:
         await lounge_vod_catalog()  # forces a build
     data = _lounge_vod_cache["data"] or {}
     instances = data.get("movies_by_id", {}).get(tmdb_id, [])
-    if not instances:
-        return {"error": "not_found", "urls": []}
 
-    # Primary = first instance from the (already sorted) list. Backup URLs
-    # come from the rest. _sort_by_url_priority isn't quite right here
-    # (we don't have the same dict shape), so we fall through in catalog
-    # order — usually the same ordering as _upstream_ACCOUNTS which puts
-    # premium accounts first.
-    urls = [m["url"] for m in instances if m.get("url")]
-    head = instances[0]
+    # Even if the catalog cache doesn't know about this tmdb_id (e.g. user
+    # pasted one in, or it's been pushed off the popular list since the
+    # last cache build), we can still synthesize the embed URLs and let
+    # the client try playback. Metadata-only fields fall back to None.
+    head: dict = instances[0] if instances else {}
+
     return {
-        "title":         head.get("name", ""),
+        "title":         head.get("english_name") or head.get("name") or "",
         "year":          head.get("year"),
         "rating":        head.get("rating"),
         "service":       head.get("service"),
         "poster":        head.get("poster"),
+        "backdrop":      head.get("backdrop"),
+        "overview":      head.get("overview"),
         "category":      head.get("category_name"),
-        "instance_count": len(urls),
-        "urls":          urls,
+        "instance_count": len(_VIDSRC_EMBED_HOSTS),
+        # Legacy clients: stream URL list. The Lounge app's WebView
+        # resolver consumes `embed_urls`; older PlayerActivity-only
+        # callers fall back to nothing.
+        "urls":          [],
+        "embed_urls":    _vidsrc_movie_embeds(tmdb_id),
     }
 
 
 @app.get("/lounge/vod/series/{series_key}")
 async def lounge_vod_series(series_key: str) -> dict:
-    """Episode list for one series.
+    """Episode list for a series, keyed on TMDB id.
 
-    `series_key` is the upstream `series_id` as a string (per-account
-    namespaced — same id can mean different shows on different accounts,
-    so it's prefixed with the account label, e.g. `kstv:1234`)."""
+    Returns season+episode structure populated from TMDB. Each episode
+    carries the `embed_urls` list so the client's WebView resolver can
+    pick one and resolve to an m3u8 at play time.
+    """
     if _lounge_vod_cache["data"] is None:
         await lounge_vod_catalog()
     data = _lounge_vod_cache["data"] or {}
-    series_by_id = data.get("series_by_id", {})
+    s = data.get("series_by_id", {}).get(series_key) or {}
 
-    s = series_by_id.get(series_key)
-    if not s:
-        return {"error": "not_found", "seasons": []}
+    api_key = os.environ.get("TMDB_API_KEY")
+    if not api_key:
+        return {"error": "missing_tmdb_key", "seasons": []}
 
     import httpx as _hx_se
-    host, port, user, pw = s.get("host"), s.get("port"), s.get("user"), s.get("pw")
     try:
-        async with _hx_se.AsyncClient(timeout=20.0, follow_redirects=True) as hx:
-            r = await hx.get(
-                f"http://{host}:{port}/player_api.php?username={user}&password={pw}"
-                f"&action=get_series_info&series_id={s.get('series_id')}",
-                headers={"User-Agent": _BROWSER_HEADERS["User-Agent"]},
+        async with _hx_se.AsyncClient(timeout=15.0, follow_redirects=True) as hx:
+            top = await hx.get(
+                f"https://api.themoviedb.org/3/tv/{series_key}",
+                params={"api_key": api_key, "language": "en-US"},
             )
-        if r.status_code != 200:
-            return {"error": f"http_{r.status_code}", "seasons": []}
-        info = r.json()
+            if top.status_code != 200:
+                return {"error": f"tmdb_http_{top.status_code}", "seasons": []}
+            top_body = top.json() or {}
+            season_meta = [
+                sm for sm in (top_body.get("seasons") or [])
+                if isinstance(sm, dict) and isinstance(sm.get("season_number"), int)
+                and sm.get("season_number") > 0  # skip Specials (season 0)
+            ]
+            # Fetch each season's episode list. Cap at 12 seasons so a
+            # 20-season-long sitcom doesn't issue 20 TMDB calls per click.
+            season_meta = season_meta[:12]
+
+            async def _fetch_season(sn: int) -> dict | None:
+                try:
+                    r = await hx.get(
+                        f"https://api.themoviedb.org/3/tv/{series_key}/season/{sn}",
+                        params={"api_key": api_key, "language": "en-US"},
+                    )
+                    if r.status_code != 200:
+                        return None
+                    return r.json() or {}
+                except Exception:
+                    return None
+            season_jsons = await asyncio.gather(
+                *[_fetch_season(int(sm["season_number"])) for sm in season_meta],
+                return_exceptions=True,
+            )
     except Exception as e:
         return {"error": f"fetch_failed: {e}", "seasons": []}
 
-    eps_by_season = info.get("episodes") or {}
     seasons: list[dict] = []
-    for season_key in sorted(eps_by_season.keys(), key=lambda k: int(k) if str(k).isdigit() else 999):
-        eps = eps_by_season[season_key] or []
+    for sm, sj in zip(season_meta, season_jsons):
+        if not isinstance(sj, dict):
+            continue
+        sn = int(sm["season_number"])
         episodes: list[dict] = []
-        for e in eps:
+        for e in (sj.get("episodes") or []):
             if not isinstance(e, dict):
                 continue
-            ep_id = e.get("id")
-            ext   = e.get("container_extension") or "mp4"
+            ep_n = e.get("episode_number")
+            if not isinstance(ep_n, int):
+                continue
+            still_path = e.get("still_path")
+            still_url = f"https://image.tmdb.org/t/p/w300{still_path}" if still_path else None
             episodes.append({
-                "episode_number": e.get("episode_num"),
-                "title":          (e.get("title") or "").strip(),
-                "overview":       (e.get("info") or {}).get("plot"),
-                "still_url":      (e.get("info") or {}).get("movie_image"),
-                "url":            f"http://{host}:{port}/series/{user}/{pw}/{ep_id}.{ext}",
+                "episode_number": ep_n,
+                "title":          (e.get("name") or "").strip(),
+                "overview":       (e.get("overview") or "").strip() or None,
+                "still_url":      still_url,
+                # Legacy stream URL field — no native URL; the client uses
+                # embed_urls and the WebView resolver to play.
+                "url":            "",
+                "embed_urls":     _vidsrc_episode_embeds(series_key, sn, ep_n),
             })
-        seasons.append({
-            "season_number": int(season_key) if str(season_key).isdigit() else 0,
-            "episodes":      episodes,
-        })
+        if episodes:
+            seasons.append({
+                "season_number": sn,
+                "episodes":      episodes,
+            })
 
+    name  = s.get("english_name") or s.get("name") or top_body.get("name") or ""
+    year  = s.get("year") or (top_body.get("first_air_date") or "")[:4]
+    rating_n = top_body.get("vote_average")
+    rating = s.get("rating") or (f"{rating_n:.1f}" if isinstance(rating_n, (int, float)) else None)
+    poster_path = top_body.get("poster_path")
+    poster = s.get("poster") or (f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None)
     return {
-        "title":   s.get("name", ""),
-        "year":    s.get("year"),
-        "rating":  s.get("rating"),
+        "title":   name,
+        "year":    year,
+        "rating":  rating,
         "service": s.get("service"),
-        "poster":  s.get("poster"),
+        "poster":  poster,
         "seasons": seasons,
     }
 
@@ -10019,20 +10569,61 @@ async def lounge_vod_series(series_key: str) -> dict:
 # VOD is a single-file download where the player needs Range header
 # forwarding so seek works.
 
+# Hosts the WebView resolver may legitimately produce after resolving a
+# vidsrc embed. Wildcard suffixes — match by endswith on the parsed
+# hostname so subdomains roll up. Any other host gets 403.
+_VIDSRC_RESOLVED_HOST_SUFFIXES: tuple[str, ...] = (
+    ".mp4upload.com", ".doodstream.com", ".dood.cx", ".dood.li", ".dood.la",
+    ".dood.pm", ".dood.so", ".dood.sh", ".dood.ws", ".dood.wf", ".dood.re",
+    ".dood.work", ".dood.watch", ".dood.yt",
+    ".vidcdn.pro", ".vidcdn.com", ".vidsrc.xyz", ".vidsrc.in", ".vidsrc.pm",
+    ".vidsrc.net", ".vidsrc.cc", ".vidsrc.me", ".vidsrc.to",
+    ".vidcloud.online", ".vidcloud.icu", ".vidcloud.io", ".vidcloud.lol",
+    ".vidcloud.co", ".vidcloud.stream",
+    ".upcloud.io", ".upstream.to", ".megacloud.tv", ".megacloud.club",
+    ".rabbitstream.net", ".filemoon.sx", ".filemoon.in", ".filemoon.to",
+    ".streamtape.com", ".streamtape.net", ".mixdrop.co", ".mixdrop.ag",
+    ".mixdrop.bz", ".mixdrop.club", ".mixdrop.sx",
+    ".smashy.stream", ".smashystream.com",
+    ".embed.su", ".embedsu.com",
+    ".2embed.cc", ".2embed.org",
+    # Akamai / Cloudfront / Fastly fronts that vidsrc-family upstreams hide
+    # behind. We don't enumerate every shard — match on the parent.
+    ".akamaized.net", ".cloudfront.net", ".fastly.net", ".bunnycdn.com",
+    ".b-cdn.net",
+)
+
+
+def _vod_proxy_host_allowed(host: str | None) -> bool:
+    if not host:
+        return False
+    h = host.lower()
+    if h in _upstream_HOSTS:
+        return True
+    for suffix in _VIDSRC_RESOLVED_HOST_SUFFIXES:
+        if h == suffix.lstrip(".") or h.endswith(suffix):
+            return True
+    return False
+
+
 @app.get("/lounge/vod-stream-proxy")
 async def lounge_vod_stream_proxy(url: str, request: Request):
-    """Stream a VOD file from an upstream upstream, with Range header
-    forwarded both ways so ExoPlayer / hls.js seek work.
+    """Stream a VOD file (mp4 or HLS m3u8 segment) from an upstream.
 
-    Only allows whitelisted upstream hosts (same allowlist the relay uses)
-    so this can't be turned into an open proxy.
+    Range header is forwarded both ways so ExoPlayer / hls.js seek works.
+    Allowlist combines:
+      - upstream hosts (legacy — for any leftover IPTV VOD flow)
+      - vidsrc-resolved CDN hosts (for the new TMDB+vidsrc playback path)
+    Anything else returns 403 so this can't be turned into an open proxy.
+
+    `referer` and `origin` query params are accepted as overrides — the
+    WebView resolver captures the Referer the embed required and passes
+    it along; many vidsrc-family CDNs hard-require a matching Referer.
     """
     from fastapi.responses import StreamingResponse, JSONResponse
 
-    # Allowlist — same hosts the relay accepts. Rejects anything else with
-    # 403 so a leaked URL can't proxy arbitrary destinations.
     parsed = urlparse(url)
-    if parsed.hostname not in _upstream_HOSTS:
+    if not _vod_proxy_host_allowed(parsed.hostname):
         return JSONResponse(
             status_code=403,
             content={"error": "host_not_allowed", "host": parsed.hostname},
@@ -10045,6 +10636,15 @@ async def lounge_vod_stream_proxy(url: str, request: Request):
     range_hdr = request.headers.get("range")
     if range_hdr:
         fwd_headers["Range"] = range_hdr
+    # Optional Referer/Origin override — the WebView resolver may pass
+    # these as query params after capturing them from the embed page.
+    qp = request.query_params
+    referer_override = qp.get("referer") or qp.get("ref")
+    if referer_override:
+        fwd_headers["Referer"] = referer_override
+    origin_override = qp.get("origin")
+    if origin_override:
+        fwd_headers["Origin"] = origin_override
 
     client = _hx_vsp.AsyncClient(timeout=httpx.Timeout(30.0, read=None), follow_redirects=True)
     upstream = await client.send(
