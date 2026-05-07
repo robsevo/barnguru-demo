@@ -8481,6 +8481,11 @@ def _sort_by_url_priority(candidates: list[dict]) -> list[dict]:
         u = m["url"]
         if "kstv.us" in u:
             return 0
+        # an upstream host.an upstream host.co — Bob 2026-05-06: passthrough rendition is
+        # buttery, no re-transcode needed. Promoted to tier 1 alongside
+        # an upstream host. Anywhere an upstream host has a candidate, prefer it.
+        if "an upstream host" in u:
+            return 1
         if "an upstream host" in u:
             return 1
         if "ampztl" in u:
