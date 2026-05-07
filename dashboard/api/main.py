@@ -6676,21 +6676,10 @@ async def _start_stream_resolver() -> None:
             r = await init_resolver()
             print(f"[stream_resolver] startup: ready providers={list(r.providers.keys())}",
                   flush=True)
-            # Pre-warm Chromium so the first user-facing resolve doesn't
-            # pay the 3-5s browser spawn cost. We trigger a cheap canary
-            # resolve in the background — it'll cache the result + spin
-            # up Playwright.
-            async def _warm_chromium() -> None:
-                try:
-                    # Small delay so we don't compete with worker init
-                    await asyncio.sleep(2.0)
-                    # Inception (TMDB 27205) — pinned canary, well-known title
-                    await r.resolve_movie(27205, budget_s=20.0)
-                    print("[stream_resolver] chromium pre-warmed", flush=True)
-                except Exception as e:
-                    print(f"[stream_resolver] chromium prewarm failed: {e}",
-                          flush=True)
-            asyncio.create_task(_warm_chromium())
+            # Prewarm DISABLED on this 2GB VPS — running prewarm in parallel
+            # with user-facing resolves doubled Chromium memory under load
+            # and starved real requests. First user pays a one-time
+            # ~12s cold-start; subsequent users hit the 24h cache.
         except Exception as e:
             import traceback
             print(f"[stream_resolver] startup FAILED: {e}", flush=True)
