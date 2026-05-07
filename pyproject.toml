@@ -23,6 +23,7 @@ dependencies = [
     "datasets>=4.8.4",
     "fiftyone>=1.14.1",
     "imagehash>=4.3.2",
+    "playwright-stealth>=2.0.3",
 ]
 
 [build-system]

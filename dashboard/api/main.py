@@ -10751,10 +10751,10 @@ def _stream_resolver_enabled() -> bool:
     return os.environ.get("STREAM_RESOLVER_ENABLED") == "1"
 
 
-# Inline resolve budget for /lounge/vod/details. 6s is enough for cache
-# hits + healthy provider warm starts; longer than that and we'd block
-# the catalog response too long.
-_STREAM_RESOLVE_BUDGET_S = float(os.environ.get("STREAM_RESOLVE_BUDGET_S", "6.0"))
+# Inline resolve budget for /lounge/vod/details. vidlink hits in ~1.3s
+# cold and <100ms cached, so 5s gives healthy headroom and falls back
+# to embed_urls cleanly when a provider stalls.
+_STREAM_RESOLVE_BUDGET_S = float(os.environ.get("STREAM_RESOLVE_BUDGET_S", "5.0"))
 
 # Path the resolver should use to wrap stream URLs. The client's API base
 # is the public URL; this needs to be the same so the proxied URLs work.
@@ -11032,6 +11032,8 @@ _VIDSRC_RESOLVED_HOST_SUFFIXES: tuple[str, ...] = (
     "ployan.me",
     ".cdnshells.com", ".cdnsh.com",
     ".jp19.icu", ".vrtcdn.com",
+    ".vodvidl.site", "storm.vodvidl.site",
+    ".vidlink.pro",
     # Akamai / Cloudfront / Fastly fronts that vidsrc-family upstreams hide
     # behind. We don't enumerate every shard — match on the parent.
     ".akamaized.net", ".cloudfront.net", ".fastly.net", ".bunnycdn.com",
