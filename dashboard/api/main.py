@@ -8481,13 +8481,6 @@ def _sort_by_url_priority(candidates: list[dict]) -> list[dict]:
         u = m["url"]
         if "kstv.us" in u:
             return 0
-        # an upstream host.an upstream host.co — Bob 2026-05-06: streaming is buttery, the
-        # passthrough rendition matches the source frame-for-frame and the
-        # CDN is fast. Promoted to tier 1 alongside an upstream host. Anywhere
-        # an upstream host has a candidate, prefer it before falling back to
-        # transmuxed paths.
-        if "an upstream host" in u:
-            return 1
         if "an upstream host" in u:
             return 1
         if "ampztl" in u:
@@ -9554,30 +9547,6 @@ async def _build_lounge_payload() -> dict:
             backup_src.append(c["url"])
             if len(backup_src) >= 12:
                 break
-
-        # Verify backups in parallel before shipping. Without this the lounge
-        # was sending dead bgdc.live chips to the Fire TV client (Bob
-        # 2026-05-06: TSN1 logcat showed `Response code: 401` cycled through
-        # 3 bgdc accounts before finding a working an upstream host backup,
-        # ~30s of dead air). Bounded by _VERIFY_SEM(20) so this stays cheap
-        # at fan-out across ~50 channels × 12 backups. We probe one URL per
-        # distinct upstream host and apply the verdict to all backups from
-        # that host — dead at the host level, not the chip level.
-        if backup_src:
-            distinct_hosts: dict[str, str] = {}  # host → first URL we saw
-            for u in backup_src:
-                h = _backup_upstream_host(u)
-                distinct_hosts.setdefault(h, u)
-            host_results = await _aio_lp.gather(
-                *[_verify_stream_alive(probe_url) for probe_url in distinct_hosts.values()],
-                return_exceptions=True,
-            )
-            alive_hosts: set[str] = set()
-            for h, ok in zip(distinct_hosts.keys(), host_results):
-                if ok is True:
-                    alive_hosts.add(h)
-            backup_src = [u for u in backup_src
-                          if _backup_upstream_host(u) in alive_hosts]
 
         chosen_out  = _apply_recode(chosen, ch_name)
         backups_out = [_apply_recode(u, ch_name) for u in backup_src]
