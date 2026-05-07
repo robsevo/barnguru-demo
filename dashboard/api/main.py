@@ -10258,13 +10258,14 @@ async def _tmdb_discover_titles(
     kind: str,
     service: str,
     provider_ids: list[int],
+    region: str = "CA",
 ) -> list[dict]:
     """Pull popular titles for one (service, kind) from TMDB /discover.
 
     `kind` is "movie" or "series". Returns a list of VodTitle-shaped dicts
     matching the existing VodCatalogResponse schema so the client doesn't
     change. `service` is set on every returned item so the rail picker
-    keeps working.
+    keeps working. `region` is a TMDB watch_region code (CA, US, GB, etc.).
     """
     path = "tv" if kind == "series" else "movie"
     out: list[dict] = []
@@ -10276,7 +10277,7 @@ async def _tmdb_discover_titles(
                 params={
                     "api_key": api_key,
                     "language": "en-US",
-                    "watch_region": "CA",
+                    "watch_region": region,
                     "with_watch_providers": "|".join(str(x) for x in provider_ids),
                     "sort_by": "popularity.desc",
                     "page": page,
@@ -10361,12 +10362,16 @@ async def _build_vod_catalog_tmdb() -> dict:
     series: list[dict] = []
 
     async with _hx_tmdb_cat.AsyncClient(timeout=20.0, follow_redirects=True) as hx:
-        # Per-service, per-kind discovery in parallel. ~9 services × 2 kinds
-        # × 3 pages = ~54 TMDB calls; with httpx pooling that's ~5s end-to-end.
+        # Discovery in parallel across 2 regions (CA + US). Region matters
+        # because TMDB watch-providers is region-specific: HBO Max/Hulu/
+        # Peacock only return titles for region=US. Many titles dedupe
+        # across regions (same TMDB id), so we keep the first occurrence
+        # within each (service, kind) rail.
         tasks = []
-        for svc, ids in _LOUNGE_VOD_PROVIDER_IDS_CA.items():
-            tasks.append(_tmdb_discover_titles(hx, api_key, "movie",  svc, ids))
-            tasks.append(_tmdb_discover_titles(hx, api_key, "series", svc, ids))
+        for region in ("CA", "US"):
+            for svc, ids in _LOUNGE_VOD_PROVIDER_IDS_CA.items():
+                tasks.append(_tmdb_discover_titles(hx, api_key, "movie",  svc, ids, region=region))
+                tasks.append(_tmdb_discover_titles(hx, api_key, "series", svc, ids, region=region))
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for r in results:
             if isinstance(r, Exception) or not r:
