@@ -11111,6 +11111,35 @@ def _vod_proxy_host_allowed(host: str | None) -> bool:
     return False
 
 
+def _rewrite_m3u8_for_vod(
+    content: str, original_url: str, proxy_base: str, referer: str | None,
+) -> str:
+    """Rewrite segment URLs in a vidlink/vidsrc-resolved manifest so they
+    flow back through /lounge/vod-stream-proxy (preserving the referer)
+    instead of trying to fetch directly from the upstream CDN.
+
+    The upstream CDN (e.g. storm.vodvidl.site) requires a specific
+    Referer header that ExoPlayer can't set per-segment. By rewriting,
+    every segment fetch comes back to us and we re-add the Referer.
+    """
+    from urllib.parse import urljoin, quote
+    out_lines: list[str] = []
+    ref_param = f"&referer={quote(referer, safe='')}" if referer else ""
+    for line in content.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            # Pass-through tags. EXT-X-KEY URI= and EXT-X-MAP URI= aren't
+            # rewritten here for simplicity — most vidlink streams don't
+            # encrypt or use map. If they do, we extend later.
+            out_lines.append(line)
+            continue
+        # This line is a URI (segment or sub-playlist).
+        abs_url = urljoin(original_url, s)
+        wrapped = f"{proxy_base}?url={quote(abs_url, safe='')}{ref_param}"
+        out_lines.append(wrapped)
+    return "\n".join(out_lines) + "\n"
+
+
 @app.get("/lounge/vod-stream-proxy")
 async def lounge_vod_stream_proxy(url: str, request: Request):
     """Stream a VOD file (mp4 or HLS m3u8 segment) from an upstream.
@@ -11141,6 +11170,12 @@ async def lounge_vod_stream_proxy(url: str, request: Request):
     import httpx as _hx_vsp
     fwd_headers: dict[str, str] = {
         "User-Agent": _BROWSER_HEADERS["User-Agent"],
+        # Force identity encoding upstream — we use aiter_raw() to stream
+        # the response, which means we'd serve gzipped bytes to the
+        # client without the Content-Encoding header. ExoPlayer would
+        # treat that as garbage. Asking upstream for plain text avoids
+        # the round-trip entirely.
+        "Accept-Encoding": "identity",
     }
     range_hdr = request.headers.get("range")
     if range_hdr:
@@ -11156,6 +11191,43 @@ async def lounge_vod_stream_proxy(url: str, request: Request):
         fwd_headers["Origin"] = origin_override
 
     client = _hx_vsp.AsyncClient(timeout=httpx.Timeout(30.0, read=None), follow_redirects=True)
+
+    # Detect manifest vs segment from the URL path. HLS manifests need
+    # buffering + segment-URL rewriting so ExoPlayer's relative .ts
+    # fetches resolve back to /lounge/vod-stream-proxy. Segment files
+    # stream raw with Range support.
+    path_lower = (urlparse(url).path or "").lower()
+    is_manifest = path_lower.endswith(".m3u8") or "playlist.m3u8" in path_lower or "master.m3u8" in path_lower or "index.m3u8" in path_lower
+
+    if is_manifest:
+        # Buffer the small manifest, rewrite segment URLs, return as text.
+        try:
+            r = await client.get(url, headers=fwd_headers)
+        except Exception as e:
+            await client.aclose()
+            return JSONResponse(status_code=502, content={"error": f"fetch: {e}"})
+        if r.status_code >= 400:
+            await client.aclose()
+            return JSONResponse(
+                status_code=r.status_code,
+                content={"error": f"upstream_status_{r.status_code}"},
+            )
+        # Rewrite segment URLs to point back through /lounge/vod-stream-proxy
+        # with the same referer carried forward, so segment fetches hit our
+        # proxy which knows the upstream's Referer requirement.
+        body_text = r.text
+        proxy_base = f"{request.url.scheme}://{request.url.netloc}/lounge/vod-stream-proxy"
+        rewritten = _rewrite_m3u8_for_vod(body_text, str(r.url), proxy_base, referer_override)
+        await client.aclose()
+        ct = r.headers.get("content-type") or "application/vnd.apple.mpegurl"
+        return Response(
+            content=rewritten,
+            status_code=r.status_code,
+            media_type=ct,
+            headers={"cache-control": "no-cache", "accept-ranges": "bytes"},
+        )
+
+    # Segment path: stream raw bytes with Range pass-through.
     upstream = await client.send(
         client.build_request("GET", url, headers=fwd_headers),
         stream=True,
@@ -11171,12 +11243,13 @@ async def lounge_vod_stream_proxy(url: str, request: Request):
 
     pass_headers: dict[str, str] = {}
     for h in ("content-type", "content-length", "content-range",
-              "accept-ranges", "etag", "last-modified", "cache-control"):
+              "accept-ranges", "etag", "last-modified", "cache-control",
+              "content-encoding"):
         v = upstream.headers.get(h)
         if v:
             pass_headers[h] = v
     if "content-type" not in pass_headers:
-        pass_headers["content-type"] = "video/mp4"
+        pass_headers["content-type"] = "video/mp2t"
     pass_headers.setdefault("accept-ranges", "bytes")
 
     async def _gen():
