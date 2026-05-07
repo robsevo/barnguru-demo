@@ -11029,6 +11029,9 @@ _VIDSRC_RESOLVED_HOST_SUFFIXES: tuple[str, ...] = (
     ".filelions.to", ".filelions.live", ".filelions.online",
     ".smashy.cloud", ".smashy.work",
     ".neonhorizonworkshops.com",
+    "ployan.me",
+    ".cdnshells.com", ".cdnsh.com",
+    ".jp19.icu", ".vrtcdn.com",
     # Akamai / Cloudfront / Fastly fronts that vidsrc-family upstreams hide
     # behind. We don't enumerate every shard — match on the parent.
     ".akamaized.net", ".cloudfront.net", ".fastly.net", ".bunnycdn.com",
