@@ -11200,6 +11200,7 @@ async def lounge_vod_stream_proxy(url: str, request: Request):
     is_manifest = path_lower.endswith(".m3u8") or "playlist.m3u8" in path_lower or "master.m3u8" in path_lower or "index.m3u8" in path_lower
 
     if is_manifest:
+        from fastapi.responses import Response as _Resp
         # Buffer the small manifest, rewrite segment URLs, return as text.
         try:
             r = await client.get(url, headers=fwd_headers)
@@ -11220,7 +11221,7 @@ async def lounge_vod_stream_proxy(url: str, request: Request):
         rewritten = _rewrite_m3u8_for_vod(body_text, str(r.url), proxy_base, referer_override)
         await client.aclose()
         ct = r.headers.get("content-type") or "application/vnd.apple.mpegurl"
-        return Response(
+        return _Resp(
             content=rewritten,
             status_code=r.status_code,
             media_type=ct,
