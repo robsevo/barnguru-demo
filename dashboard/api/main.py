@@ -8193,8 +8193,37 @@ def _get_verify_sem() -> "asyncio.Semaphore":
     return _VERIFY_SEM
 
 
+_verify_cache: dict[str, tuple[bool, float]] = {}
+_VERIFY_CACHE_TTL_OK = 300.0   # 5 min for alive-confirmed URLs
+_VERIFY_CACHE_TTL_BAD = 60.0   # 1 min for dead URLs (revisit faster on outages)
+
+
 async def _verify_stream_alive(url: str, timeout: float = 4.0) -> bool:
     """Follow redirects and confirm the URL resolves to a reachable HLS stream.
+
+    Result is cached per-URL (5 min OK, 1 min bad) to keep the channel-list
+    build from re-probing the same chip dozens of times. Critical: each
+    /lounge/live-channels build calls this for every primary across ~50
+    channels; without caching, each request fans out 50+ probes (some
+    spawning relay-side ffmpeg) and pushes the worker over the 2 GB
+    VPS budget, OOM-killing the worker mid-response.
+    """
+    import time as _t_vc
+    now_ts = _t_vc.time()
+    cached = _verify_cache.get(url)
+    if cached is not None:
+        ok, ts = cached
+        ttl = _VERIFY_CACHE_TTL_OK if ok else _VERIFY_CACHE_TTL_BAD
+        if now_ts - ts < ttl:
+            return ok
+
+    result = await _verify_stream_alive_uncached(url, timeout)
+    _verify_cache[url] = (result, now_ts)
+    return result
+
+
+async def _verify_stream_alive_uncached(url: str, timeout: float = 4.0) -> bool:
+    """Original verifier — bypasses the cache. Internal use only.
 
     For tvpass.org/live/* URLs: follow 302 → check final URL is m3u8 + HTTP 200.
     For direct m3u8 URLs: do a lightweight HEAD/GET.
