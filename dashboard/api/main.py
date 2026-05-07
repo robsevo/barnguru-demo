@@ -10829,12 +10829,19 @@ async def _resolve_stream_urls_movie(tmdb_id: str) -> list[str]:
     if entry is not None and entry.expires_at > __import__("time").monotonic() and not entry.is_failure:
         return [_wrap_resolver_url(u) for u in entry.result.stream_urls]
 
-    # Cold path: spawn a real resolve as a background task and wait up
-    # to budget for it. On timeout, the task keeps running — DO NOT
-    # cancel — so the cache populates and the next viewer gets it instantly.
+    # Cold path: kick a real resolve with a GENEROUS internal budget
+    # (cold Chromium spawn is 5-7s, then the resolve itself is 4-6s,
+    # so 30s gives a comfortable margin). The CALLER waits up to
+    # _STREAM_RESOLVE_BUDGET_S (~8s) thanks to asyncio.shield. If the
+    # caller times out, the resolve keeps running and caches its
+    # result — next viewer gets stream_urls instantly.
+    #
+    # The previous bug: a tight 12s inner budget timed out on cold
+    # starts and cached an empty result with 30-min negative TTL,
+    # so subsequent requests saw cache_hit=True with no streams.
     try:
         task = asyncio.create_task(
-            r.resolve_movie(tmdb_id_int, budget_s=_STREAM_RESOLVE_BUDGET_S + 4.0)
+            r.resolve_movie(tmdb_id_int, budget_s=30.0)
         )
         try:
             result = await asyncio.wait_for(asyncio.shield(task), _STREAM_RESOLVE_BUDGET_S)
