@@ -9681,6 +9681,75 @@ async def _fetch_upstream_xmltv(label: str, host: str, port: int, user: str, pw:
     return out
 
 
+_lounge_epg_build_inflight: bool = False
+
+
+async def _build_lounge_epg() -> dict:
+    """Build the EPG cache from XMLTV per upstream account + sports programs.
+    Caller is responsible for mutating _lounge_epg_cache. Slow path —
+    8-15s on cold cache; never call this on a request hot path."""
+    per_account = await asyncio.gather(
+        *[
+            _fetch_upstream_xmltv(label, host, port, user, pw)
+            for label, host, port, user, pw in _upstream_ACCOUNTS
+        ],
+        return_exceptions=True,
+    )
+    merged: dict[str, list[dict]] = {}
+    for r in per_account:
+        if not isinstance(r, dict):
+            continue
+        for k, v in r.items():
+            merged.setdefault(k, []).extend(v)
+    # Fold in sports programs from the Lounge channel list (already
+    # populated when /lounge/live-channels last ran).
+    if isinstance(_lounge_cache.get("data"), list):
+        for ch in _lounge_cache["data"]:
+            ch_name = ch.get("name", "")
+            progs   = ch.get("programs", []) or []
+            if ch_name and progs:
+                merged.setdefault(ch_name, []).extend(progs)
+    # Dedup + sort each channel's programmes
+    for k in list(merged.keys()):
+        seen: set[tuple] = set()
+        unique: list[dict] = []
+        for p in merged[k]:
+            key = (p.get("title", ""), p.get("start_utc", ""))
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(p)
+        unique.sort(key=lambda p: p.get("start_utc", ""))
+        merged[k] = unique
+    return merged
+
+
+def _kick_lounge_epg_refresh() -> None:
+    """Fire-and-forget rebuild of the EPG cache. No-op if a build is
+    already inflight. Always safe to call repeatedly."""
+    global _lounge_epg_build_inflight
+    if _lounge_epg_build_inflight:
+        return
+    _lounge_epg_build_inflight = True
+
+    async def _run() -> None:
+        global _lounge_epg_build_inflight
+        import time as _t_kr
+        try:
+            merged = await _build_lounge_epg()
+            _lounge_epg_cache["data"] = merged
+            _lounge_epg_cache["ts"]   = _t_kr.time()
+        except Exception:
+            pass
+        finally:
+            _lounge_epg_build_inflight = False
+
+    try:
+        asyncio.create_task(_run())
+    except Exception:
+        _lounge_epg_build_inflight = False
+
+
 @app.get("/lounge/epg")
 async def lounge_epg(channels: str = "") -> dict:
     """Programme listings for the next ~48h on the requested channels.
@@ -9688,51 +9757,28 @@ async def lounge_epg(channels: str = "") -> dict:
     Returns `{channel_name: [programmes]}`. `channels` is a comma-separated
     list of names from /lounge/live-channels (e.g. "HBO,FX,AMC"). Empty
     string returns all known programmes.
+
+    SWR semantics:
+      - Fresh cache → return immediately.
+      - Stale cache → return stale data + kick a background refresh. The
+        client gets sub-second response and the next call sees fresh data.
+      - No cache (cold start) → block on the build (~8-15s). The Android
+        client's 20s read timeout fits inside this; previous behaviour
+        also blocked on cold cache, so cold-start UX is unchanged.
     """
     import time as _t_epg
     now_ts = _t_epg.time()
     have   = _lounge_epg_cache["data"] is not None
     fresh  = have and (now_ts - _lounge_epg_cache["ts"] < _LOUNGE_EPG_TTL)
 
-    if not fresh:
-        # Refresh inline — keeps the response simple. SWR pattern fits
-        # /lounge/live-channels (called every screen mount); EPG is hit far
-        # less often (one fetch per Live-TV view).
-        per_account = await asyncio.gather(
-            *[
-                _fetch_upstream_xmltv(label, host, port, user, pw)
-                for label, host, port, user, pw in _upstream_ACCOUNTS
-            ],
-            return_exceptions=True,
-        )
-        merged: dict[str, list[dict]] = {}
-        for r in per_account:
-            if not isinstance(r, dict):
-                continue
-            for k, v in r.items():
-                merged.setdefault(k, []).extend(v)
-        # Fold in sports programs from the Lounge channel list (already
-        # populated when /lounge/live-channels last ran).
-        if isinstance(_lounge_cache.get("data"), list):
-            for ch in _lounge_cache["data"]:
-                ch_name = ch.get("name", "")
-                progs   = ch.get("programs", []) or []
-                if ch_name and progs:
-                    merged.setdefault(ch_name, []).extend(progs)
-        # Dedup + sort each channel's programmes
-        for k in list(merged.keys()):
-            seen: set[tuple] = set()
-            unique: list[dict] = []
-            for p in merged[k]:
-                key = (p.get("title", ""), p.get("start_utc", ""))
-                if key in seen:
-                    continue
-                seen.add(key)
-                unique.append(p)
-            unique.sort(key=lambda p: p.get("start_utc", ""))
-            merged[k] = unique
+    if not have:
+        # Cold cache — must build inline.
+        merged = await _build_lounge_epg()
         _lounge_epg_cache["data"] = merged
         _lounge_epg_cache["ts"]   = now_ts
+    elif not fresh:
+        # Have stale data — serve it, refresh in background.
+        _kick_lounge_epg_refresh()
 
     data: dict[str, list[dict]] = _lounge_epg_cache["data"] or {}
     if channels:
