@@ -10244,9 +10244,12 @@ _LOUNGE_VOD_PROVIDER_IDS_CA: dict[str, list[int]] = {
     "Peacock":      [386],
 }
 
-# Pages per service per kind. TMDB returns 20 results per page, so 3 pages
-# = 60 titles per rail — matches the 60-cap the UI renders today.
-_TMDB_DISCOVER_PAGES = 10
+# Pages per service per kind. TMDB returns 20 results per page.
+#   25 pages × 20 = 500 titles per service per kind.
+# With 9 services × 2 kinds = 18 catalog rails of 500 titles each.
+# Catalog build: ~360 TMDB calls in parallel, ~30-45s cold (httpx pooling
+# keeps it bounded). Cached 24h (_LOUNGE_VOD_TTL).
+_TMDB_DISCOVER_PAGES = 25
 
 
 async def _tmdb_discover_titles(
