@@ -6673,10 +6673,13 @@ async def _start_stream_resolver() -> None:
     async def _runner() -> None:
         try:
             from .stream_resolver import init_resolver
-            await init_resolver()
-            print("[stream_resolver] startup: ready", flush=True)
+            r = await init_resolver()
+            print(f"[stream_resolver] startup: ready providers={list(r.providers.keys())}",
+                  flush=True)
         except Exception as e:
-            print(f"[stream_resolver] startup failed: {e}", flush=True)
+            import traceback
+            print(f"[stream_resolver] startup FAILED: {e}", flush=True)
+            traceback.print_exc()
     asyncio.create_task(_runner())
 
 
