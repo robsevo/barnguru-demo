@@ -68,8 +68,17 @@ HLS_LIST_SIZE          = 36
 # briefly looked away, forcing a full ffmpeg respawn on resume. 90s is still
 # tight enough that abandoned chips don't pile up but covers normal viewer
 # behavior (phone call, brief tab switch, talking with someone in the room).
-HLS_IDLE_TIMEOUT_S     = 90.0
+HLS_IDLE_TIMEOUT_S     = 30.0
 HLS_STARTUP_TIMEOUT_S  = 15.0
+# Hard cap on concurrent ffmpeg sessions. Each ffmpeg holds 60-80 MB
+# resident; on a 2 GB VPS even 25 sessions saturates RAM and the OOM
+# killer takes the relay (or worse, a sibling service) down. Capping
+# at 12 leaves headroom for the API workers + python heap and lets
+# the LRU drop stale sessions instead of accumulating until OOM.
+# When the cap is reached, the LEAST-recently-used session is killed
+# before the new one starts. Active viewers are unaffected; only
+# abandoned channel-hop / verifier-probe leftovers get evicted.
+HLS_MAX_SESSIONS       = 12
 
 # (width, height, video_bitrate, video_bufsize, audio_bitrate)
 _QUALITY_TIERS: dict[str, tuple[int, int, str, str, str]] = {
@@ -599,6 +608,17 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough") -> _
         if existing is not None and existing.proc is not None and existing.proc.poll() is None:
             existing.last_access = time.monotonic()
             return existing
+
+        # LRU eviction: enforce HLS_MAX_SESSIONS BEFORE starting a new
+        # ffmpeg. Without this the session table can balloon during
+        # channel-hop / verifier-probe bursts (we observed 35+ live
+        # ffmpegs on a 2 GB VPS, OOM-killing the relay). Drop the
+        # least-recently-used session whose pid is still alive.
+        if len(_HLS_SESSIONS) >= HLS_MAX_SESSIONS:
+            victims = sorted(_HLS_SESSIONS.values(), key=lambda s: s.last_access)
+            for victim in victims[: len(_HLS_SESSIONS) - HLS_MAX_SESSIONS + 1]:
+                _HLS_SESSIONS.pop(victim.id, None)
+                _kill_session(victim)
 
         workdir = HLS_WORKDIR / sid
         if workdir.exists():
