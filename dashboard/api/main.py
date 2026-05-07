@@ -9590,8 +9590,19 @@ async def _build_lounge_payload() -> dict:
                 "online":         False,
             }
 
-        upstream_cands = [c for c in candidates if _is_upstream(c["url"])]
-        chosen = (upstream_cands[0] if upstream_cands else candidates[0])["url"]
+        # Per-channel primary host overrides. an upstream host's TSN slot
+        # serves dead 0-byte tokens (auth-redirects to a dead upstream),
+        # so for TSN1-5 we promote an upstream host to primary. User-confirmed
+        # 2026-05-07: an upstream host TSN feeds play buttery.
+        _TSN_NAMES = {"TSN1", "TSN2", "TSN3", "TSN4", "TSN5"}
+        chosen = ""
+        if ch_name in _TSN_NAMES:
+            an upstream host_cands = [c for c in candidates if "an upstream host" in c["url"]]
+            if an upstream host_cands:
+                chosen = an upstream host_cands[0]["url"]
+        if not chosen:
+            upstream_cands = [c for c in candidates if _is_upstream(c["url"])]
+            chosen = (upstream_cands[0] if upstream_cands else candidates[0])["url"]
 
         # NO inline verification. Cold-build verification was the OOM root
         # cause: 50+ channels × _verify_stream_alive() against /hls?u=
