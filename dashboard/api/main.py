@@ -10755,9 +10755,10 @@ def _stream_resolver_enabled() -> bool:
 
 
 # Inline resolve budget for /lounge/vod/details. vidlink hits in ~1.3s
-# cold and <100ms cached, so 5s gives healthy headroom and falls back
-# to embed_urls cleanly when a provider stalls.
-_STREAM_RESOLVE_BUDGET_S = float(os.environ.get("STREAM_RESOLVE_BUDGET_S", "5.0"))
+# locally but ~6s on the VPS (cloudflared + cold provider). 8s budget
+# leaves headroom, falls back to embed_urls on timeout. Cached calls
+# return in <100ms regardless.
+_STREAM_RESOLVE_BUDGET_S = float(os.environ.get("STREAM_RESOLVE_BUDGET_S", "8.0"))
 
 # Path the resolver should use to wrap stream URLs. The client's API base
 # is the public URL; this needs to be the same so the proxied URLs work.
