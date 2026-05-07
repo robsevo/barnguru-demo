@@ -10792,15 +10792,19 @@ def _wrap_resolver_url(url: str) -> str:
 
 
 async def _resolve_stream_urls_movie(tmdb_id: str) -> list[str]:
-    """Inline resolve for /lounge/vod/details. Fire-and-forget on timeout.
+    """Cache-only fast path for /lounge/vod/details.
 
-    1. Try the cache first (sub-ms).
-    2. Wait up to STREAM_RESOLVE_BUDGET_S for an active resolve.
-    3. On timeout, return [] — but DON'T cancel the resolve; it
-       continues in the background and populates the cache for the
-       next viewer. The client falls back to embed_urls + WebView
-       resolver for THIS request.
-    """
+    The catalog endpoint MUST return quickly — it powers the movie list
+    page. We never wait for a real resolve here:
+      * Cache hit -> return stream_urls immediately
+      * Cache miss -> kick a real resolve in background and return [].
+        The client's VodDetailActivity shows a loading splash and
+        polls /lounge/vod/details (or /lounge/stream/{id}) until the
+        resolve completes and the cache populates.
+
+    This separation keeps catalog browsing snappy AND lets the loading
+    splash carry the cold-start wait visibly to the user instead of
+    silently locking up the catalog request."""
     if not _stream_resolver_enabled():
         return []
     try:
@@ -10829,29 +10833,20 @@ async def _resolve_stream_urls_movie(tmdb_id: str) -> list[str]:
     if entry is not None and entry.expires_at > __import__("time").monotonic() and not entry.is_failure:
         return [_wrap_resolver_url(u) for u in entry.result.stream_urls]
 
-    # Cold path: kick a real resolve with a GENEROUS internal budget
-    # (cold Chromium spawn is 5-7s, then the resolve itself is 4-6s,
-    # so 30s gives a comfortable margin). The CALLER waits up to
-    # _STREAM_RESOLVE_BUDGET_S (~8s) thanks to asyncio.shield. If the
-    # caller times out, the resolve keeps running and caches its
-    # result — next viewer gets stream_urls instantly.
-    #
-    # The previous bug: a tight 12s inner budget timed out on cold
-    # starts and cached an empty result with 30-min negative TTL,
-    # so subsequent requests saw cache_hit=True with no streams.
+    # Cache miss — kick a real resolve in the background. Don't await.
+    # This way the catalog endpoint returns in <100 ms and the next
+    # call hits the cache.
     try:
-        task = asyncio.create_task(
-            r.resolve_movie(tmdb_id_int, budget_s=30.0)
-        )
-        try:
-            result = await asyncio.wait_for(asyncio.shield(task), _STREAM_RESOLVE_BUDGET_S)
-            return [_wrap_resolver_url(u) for u in result.stream_urls]
-        except asyncio.TimeoutError:
-            # Don't cancel — let the resolve finish and cache the result.
-            return []
-    except Exception as e:
-        print(f"[stream_resolver] resolve_movie({tmdb_id}) failed: {e}", flush=True)
-        return []
+        async def _bg_resolve() -> None:
+            try:
+                await r.resolve_movie(tmdb_id_int, budget_s=30.0)
+            except Exception as e:
+                print(f"[stream_resolver] bg_resolve_movie({tmdb_id}) failed: {e}",
+                      flush=True)
+        asyncio.create_task(_bg_resolve())
+    except Exception:
+        pass
+    return []
 
 
 def _resolve_stream_urls_episode_cache_only(
