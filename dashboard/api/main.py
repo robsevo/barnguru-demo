@@ -10935,6 +10935,23 @@ async def lounge_stream_resolver_health() -> dict:
     return out
 
 
+@app.post("/lounge/stream-resolver/refresh")
+async def lounge_stream_resolver_refresh(provider: str) -> dict:
+    """Force a rediscovery pass for the named provider. Returns the diff
+    report — patches that were applied, structural changes that need
+    operator attention, captured AJAX endpoints from the trace."""
+    if not _stream_resolver_enabled():
+        return {"enabled": False}
+    from .stream_resolver import get_resolver as _gr
+    r = _gr()
+    if r is None:
+        return {"enabled": True, "running": False}
+    diff = await r.force_rediscover(provider)
+    if diff is None:
+        return {"error": "unknown_provider", "provider": provider}
+    return diff.to_dict()
+
+
 @app.post("/lounge/stream-resolver/clear-cache")
 async def lounge_stream_resolver_clear_cache(tmdb_id: str | None = None) -> dict:
     if not _stream_resolver_enabled():
