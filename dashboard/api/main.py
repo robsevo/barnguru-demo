@@ -6676,6 +6676,21 @@ async def _start_stream_resolver() -> None:
             r = await init_resolver()
             print(f"[stream_resolver] startup: ready providers={list(r.providers.keys())}",
                   flush=True)
+            # Pre-warm Chromium so the first user-facing resolve doesn't
+            # pay the 3-5s browser spawn cost. We trigger a cheap canary
+            # resolve in the background — it'll cache the result + spin
+            # up Playwright.
+            async def _warm_chromium() -> None:
+                try:
+                    # Small delay so we don't compete with worker init
+                    await asyncio.sleep(2.0)
+                    # Inception (TMDB 27205) — pinned canary, well-known title
+                    await r.resolve_movie(27205, budget_s=20.0)
+                    print("[stream_resolver] chromium pre-warmed", flush=True)
+                except Exception as e:
+                    print(f"[stream_resolver] chromium prewarm failed: {e}",
+                          flush=True)
+            asyncio.create_task(_warm_chromium())
         except Exception as e:
             import traceback
             print(f"[stream_resolver] startup FAILED: {e}", flush=True)
@@ -10777,8 +10792,15 @@ def _wrap_resolver_url(url: str) -> str:
 
 
 async def _resolve_stream_urls_movie(tmdb_id: str) -> list[str]:
-    """Inline resolve for /lounge/vod/details. 6s budget. Returns [] on
-    timeout or if the resolver is disabled — caller falls back to embeds."""
+    """Inline resolve for /lounge/vod/details. Fire-and-forget on timeout.
+
+    1. Try the cache first (sub-ms).
+    2. Wait up to STREAM_RESOLVE_BUDGET_S for an active resolve.
+    3. On timeout, return [] — but DON'T cancel the resolve; it
+       continues in the background and populates the cache for the
+       next viewer. The client falls back to embed_urls + WebView
+       resolver for THIS request.
+    """
     if not _stream_resolver_enabled():
         return []
     try:
@@ -10786,18 +10808,40 @@ async def _resolve_stream_urls_movie(tmdb_id: str) -> list[str]:
     except (TypeError, ValueError):
         return []
     try:
-        from .stream_resolver import resolve_movie as _rm
+        from .stream_resolver import get_resolver as _gr
     except Exception as e:
         print(f"[stream_resolver] import failed: {e}", flush=True)
         return []
-    try:
-        result = await asyncio.wait_for(
-            _rm(tmdb_id_int, budget_s=_STREAM_RESOLVE_BUDGET_S),
-            timeout=_STREAM_RESOLVE_BUDGET_S + 0.5,
-        )
-        return [_wrap_resolver_url(u) for u in result.stream_urls]
-    except asyncio.TimeoutError:
+
+    r = _gr()
+    if r is None:
+        # Fire init in background; first viewer gets embed_urls fallback.
+        try:
+            from .stream_resolver import init_resolver
+            asyncio.create_task(init_resolver())
+        except Exception:
+            pass
         return []
+
+    # Cache hit — instant return.
+    key = (tmdb_id_int, "movie", None, None)
+    entry = r._cache.get(key)
+    if entry is not None and entry.expires_at > __import__("time").monotonic() and not entry.is_failure:
+        return [_wrap_resolver_url(u) for u in entry.result.stream_urls]
+
+    # Cold path: spawn a real resolve as a background task and wait up
+    # to budget for it. On timeout, the task keeps running — DO NOT
+    # cancel — so the cache populates and the next viewer gets it instantly.
+    try:
+        task = asyncio.create_task(
+            r.resolve_movie(tmdb_id_int, budget_s=_STREAM_RESOLVE_BUDGET_S + 4.0)
+        )
+        try:
+            result = await asyncio.wait_for(asyncio.shield(task), _STREAM_RESOLVE_BUDGET_S)
+            return [_wrap_resolver_url(u) for u in result.stream_urls]
+        except asyncio.TimeoutError:
+            # Don't cancel — let the resolve finish and cache the result.
+            return []
     except Exception as e:
         print(f"[stream_resolver] resolve_movie({tmdb_id}) failed: {e}", flush=True)
         return []
