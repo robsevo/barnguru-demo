@@ -9544,30 +9544,17 @@ async def _build_lounge_payload() -> dict:
         upstream_cands = [c for c in candidates if _is_upstream(c["url"])]
         chosen = (upstream_cands[0] if upstream_cands else candidates[0])["url"]
 
-        # Promote a verified alternate to primary when the upstream-bias chip
-        # fails the liveness check. Walk distinct upstream hosts rather than
-        # candidates[:3] so a working alternate at index 4+ (e.g. an upstream host
-        # behind 3 an upstream host account variants) actually gets tried. Same
-        # logic as _build_channel above; see that comment for context.
-        verified_primary: str | None = None
-        if await _verify_stream_alive(chosen):
-            verified_primary = chosen
-        else:
-            tried_hosts: set[str] = set()
-            tried_hosts.add(_candidate_upstream_host(chosen))
-            for cand in candidates:
-                if len(tried_hosts) >= 6:
-                    break
-                if cand["url"] == chosen:
-                    continue
-                cand_host = _candidate_upstream_host(cand["url"])
-                if cand_host in tried_hosts:
-                    continue
-                tried_hosts.add(cand_host)
-                if await _verify_stream_alive(cand["url"]):
-                    verified_primary = cand["url"]
-                    chosen = verified_primary
-                    break
+        # NO inline verification. Cold-build verification was the OOM root
+        # cause: 50+ channels × _verify_stream_alive() against /hls?u=
+        # URLs spawned 30+ relay-side ffmpegs and held 50+ concurrent
+        # httpx connections in the API worker, OOM-killing both workers
+        # and stalling concurrent web traffic ("LOADING GAME..." forever
+        # on localhost:3000). The player handles dead chips: 401/404/
+        # PlaylistStuckException are detected as terminal failures and
+        # rotate to the next chip immediately (see PlayerActivity.kt
+        # isTerminalChipFailure). Trust the priority sort; let the
+        # client do the live health check at play time.
+        verified_primary: str | None = chosen
 
         host_used: dict[str, int] = {}
         backup_src: list[str] = []
