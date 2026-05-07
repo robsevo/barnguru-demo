@@ -6660,6 +6660,25 @@ async def _prewarm_barncentre() -> None:
     asyncio.create_task(_runner())
 
 
+@app.on_event("startup")
+async def _prewarm_lounge_epg() -> None:
+    """Build the Lounge EPG cache at startup. Cold build is 8-15s (XMLTV
+    fetch from each upstream account); the Vercel /api/[...backend] proxy
+    has a 10s default function timeout, so the first cold-cache EPG hit
+    after a deploy was 504-ing through Vercel and timing out the lounge
+    client. Pre-warming on startup eliminates the cold-cache window.
+    """
+    async def _runner() -> None:
+        import time as _t_pwe
+        try:
+            merged = await _build_lounge_epg()
+            _lounge_epg_cache["data"] = merged
+            _lounge_epg_cache["ts"]   = _t_pwe.time()
+        except Exception:
+            pass
+    asyncio.create_task(_runner())
+
+
 @app.on_event("shutdown")
 async def _stop_proxy_http() -> None:
     global _PROXY_HTTP
