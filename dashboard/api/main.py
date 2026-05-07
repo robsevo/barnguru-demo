@@ -6661,6 +6661,37 @@ async def _prewarm_barncentre() -> None:
 
 
 @app.on_event("startup")
+async def _start_stream_resolver() -> None:
+    """Initialise the stream resolver if STREAM_RESOLVER_ENABLED=1.
+
+    Lazy: provider classes are constructed but Playwright isn't started until
+    the first resolve. This costs ~5 ms at boot when disabled, ~50 ms when
+    enabled (just imports + provider construction).
+    """
+    if os.environ.get("STREAM_RESOLVER_ENABLED") != "1":
+        return
+    async def _runner() -> None:
+        try:
+            from .stream_resolver import init_resolver
+            await init_resolver()
+            print("[stream_resolver] startup: ready", flush=True)
+        except Exception as e:
+            print(f"[stream_resolver] startup failed: {e}", flush=True)
+    asyncio.create_task(_runner())
+
+
+@app.on_event("shutdown")
+async def _stop_stream_resolver() -> None:
+    if os.environ.get("STREAM_RESOLVER_ENABLED") != "1":
+        return
+    try:
+        from .stream_resolver import shutdown_resolver
+        await shutdown_resolver()
+    except Exception:
+        pass
+
+
+@app.on_event("startup")
 async def _prewarm_lounge_epg() -> None:
     """Build the Lounge EPG cache at startup. Cold build is 8-15s (XMLTV
     fetch from each upstream account); the Vercel /api/[...backend] proxy
@@ -10554,8 +10585,13 @@ async def lounge_vod_details(tmdb_id: str) -> dict:
     """Movie detail keyed on TMDB id.
 
     Returns metadata + the list of vidsrc-family embed URLs the client's
-    WebView resolver should try in order. Playback URL resolution happens
-    on-device — the backend just hands back the embed URLs.
+    WebView resolver should try in order.
+
+    When the stream resolver is enabled (env STREAM_RESOLVER_ENABLED=1) and
+    is fast enough (configurable budget), this also returns `stream_urls` —
+    pre-resolved m3u8 URLs wrapped through `/lounge/vod-stream-proxy`. The
+    client should prefer `stream_urls` and fall back to `embed_urls` if
+    they're empty or fail at play time.
     """
     if _lounge_vod_cache["data"] is None:
         await lounge_vod_catalog()  # forces a build
@@ -10567,6 +10603,8 @@ async def lounge_vod_details(tmdb_id: str) -> dict:
     # last cache build), we can still synthesize the embed URLs and let
     # the client try playback. Metadata-only fields fall back to None.
     head: dict = instances[0] if instances else {}
+
+    stream_urls = await _resolve_stream_urls_movie(tmdb_id)
 
     return {
         "title":         head.get("english_name") or head.get("name") or "",
@@ -10583,6 +10621,10 @@ async def lounge_vod_details(tmdb_id: str) -> dict:
         # callers fall back to nothing.
         "urls":          [],
         "embed_urls":    _vidsrc_movie_embeds(tmdb_id),
+        # New: pre-resolved m3u8 URLs (already wrapped through the proxy).
+        # Empty when the resolver is disabled, the title can't be resolved,
+        # or we hit the 6s budget before any provider responded.
+        "stream_urls":   stream_urls,
     }
 
 
@@ -10654,6 +10696,15 @@ async def lounge_vod_series(series_key: str) -> dict:
                 continue
             still_path = e.get("still_path")
             still_url = f"https://image.tmdb.org/t/p/w300{still_path}" if still_path else None
+            # Stream resolver: only check the cache here — running real
+            # resolves for every episode would blow the per-request budget.
+            # The first viewer of a given (series, season, episode) gets
+            # an empty stream_urls and falls back to embed_urls. Their
+            # WebView capture populates the cache via a background task,
+            # so the next viewer plays instantly.
+            ep_stream_urls = _resolve_stream_urls_episode_cache_only(
+                series_key, sn, ep_n,
+            )
             episodes.append({
                 "episode_number": ep_n,
                 "title":          (e.get("name") or "").strip(),
@@ -10663,6 +10714,7 @@ async def lounge_vod_series(series_key: str) -> dict:
                 # embed_urls and the WebView resolver to play.
                 "url":            "",
                 "embed_urls":     _vidsrc_episode_embeds(series_key, sn, ep_n),
+                "stream_urls":    ep_stream_urls,
             })
         if episodes:
             seasons.append({
@@ -10683,6 +10735,239 @@ async def lounge_vod_series(series_key: str) -> dict:
         "service": s.get("service"),
         "poster":  poster,
         "seasons": seasons,
+    }
+
+
+# ─── Stream resolver integration ──────────────────────────────────────────
+#
+# The stream resolver scrapes bflix-family + vidsrc-family sites server-side
+# to deliver pre-resolved m3u8 URLs in the catalog response. The lounge
+# client prefers `stream_urls` over `embed_urls` when present.
+#
+# Disabled by default until E2E verified — set STREAM_RESOLVER_ENABLED=1
+# to flip the flag. The resolver is initialised lazily on first request.
+
+def _stream_resolver_enabled() -> bool:
+    return os.environ.get("STREAM_RESOLVER_ENABLED") == "1"
+
+
+# Inline resolve budget for /lounge/vod/details. 6s is enough for cache
+# hits + healthy provider warm starts; longer than that and we'd block
+# the catalog response too long.
+_STREAM_RESOLVE_BUDGET_S = float(os.environ.get("STREAM_RESOLVE_BUDGET_S", "6.0"))
+
+# Path the resolver should use to wrap stream URLs. The client's API base
+# is the public URL; this needs to be the same so the proxied URLs work.
+_RESOLVER_API_BASE = os.environ.get("RESOLVER_API_BASE", "")
+
+
+def _wrap_resolver_url(url: str) -> str:
+    """Wrap a stream resolver-emitted URL through this API's vod proxy.
+
+    The resolver returns paths starting with `/lounge/vod-stream-proxy?...`
+    (when RESOLVER_API_BASE is unset) — we keep them as paths so the client
+    combines them with its own baseUrl. If RESOLVER_API_BASE is set in env,
+    the resolver pre-qualifies the URL absolute and we return it as-is.
+    """
+    return url
+
+
+async def _resolve_stream_urls_movie(tmdb_id: str) -> list[str]:
+    """Inline resolve for /lounge/vod/details. 6s budget. Returns [] on
+    timeout or if the resolver is disabled — caller falls back to embeds."""
+    if not _stream_resolver_enabled():
+        return []
+    try:
+        tmdb_id_int = int(tmdb_id)
+    except (TypeError, ValueError):
+        return []
+    try:
+        from .stream_resolver import resolve_movie as _rm
+    except Exception as e:
+        print(f"[stream_resolver] import failed: {e}", flush=True)
+        return []
+    try:
+        result = await asyncio.wait_for(
+            _rm(tmdb_id_int, budget_s=_STREAM_RESOLVE_BUDGET_S),
+            timeout=_STREAM_RESOLVE_BUDGET_S + 0.5,
+        )
+        return [_wrap_resolver_url(u) for u in result.stream_urls]
+    except asyncio.TimeoutError:
+        return []
+    except Exception as e:
+        print(f"[stream_resolver] resolve_movie({tmdb_id}) failed: {e}", flush=True)
+        return []
+
+
+def _resolve_stream_urls_episode_cache_only(
+    series_key: str, season: int, episode: int,
+) -> list[str]:
+    """Cache-only lookup for episode list. No live resolve here — running
+    real resolves for every episode in a series would blow the budget."""
+    if not _stream_resolver_enabled():
+        return []
+    try:
+        tmdb_id_int = int(series_key)
+    except (TypeError, ValueError):
+        return []
+    try:
+        from .stream_resolver import get_resolver as _gr
+    except Exception:
+        return []
+    r = _gr()
+    if r is None:
+        return []
+    key = (tmdb_id_int, "series", season, episode)
+    entry = r._cache.get(key)
+    if entry is None:
+        return []
+    import time as _t_es
+    if entry.expires_at <= _t_es.monotonic():
+        return []
+    if entry.is_failure:
+        return []
+    return [_wrap_resolver_url(u) for u in entry.result.stream_urls]
+
+
+@app.get("/lounge/stream/{tmdb_id}")
+async def lounge_stream_movie(tmdb_id: str, budget_s: float = 12.0) -> dict:
+    """Resolve a movie to playable stream URLs. Longer budget than inline.
+
+    Used by clients that want to show a loading spinner instead of waiting
+    for /lounge/vod/details to come back. 12s budget is the default; the
+    client can request more or less via ?budget_s=.
+    """
+    if not _stream_resolver_enabled():
+        return {"stream_urls": [], "embed_urls": _vidsrc_movie_embeds(tmdb_id),
+                "providers_tried": [], "cache_hit": False, "resolved_in_ms": 0,
+                "disabled": True}
+    try:
+        tmdb_id_int = int(tmdb_id)
+    except (TypeError, ValueError):
+        return {"stream_urls": [], "embed_urls": _vidsrc_movie_embeds(tmdb_id),
+                "providers_tried": [], "cache_hit": False, "resolved_in_ms": 0,
+                "error": "invalid_tmdb_id"}
+    from .stream_resolver import resolve_movie as _rm
+    budget_s = max(2.0, min(30.0, float(budget_s)))
+    try:
+        result = await asyncio.wait_for(_rm(tmdb_id_int, budget_s=budget_s),
+                                         timeout=budget_s + 1.0)
+    except asyncio.TimeoutError:
+        return {"stream_urls": [], "embed_urls": _vidsrc_movie_embeds(tmdb_id),
+                "providers_tried": [], "cache_hit": False, "resolved_in_ms": 0,
+                "error": "timeout"}
+    return {
+        "stream_urls":     [_wrap_resolver_url(u) for u in result.stream_urls],
+        "embed_urls":      result.embed_urls,
+        "providers_tried": [a.__dict__ for a in result.providers_tried],
+        "cache_hit":       result.cache_hit,
+        "resolved_in_ms":  result.resolved_in_ms,
+    }
+
+
+@app.get("/lounge/stream/{tmdb_id}/{season}/{episode}")
+async def lounge_stream_episode(
+    tmdb_id: str, season: int, episode: int, budget_s: float = 12.0,
+) -> dict:
+    if not _stream_resolver_enabled():
+        return {"stream_urls": [],
+                "embed_urls": _vidsrc_episode_embeds(tmdb_id, season, episode),
+                "providers_tried": [], "cache_hit": False, "resolved_in_ms": 0,
+                "disabled": True}
+    try:
+        tmdb_id_int = int(tmdb_id)
+    except (TypeError, ValueError):
+        return {"stream_urls": [],
+                "embed_urls": _vidsrc_episode_embeds(tmdb_id, season, episode),
+                "providers_tried": [], "cache_hit": False, "resolved_in_ms": 0,
+                "error": "invalid_tmdb_id"}
+    from .stream_resolver import resolve_episode as _re
+    budget_s = max(2.0, min(30.0, float(budget_s)))
+    try:
+        result = await asyncio.wait_for(
+            _re(tmdb_id_int, season, episode, budget_s=budget_s),
+            timeout=budget_s + 1.0,
+        )
+    except asyncio.TimeoutError:
+        return {"stream_urls": [],
+                "embed_urls": _vidsrc_episode_embeds(tmdb_id, season, episode),
+                "providers_tried": [], "cache_hit": False, "resolved_in_ms": 0,
+                "error": "timeout"}
+    return {
+        "stream_urls":     [_wrap_resolver_url(u) for u in result.stream_urls],
+        "embed_urls":      result.embed_urls,
+        "providers_tried": [a.__dict__ for a in result.providers_tried],
+        "cache_hit":       result.cache_hit,
+        "resolved_in_ms":  result.resolved_in_ms,
+    }
+
+
+@app.get("/lounge/stream-resolver/health")
+async def lounge_stream_resolver_health() -> dict:
+    """Per-provider rolling success rate + state.json fields. Public — the
+    info is non-sensitive and useful for debugging from any client."""
+    if not _stream_resolver_enabled():
+        return {"enabled": False}
+    try:
+        from .stream_resolver import get_resolver as _gr
+    except Exception as e:
+        return {"enabled": True, "error": f"import_failed: {e}"}
+    r = _gr()
+    if r is None:
+        return {"enabled": True, "running": False}
+    healths = r.health.all()
+    out: dict = {"enabled": True, "running": True, "providers": {}}
+    for pid, h in healths.items():
+        out["providers"][pid] = {
+            "rolling_successes":         h.rolling_successes,
+            "rolling_failures":          h.rolling_failures,
+            "consecutive_silent_empty":  h.consecutive_silent_empty,
+            "success_rate":              round(h.success_rate, 3),
+            "last_success_at":           h.last_success_at,
+            "last_failure_at":           h.last_failure_at,
+            "last_failure_reason":       h.last_failure_reason,
+            "current_base_url":          h.current_base_url,
+            "pattern_version":           h.pattern_version,
+        }
+    out["browser_started_at"] = r.browser.started_at
+    out["browser_eviction_count"] = r.browser.eviction_count
+    out["cache_size"] = len(r._cache)
+    return out
+
+
+@app.post("/lounge/stream-resolver/clear-cache")
+async def lounge_stream_resolver_clear_cache(tmdb_id: str | None = None) -> dict:
+    if not _stream_resolver_enabled():
+        return {"enabled": False}
+    from .stream_resolver import get_resolver as _gr
+    r = _gr()
+    if r is None:
+        return {"running": False}
+    try:
+        n = await r.clear_cache(int(tmdb_id) if tmdb_id else None)
+    except (TypeError, ValueError):
+        return {"error": "invalid_tmdb_id"}
+    return {"cleared": n}
+
+
+@app.get("/lounge/stream-resolver/test")
+async def lounge_stream_resolver_test(tmdb_id: str) -> dict:
+    """Resolve a movie + return full diagnostics. Same as /lounge/stream/{id}
+    but always with full budget + verbose providers_tried even on miss."""
+    if not _stream_resolver_enabled():
+        return {"enabled": False}
+    try:
+        tmdb_id_int = int(tmdb_id)
+    except (TypeError, ValueError):
+        return {"error": "invalid_tmdb_id"}
+    from .stream_resolver import resolve_movie as _rm
+    result = await _rm(tmdb_id_int, budget_s=20.0)
+    return {
+        "stream_urls":     [_wrap_resolver_url(u) for u in result.stream_urls],
+        "embed_urls":      result.embed_urls,
+        "providers_tried": [a.__dict__ for a in result.providers_tried],
+        "cache_hit":       result.cache_hit,
+        "resolved_in_ms":  result.resolved_in_ms,
     }
 
 
