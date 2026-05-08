@@ -11243,13 +11243,25 @@ async def lounge_vod_stream_proxy(url: str, request: Request):
         )
 
     pass_headers: dict[str, str] = {}
-    for h in ("content-type", "content-length", "content-range",
+    for h in ("content-length", "content-range",
               "accept-ranges", "etag", "last-modified", "cache-control",
               "content-encoding"):
         v = upstream.headers.get(h)
         if v:
             pass_headers[h] = v
-    if "content-type" not in pass_headers:
+    # Override content-type. Some upstream CDNs (vodvidl, doodstream)
+    # disguise .ts segments as image/jpg or image/png to dodge ISP
+    # filtering. ExoPlayer rejects HLS segments with image/* content-type
+    # and refuses to play. Force video/mp2t for .ts files, leave others
+    # as-is from upstream.
+    upstream_ct = (upstream.headers.get("content-type") or "").lower()
+    path_no_q = url.split("?", 1)[0].lower()
+    if path_no_q.endswith(".ts") or path_no_q.endswith(".jpg") or "image/" in upstream_ct:
+        # HLS .ts segment — force the right MIME so ExoPlayer accepts it
+        pass_headers["content-type"] = "video/mp2t"
+    elif upstream_ct:
+        pass_headers["content-type"] = upstream_ct
+    else:
         pass_headers["content-type"] = "video/mp2t"
     pass_headers.setdefault("accept-ranges", "bytes")
 
