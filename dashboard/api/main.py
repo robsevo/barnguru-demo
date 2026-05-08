@@ -10584,33 +10584,49 @@ async def lounge_vod_catalog(service: str = "") -> dict:
     }
 
 
-# Vidsrc-family embed providers, in fallback order. The client's WebView
-# resolver tries each in turn until one yields an m3u8. These all accept
-# /embed/{movie|tv}/{tmdb_id} and (for series) /embed/tv/{tmdb_id}/{season}/{episode}.
-_VIDSRC_EMBED_HOSTS: list[str] = [
-    "https://vidsrc.xyz",
-    "https://vidsrc.in",
-    "https://vidsrc.pm",
-    "https://vidsrc.net",
-    "https://vidsrc.to",
-    "https://embed.su",
-    "https://autoembed.cc",
-]
-
+# Embed providers that take a TMDB id and render a player whose network
+# traffic includes an .m3u8. The Fire TV WebView resolver loads each in
+# fallback order until one captures a stream.
+#
+# vidsrc.in/.to/.xyz/.pm/.net all gate Cloudflare Turnstile (sitekey
+# 0x4AAAAAABNpWSLmOnUi7s0b) and the WebView can't solve it reliably —
+# these are excluded entirely. The list below is curated to providers
+# that load a working player WITHOUT a captcha, so the WebView's
+# m3u8 capture actually fires.
+#
+# Order = "most likely to capture m3u8 fastest" first. vidlink/moviesapi
+# typically autoplay and surface the master.m3u8 within 5-7s. The multi-
+# embed services need a server pick before their iframes load and tend
+# to be slower (~10s) but cover more obscure titles.
 
 def _vidsrc_movie_embeds(tmdb_id: str) -> list[str]:
-    return [f"{h}/embed/movie/{tmdb_id}" for h in _VIDSRC_EMBED_HOSTS]
+    return [
+        f"https://vidlink.pro/movie/{tmdb_id}",
+        f"https://moviesapi.club/movie/{tmdb_id}",
+        f"https://www.2embed.cc/embed/{tmdb_id}",
+        f"https://multiembed.mov/?video_id={tmdb_id}&tmdb=1",
+        f"https://nontongo.win/embed/movie/{tmdb_id}",
+        f"https://pstream.org/embed/movie/{tmdb_id}",
+    ]
 
 
 def _vidsrc_episode_embeds(tmdb_id: str, season: int, episode: int) -> list[str]:
-    return [f"{h}/embed/tv/{tmdb_id}/{season}/{episode}" for h in _VIDSRC_EMBED_HOSTS]
+    return [
+        f"https://vidlink.pro/tv/{tmdb_id}/{season}/{episode}",
+        f"https://moviesapi.club/tv/{tmdb_id}-{season}-{episode}",
+        f"https://www.2embed.cc/embedtv/{tmdb_id}&s={season}&e={episode}",
+        f"https://multiembed.mov/?video_id={tmdb_id}&tmdb=1&s={season}&e={episode}",
+        f"https://nontongo.win/embed/tv/{tmdb_id}/{season}/{episode}",
+        f"https://pstream.org/embed/tv/{tmdb_id}/{season}/{episode}",
+    ]
 
 
 @app.get("/lounge/vod/details/{tmdb_id}")
 async def lounge_vod_details(tmdb_id: str) -> dict:
     """Movie detail keyed on TMDB id.
 
-    Returns metadata + the list of vidsrc-family embed URLs the client's
+    Returns metadata + the list of TMDB-keyed embed URLs (vidlink,
+    moviesapi, 2embed, multiembed, nontongo, pstream) the client's
     WebView resolver should try in order.
 
     When the stream resolver is enabled (env STREAM_RESOLVER_ENABLED=1) and
@@ -10641,7 +10657,7 @@ async def lounge_vod_details(tmdb_id: str) -> dict:
         "backdrop":      head.get("backdrop"),
         "overview":      head.get("overview"),
         "category":      head.get("category_name"),
-        "instance_count": len(_VIDSRC_EMBED_HOSTS),
+        "instance_count": len(_vidsrc_movie_embeds(tmdb_id)),
         # Legacy clients: stream URL list. The Lounge app's WebView
         # resolver consumes `embed_urls`; older PlayerActivity-only
         # callers fall back to nothing.
