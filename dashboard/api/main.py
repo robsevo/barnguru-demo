@@ -7269,20 +7269,6 @@ _NHL_KEYWORDS = [
     # "fox sports" with a space — kstv & many providers spell it "Fox Sports 1"
     # rather than the contraction "FS1". Without this, FS1/FS2 chips were 0.
     "fox sports",
-    # BarnCentre extra-sport slate (2026-05-10): NFL Network / NFL RedZone /
-    # BeIN Sports USA / UK & Italian football / DAZN / UFC Fight Pass. Listed
-    # here (not in the cable bucket) so they go through the same NHL-style
-    # priority pipeline. Substring matched, so "nfl" pulls in everything from
-    # "NFL Network" to bgdc's "01. NFL NETWORK"; the curated _BARNCENTRE_NAME_TOKENS
-    # below decides which titles actually surface in the slate.
-    "nfl",
-    "redzone","red zone",
-    "bein",
-    "ufc",
-    "dazn",
-    "premier league",
-    "sky sport","sky sports",
-    "calcio","sportitalia",
 ]
 
 # Cable channels carried by Origin Lounge (the personal at-home Fire TV app).
@@ -8005,14 +7991,8 @@ _BARNCENTRE_CHANNEL_NAMES = [
     "NESN",
     # US sports betting / general sports
     "FanDuel",
-    # US — CBS Sports
+    # US — CBS Sports (placed right before the French block)
     "CBS Sports", "CBS Sports Network",
-    # NFL — football slate
-    "NFL Network", "NFL RedZone",
-    # Combat sports
-    "UFC Fight Pass",
-    # Soccer / international
-    "BeIN Sports", "Premier League", "Serie A", "DAZN",
     # Canadian French — at the back, grouped by network
     "RDS", "RDS 2", "RDS INFO",
     "TVA Sports",
@@ -8172,10 +8152,6 @@ def _normalize_ch(title: str) -> str:
     - upstream label:   "RDS HD (tv14s)"            → "rds"
     """
     t = title.strip()
-    # Strip leading numeric ordering ("01. NFL Network", "02. RED ZONE"). bgdc's
-    # playlist prefixes catalogued sports channels with a 2-digit number; without
-    # this strip the matcher sees "01. nfl network" and never aligns.
-    t = _re_bc.sub(r"^\d+\.\s*", "", t)
     # Strip upstream source labels we append: "(tv14s)", "(an upstream host)", etc.
     t = _re_bc.sub(r"\s*\([a-z0-9._-]{3,30}\)\s*$", "", t, flags=_re_bc.I)
     # Strip playlist/thetvapp suffixes
@@ -8183,28 +8159,12 @@ def _normalize_ch(title: str) -> str:
     # Strip trailing quality flags: HD, SD, FHD, UHD, (B), (R), (E), (D)
     t = _re_bc.sub(r"\s+(?:fhd|uhd|hd|sd)\s*$", "", t, flags=_re_bc.I)
     t = _re_bc.sub(r"\s*\([a-z]\)\s*$", "", t, flags=_re_bc.I)
-    # Strip trailing "(USA)" / "(MX)" / "(UK)" region tags emitted by an upstream host
-    # on its DEP playlist (e.g. "Bein Sports HD (USA)"). Two-letter language
-    # tags handled below; this widens the match to country tags up to 4 chars.
-    t = _re_bc.sub(r"\s*\((?:USA|UK|CA|MX|FR|BR|GER|ITA|ARG|CL|UE)\)\s*$", "", t, flags=_re_bc.I)
     # Strip upstream country/language prefixes. The optional language-code group
     # uses [-_]+ (no whitespace) so it matches "CA-FR" / "CA_EN" but does NOT
     # accidentally eat into "CA - SPORTSNET" (where the dash is just a
     # separator, not a language separator). Without this guard the regex was
     # munching "CA - SP" off "CA - SPORTSNET EAST" and breaking matches.
     t = _re_bc.sub(r"^(?:CA|US|UK)(?:[-_]+[A-Z]{2})?\s*(?:\([A-Z]{2}\))?\s*[\|:\-]?\s*", "", t, flags=_re_bc.I)
-    # Strip extra upstream package prefixes seen on an upstream host / bgdc slates that
-    # the original CA/US/UK regex doesn't cover: "DEP | Bein Sports HD",
-    # "ITA | Sky Sport 24", "ARG | TNT Sports", "MX | TUDN", "2MB | ESPN", etc.
-    # The separator (`|`/`:`/`-`) is REQUIRED here so legitimate channel names
-    # that begin with these letters (e.g. "USA Network", "MX Channel") aren't
-    # accidentally consumed.
-    t = _re_bc.sub(
-        r"^(?:DEP|ITA|ARG|MX|BR|GER|CL|FR|2MB|USA|UE|NL|PT|ES)(?:[-_]+[A-Z]{2})?\s*[\|:\-]\s*",
-        "",
-        t,
-        flags=_re_bc.I,
-    )
     # Strip trailing language flag "(FR)" / "(EN)" / "(ES)" / "(DE)" — lunar
     # keeps this after "CA:" prefix consumption.
     t = _re_bc.sub(r"\s*\((?:FR|EN|ES|DE)\)\s*$", "", t, flags=_re_bc.I)
@@ -8235,40 +8195,6 @@ def _normalize_ch(title: str) -> str:
 
 _SHORT_FR_DISPLAYS = {"rds", "rds2", "rds info", "tva sports"}
 
-# Per-display token whitelist for channels whose IPTV titles never match the
-# curated BarnCentre name as a clean prefix. Each token is a substring tested
-# against the *normalised* title (post-prefix/suffix strip + lowercase). A
-# title matches the channel if any token is contained in or starts the
-# normalised string. Keep tokens specific enough that they don't bleed into
-# unrelated channels (e.g. "ufc fight pass" not bare "ufc" — the latter would
-# claim "ufc-wwe fox sports premium" which carries WWE, not UFC).
-_BARNCENTRE_NAME_TOKENS: dict[str, tuple[str, ...]] = {
-    "bein sports": (
-        "bein sports", "bein sport", "bein usa", "bein xtra",
-    ),
-    "premier league": (
-        "sky sports premier league", "premier league tv", "premier league hd",
-        "premier league channel",
-    ),
-    "serie a": (
-        # Italian Sky Sport channels carry Serie A; DAZN Italy has its own slot.
-        "sky sport calcio", "sky sport serie a", "sky sport 24",
-        "sky sport 257", "sky sport fotball", "sportitalia",
-    ),
-    "dazn": (
-        "dazn 1", "dazn1", "dazn 2", "dazn2", "dazn ringside",
-    ),
-    "ufc fight pass": (
-        "ufc fight pass", "ufc fightpass", "ufc 24/7",
-    ),
-    "nfl network": (
-        "nfl network",
-    ),
-    "nfl redzone": (
-        "nfl redzone", "nfl red zone", "redzone", "red zone",
-    ),
-}
-
 
 def _ch_matches(raw_title: str, ch_name: str) -> bool:
     """Return True if an IPTV channel title matches our BarnCentre channel name."""
@@ -8288,13 +8214,6 @@ def _ch_matches(raw_title: str, ch_name: str) -> bool:
         tokens = [t for t in want.split() if len(t) >= 2]
         if tokens and all(tok in norm for tok in tokens):
             return True
-    # New-channel substring whitelist (BeIN / NFL / UFC / soccer / DAZN). See
-    # _BARNCENTRE_NAME_TOKENS for rationale.
-    extra = _BARNCENTRE_NAME_TOKENS.get(want)
-    if extra:
-        for tok in extra:
-            if tok in norm:
-                return True
     return False
 
 
