@@ -6567,6 +6567,13 @@ _PROXY_HTTP: httpx.AsyncClient | None = None
 
 _PROXY_MANIFEST_TTL = 1.0   # seconds; live playlists rotate every 2-6 s
 _PROXY_SEGMENT_TTL = 30.0   # seconds; segments are immutable
+# Cache hard-fail upstream responses briefly. When an upstream account hits its
+# concurrent-connection cap it returns 403; hls.js then retries the manifest
+# up to 3 times per recovery cycle × 3 recoveries = ~10 round trips, each
+# re-hammering the throttled upstream. A short TTL absorbs those retries
+# without compounding the provider's throttle. Short enough that genuine
+# upstream recovery (typically 30-90s) isn't masked.
+_PROXY_4XX_TTL = 5.0
 _PROXY_CACHE_MAX_BYTES = 32 * 1024 * 1024
 _PROXY_CACHE: dict[str, tuple[float, str, bytes, int]] = {}
 # value: (expires_at, content_type, body, status_code)
@@ -6633,7 +6640,15 @@ def _proxy_cache_get(url: str) -> tuple[str, bytes, int] | None:
 
 
 def _proxy_cache_put(url: str, content_type: str, body: bytes, status_code: int, ttl: float) -> None:
-    if status_code != 200 or not body or ttl <= 0:
+    if ttl <= 0:
+        return
+    # Allow success (200 + body) and hard-fail 4xx (with or without body).
+    # 4xx caching breaks the retry storm where hls.js spams the relay after
+    # an upstream account throttles — see _PROXY_4XX_TTL above for the why.
+    if status_code == 200:
+        if not body:
+            return
+    elif status_code not in (401, 403, 404, 410):
         return
     global _PROXY_CACHE_BYTES
     _proxy_cache_evict_if_needed(len(body))
@@ -6793,6 +6808,17 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
     cached = _proxy_cache_get(url)
     if cached is not None:
         ct, body, _sc = cached
+        # Cached hard-fail (4xx) — pass through as-is. Skip m3u8 rewrite (the
+        # body is an HTML error page or empty, not a manifest) and skip the
+        # immutable segment Cache-Control (don't tell CF to cache the failure
+        # for 60s when the upstream is likely to recover in <30s).
+        if _sc and _sc >= 400:
+            return FastResponse(
+                content=body,
+                media_type=ct or "application/octet-stream",
+                headers=cors_headers,
+                status_code=_sc,
+            )
         if "mpegurl" in ct.lower():
             text = body.decode("utf-8", errors="replace")
             text = _rewrite_m3u8(text, url, proxy_base)
@@ -6892,6 +6918,22 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
 
         content_type = resp.headers.get("content-type", "")
         body = resp.content
+
+        # Hard upstream failure (401/403/404/410). Cache briefly and return
+        # immediately — don't fall through to m3u8/HTML/segment processing.
+        # The 4xx cache breaks the retry-storm pattern where hls.js spams the
+        # relay after an upstream account throttles, compounding the provider's
+        # connection-limit rejection.
+        if resp.status_code in (401, 403, 404, 410):
+            _proxy_cache_put(url, content_type, body, resp.status_code, _PROXY_4XX_TTL)
+            if not fut.done():
+                fut.set_result((content_type, body, resp.status_code))
+            return FastResponse(
+                content=body,
+                media_type=content_type or "application/octet-stream",
+                headers=cors_headers,
+                status_code=resp.status_code,
+            )
 
         # If it's an m3u8 manifest, rewrite internal URLs.
         # Only treat as M3U8 on success — a 403/404 with a .m3u8 URL returns HTML
