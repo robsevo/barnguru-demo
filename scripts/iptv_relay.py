@@ -68,7 +68,10 @@ HLS_LIST_SIZE          = 36
 # briefly looked away, forcing a full ffmpeg respawn on resume. 90s is still
 # tight enough that abandoned chips don't pile up but covers normal viewer
 # behavior (phone call, brief tab switch, talking with someone in the room).
-HLS_IDLE_TIMEOUT_S     = 30.0
+# OOM protection comes from HLS_MAX_SESSIONS below, not this idle timeout —
+# 12 × ~80 MB resident keeps the relay under 1 GB regardless of how long
+# each session lives.
+HLS_IDLE_TIMEOUT_S     = 90.0
 HLS_STARTUP_TIMEOUT_S  = 15.0
 # Hard cap on concurrent ffmpeg sessions. Each ffmpeg holds 60-80 MB
 # resident; on a 2 GB VPS even 25 sessions saturates RAM and the OOM
