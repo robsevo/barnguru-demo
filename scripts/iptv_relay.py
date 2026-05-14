@@ -140,7 +140,11 @@ def _encode_args(quality: str, encoder: str) -> list[str]:
     branch picks its own scene-cut control.
     """
     if quality == "passthrough":
-        return ["-c", "copy"]
+        # Video pass-through, audio normalized to AAC. Some upstream TS feeds
+        # ship audio (MP2, AC3, ADTS-AAC variants) that MediaSource refuses to
+        # append, surfacing as bufferAppendError in hls.js. AAC re-encode is
+        # cheap (~2-5% of one core) and guarantees MSE-compatible audio.
+        return ["-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-ac", "2"]
 
     width, height, vbr, vbufsize, abr = _QUALITY_TIERS[quality]
     common_audio = ["-c:a", "aac", "-b:a", abr, "-ac", "2"]
