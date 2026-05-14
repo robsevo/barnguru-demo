@@ -672,10 +672,18 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough") -> _
             "-reconnect_delay_max", "5",
             "-i", url,
             *encode,
+            # Larger muxer queue tolerates 5-10s of upstream backpressure
+            # before ffmpeg drops packets — pairs with the deep player buffer.
+            "-max_muxing_queue_size", "4096",
             "-f", "hls",
             "-hls_time", str(HLS_SEGMENT_SECONDS),
             "-hls_list_size", str(HLS_LIST_SIZE),
-            "-hls_flags", "delete_segments+omit_endlist+independent_segments",
+            # discont_start: signals to hls.js that this session is fresh and
+            # any PTS continuity from a prior session is broken. Combined with
+            # the player's maxBufferHole=1.5s, hls.js flushes the MSE source
+            # buffer cleanly at the marker instead of stalling on PTS jumps
+            # after an LRU-evict + respawn for the same channel.
+            "-hls_flags", "delete_segments+omit_endlist+independent_segments+discont_start",
             "-hls_segment_filename", str(workdir / "seg%04d.ts"),
             str(workdir / "live.m3u8"),
         ]
