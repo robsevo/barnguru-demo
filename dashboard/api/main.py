@@ -6567,13 +6567,15 @@ _PROXY_HTTP: httpx.AsyncClient | None = None
 
 _PROXY_MANIFEST_TTL = 1.0   # seconds; live playlists rotate every 2-6 s
 _PROXY_SEGMENT_TTL = 30.0   # seconds; segments are immutable
-# Cache hard-fail upstream responses briefly. When an upstream account hits its
-# concurrent-connection cap it returns 403; hls.js then retries the manifest
-# up to 3 times per recovery cycle × 3 recoveries = ~10 round trips, each
-# re-hammering the throttled upstream. A short TTL absorbs those retries
-# without compounding the provider's throttle. Short enough that genuine
-# upstream recovery (typically 30-90s) isn't masked.
-_PROXY_4XX_TTL = 5.0
+# Cache hard-fail upstream responses. When an upstream account is auth-throttled
+# (typical penalty for `/live/*` probe floods is 24-48h), every hover warmup
+# fires a fresh /m3u8 probe; without caching, browsing barncentre during the
+# throttle window keeps the upstream provider locked out indefinitely. 60s
+# is short enough that genuine upstream recovery (rare on the same minute,
+# but possible on transient outages) isn't masked for long, and long enough
+# that a hover scan across 20 chips doesn't generate 20 redundant probes
+# against the same throttled account.
+_PROXY_4XX_TTL = 60.0
 _PROXY_CACHE_MAX_BYTES = 32 * 1024 * 1024
 _PROXY_CACHE: dict[str, tuple[float, str, bytes, int]] = {}
 # value: (expires_at, content_type, body, status_code)
