@@ -239,6 +239,16 @@ export default function FloatingPlayer() {
           startLevel: 0,
           capLevelToPlayerSize: true,
         });
+        // Mirror StreamPanel's recovery budget. Without these the PiP player
+        // bails on the first transient NETWORK_ERROR (relay session evict,
+        // brief manifest 5xx) or MEDIA_ERROR (bufferAppendError on a codec
+        // mismatch). startLoad() handles the network case; the two-step
+        // recoverMediaError(+swapAudioCodec) is hls.js's prescribed fix for
+        // an audio-codec guess that doesn't match the bitstream.
+        let networkRecoveries = 0;
+        let mediaRecoveries   = 0;
+        const MAX_NETWORK_RECOVERIES = 3;
+        const MAX_MEDIA_RECOVERIES   = 2;
         hlsInstance.loadSource(src);
         hlsInstance.attachMedia(videoEl);
         hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -252,7 +262,22 @@ export default function FloatingPlayer() {
           videoEl.play().catch(() => {});
         });
         hlsInstance.on(Hls.Events.ERROR, (_e, d) => {
-          if (d.fatal && !cancelled) { setError("stream error"); setLoading(false); }
+          if (!d.fatal || cancelled) return;
+          if (d.type === Hls.ErrorTypes.NETWORK_ERROR && networkRecoveries < MAX_NETWORK_RECOVERIES) {
+            networkRecoveries += 1;
+            try { hlsInstance!.startLoad(); } catch { /* ignore */ }
+            return;
+          }
+          if (d.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRecoveries < MAX_MEDIA_RECOVERIES) {
+            mediaRecoveries += 1;
+            try {
+              if (mediaRecoveries === 2) hlsInstance!.swapAudioCodec();
+              hlsInstance!.recoverMediaError();
+            } catch { /* ignore */ }
+            return;
+          }
+          setError("stream error");
+          setLoading(false);
         });
       } catch {
         if (!cancelled) { setError("could not connect"); setLoading(false); }

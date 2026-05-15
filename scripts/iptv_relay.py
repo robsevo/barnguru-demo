@@ -550,7 +550,8 @@ async def proxy_ts(u: str, request: Request) -> Response:
 # ---------------------------------------------------------------------------
 
 class _HLSSession:
-    __slots__ = ("id", "url", "workdir", "proc", "last_access", "started_at")
+    __slots__ = ("id", "url", "workdir", "proc", "last_access", "started_at",
+                 "has_served_segment")
 
     def __init__(self, sid: str, url: str, workdir: Path) -> None:
         self.id          = sid
@@ -559,6 +560,10 @@ class _HLSSession:
         self.proc: subprocess.Popen[bytes] | None = None
         self.last_access = time.monotonic()
         self.started_at  = time.monotonic()
+        # Flip True once /hls-seg actually serves a fragment from this session.
+        # Warmup-only sessions (hover spawn, never clicked) stay False and are
+        # the first to be LRU-evicted under capacity pressure.
+        self.has_served_segment = False
 
 
 _HLS_SESSIONS:  dict[str, _HLSSession] = {}
@@ -567,6 +572,22 @@ _HLS_REAPER: asyncio.Task[None] | None = None
 _SEG_NAME_RE    = re.compile(r"^seg\d{4,}\.ts$")
 _BROWSER_UA     = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+
+# sid → (url, quality). Outlives the _HLS_SESSIONS entry so that /hls-seg can
+# lazy-respawn a session that was LRU-evicted while the player still had its
+# segment URLs queued. Without this, an evicted session forces hls.js to wait
+# for the next manifest poll (3-6s) before recovering — the lazy respawn cuts
+# that to ~1-2s on next segment request. Bounded so a long-running relay
+# doesn't accumulate every URL it has ever seen.
+_HLS_URL_BY_SID: "OrderedDict[str, tuple[str, str]]" = OrderedDict()
+_HLS_URL_MAP_MAX = 200
+
+
+def _remember_hls_url(sid: str, url: str, quality: str) -> None:
+    _HLS_URL_BY_SID[sid] = (url, quality)
+    _HLS_URL_BY_SID.move_to_end(sid)
+    while len(_HLS_URL_BY_SID) > _HLS_URL_MAP_MAX:
+        _HLS_URL_BY_SID.popitem(last=False)
 
 
 def _hls_session_id(url: str, quality: str = "passthrough") -> str:
@@ -619,10 +640,17 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough") -> _
         # LRU eviction: enforce HLS_MAX_SESSIONS BEFORE starting a new
         # ffmpeg. Without this the session table can balloon during
         # channel-hop / verifier-probe bursts (we observed 35+ live
-        # ffmpegs on a 2 GB VPS, OOM-killing the relay). Drop the
-        # least-recently-used session whose pid is still alive.
+        # ffmpegs on a 2 GB VPS, OOM-killing the relay).
+        #
+        # Sort key prefers warmup-only sessions (has_served_segment=False)
+        # before any session that has actually streamed a fragment — that
+        # protects the active viewer from being evicted by a flurry of chip
+        # hovers. Within each group, oldest last_access goes first.
         if len(_HLS_SESSIONS) >= HLS_MAX_SESSIONS:
-            victims = sorted(_HLS_SESSIONS.values(), key=lambda s: s.last_access)
+            victims = sorted(
+                _HLS_SESSIONS.values(),
+                key=lambda s: (s.has_served_segment, s.last_access),
+            )
             for victim in victims[: len(_HLS_SESSIONS) - HLS_MAX_SESSIONS + 1]:
                 _HLS_SESSIONS.pop(victim.id, None)
                 _kill_session(victim)
@@ -704,6 +732,7 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough") -> _
     deadline = time.monotonic() + HLS_STARTUP_TIMEOUT_S
     while time.monotonic() < deadline:
         if manifest.exists() and manifest.stat().st_size > 0:
+            _remember_hls_url(sid, url, quality)
             return sess
         if sess.proc is not None and sess.proc.poll() is not None:
             stderr_tail = b""
@@ -784,8 +813,25 @@ async def proxy_hls_segment(session_id: str, segment: str, request: Request) -> 
 
     sess = _HLS_SESSIONS.get(session_id)
     if sess is None:
-        raise HTTPException(status_code=410, detail="session expired")
+        # Session was LRU-evicted or reaped while the player still had segment
+        # URLs queued. Look up the upstream URL we recorded when /hls last
+        # served this sid and respawn the ffmpeg transparently. The respawned
+        # session starts at seg0000, so the player's stale segNNNN.ts request
+        # will 404 below — that's recoverable (hls.js refetches the manifest
+        # on its next poll) instead of the 410 cliff we used to return.
+        info = _HLS_URL_BY_SID.get(session_id)
+        if info is None:
+            raise HTTPException(status_code=410, detail="session expired")
+        url, quality = info
+        try:
+            sess = await _start_or_get_hls_session(url, quality)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"respawn failed: {e}")
+
     sess.last_access = time.monotonic()
+    sess.has_served_segment = True
 
     path = sess.workdir / segment
     if not path.exists():
