@@ -263,7 +263,13 @@ export default function FloatingPlayer() {
         });
         hlsInstance.on(Hls.Events.ERROR, (_e, d) => {
           if (!d.fatal || cancelled) return;
-          if (d.type === Hls.ErrorTypes.NETWORK_ERROR && networkRecoveries < MAX_NETWORK_RECOVERIES) {
+          // 410 Gone = upstream permanently dead (upstream auth-fail). Skip the
+          // retry budget so the PiP error surfaces instantly instead of after
+          // ~20s of fruitless reloads.
+          const httpCode = (d as { response?: { code?: number } }).response?.code;
+          if (httpCode !== 410
+              && d.type === Hls.ErrorTypes.NETWORK_ERROR
+              && networkRecoveries < MAX_NETWORK_RECOVERIES) {
             networkRecoveries += 1;
             try { hlsInstance!.startLoad(); } catch { /* ignore */ }
             return;
