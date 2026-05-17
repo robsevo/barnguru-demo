@@ -3865,19 +3865,22 @@ async def phase3_fi_histogram(bins: int = 20) -> dict:
 
 
 @app.get("/phase3/team-fatigue")
-async def phase3_team_fatigue() -> dict:
-    """Average fatigue index per team in the latest FI snapshot.
+async def phase3_team_fatigue(window_days: int = 21) -> dict:
+    """Recent-game fatigue per team — defaults to the last 21 days of
+    composite_fi data so teams that stopped playing weeks ago don't
+    skew the league ranking.
 
-    Joins composite_fi with the most recent roster JSONs to map
-    player_id → team_code, then averages FI by team. Surfaces which
-    teams are skating tired league-wide — Polymarket-actionable.
+    Each team's row is computed as the mean fatigue_index of its
+    player-games in ``[latest_fi_date - window_days, latest_fi_date]``.
+    Teams with zero games in that window are dropped. The window cutoff
+    is included in the response so the dashboard can label it.
     """
     import polars as pl
 
     fi_path, mtime = _phase3_latest("composite_fi", "composite_fi_*.parquet")
     if fi_path is None:
         return {"status": "not_run", "teams": [], "as_of": None}
-    fi_df = pl.read_parquet(fi_path, columns=["player_id", "fatigue_index"])
+    fi_df = pl.read_parquet(fi_path, columns=["player_id", "game_date", "fatigue_index"])
     if len(fi_df) == 0:
         return {"status": "empty", "teams": [], "as_of": mtime.date().isoformat()}
 
@@ -3899,32 +3902,54 @@ async def phase3_team_fatigue() -> dict:
     if not pid_team:
         return {"status": "no_roster", "teams": [], "as_of": mtime.date().isoformat()}
 
+    # Anchor the rolling window on the most recent game_date *in the
+    # parquet itself*, not today. Today might be off-season (May), when
+    # no regular-season games are happening at all.
+    latest_in_data = fi_df["game_date"].max()
+    window = max(7, min(60, int(window_days)))
+    cutoff = (datetime.strptime(latest_in_data, "%Y-%m-%d")
+              - timedelta(days=window)).date().isoformat()
+
+    recent = fi_df.filter(pl.col("game_date") >= cutoff)
+    if len(recent) == 0:
+        return {
+            "status": "empty",
+            "teams": [],
+            "as_of": mtime.date().isoformat() if mtime else None,
+            "window_start": cutoff,
+            "window_end":   latest_in_data,
+        }
+
     team_df = pl.DataFrame(
         [{"player_id": k, "team": v} for k, v in pid_team.items()],
         schema={"player_id": pl.Int64, "team": pl.Utf8},
     )
     agg = (
-        fi_df.join(team_df, on="player_id", how="inner")
-             .group_by("team")
-             .agg([
-                 pl.col("fatigue_index").mean().alias("mean_fi"),
-                 pl.col("fatigue_index").max().alias("max_fi"),
-                 pl.len().alias("rows"),
-             ])
-             .sort("mean_fi", descending=True)
+        recent.join(team_df, on="player_id", how="inner")
+              .group_by("team")
+              .agg([
+                  pl.col("fatigue_index").mean().alias("mean_fi"),
+                  pl.col("fatigue_index").max().alias("max_fi"),
+                  pl.col("game_date").max().alias("last_game"),
+                  pl.len().alias("rows"),
+              ])
+              .sort("mean_fi", descending=True)
     )
     return {
         "status": "ok",
         "teams":  [
             {
-                "team":    r["team"],
-                "mean_fi": float(r["mean_fi"] or 0.0),
-                "max_fi":  float(r["max_fi"]  or 0.0),
-                "rows":    int(r["rows"]),
+                "team":      r["team"],
+                "mean_fi":   float(r["mean_fi"] or 0.0),
+                "max_fi":    float(r["max_fi"]  or 0.0),
+                "last_game": r["last_game"],
+                "rows":      int(r["rows"]),
             }
             for r in agg.to_dicts()
         ],
-        "as_of":  mtime.date().isoformat() if mtime else None,
+        "as_of":        mtime.date().isoformat() if mtime else None,
+        "window_start": cutoff,
+        "window_end":   latest_in_data,
     }
 
 
