@@ -3630,22 +3630,50 @@ async def phase3_player(name: str = Query(..., description="Player name")) -> di
     needle = _norm(name)
     names  = _build_name_lookup()
 
-    # Resolve player_id by name (any match — name lookup is built from all parquets).
-    pid: int | None = None
-    matched_name: str | None = None
-    for k, v in names.items():
-        if _norm(v) == needle:
-            pid = int(k)
-            matched_name = v
-            break
-    if pid is None:
-        # Prefix match fallback for truncated names.
+    # Restrict the name → id resolution to player IDs that are actually
+    # in the current composite_fi parquet. Two reasons:
+    #   1. Old bayes_ratings parquets (2023) carry corrupted player_ids
+    #      from an early pipeline bug (e.g. Matthews appeared as both
+    #      220478230 in 2023 and 8479318 in 2025). Both keys end up in
+    #      _build_name_lookup; matching by name picks whichever inserted
+    #      first, which is the broken one. We never want to return an
+    #      ID the dashboard can't pull stats for.
+    #   2. Even valid IDs from older parquets may belong to retired
+    #      players who don't appear in the current FI run.
+    fi_path, _ = _phase3_latest("composite_fi", "composite_fi_*.parquet")
+    valid_pids: set[int] = set()
+    if fi_path is not None:
+        try:
+            valid_pids = set(
+                pl.scan_parquet(fi_path)
+                  .select("player_id").unique().collect()["player_id"].to_list()
+            )
+        except Exception:
+            valid_pids = set()
+
+    def _resolve(needle: str) -> tuple[int | None, str | None]:
+        # Exact normalized match, scoped to FI'd players first.
+        for k, v in names.items():
+            if _norm(v) == needle and (not valid_pids or int(k) in valid_pids):
+                return int(k), v
+        # Same exact match, no scope (handles players present in older
+        # parquets only — e.g. Phase 2-only data with no current FI row).
+        for k, v in names.items():
+            if _norm(v) == needle:
+                return int(k), v
+        # Prefix fallback (truncated names like "Slafkovsk"), scoped first.
+        for k, v in names.items():
+            nv = _norm(v)
+            if (nv.startswith(needle) or needle.startswith(nv)) and \
+               (not valid_pids or int(k) in valid_pids):
+                return int(k), v
         for k, v in names.items():
             nv = _norm(v)
             if nv.startswith(needle) or needle.startswith(nv):
-                pid = int(k)
-                matched_name = v
-                break
+                return int(k), v
+        return None, None
+
+    pid, matched_name = _resolve(needle)
 
     if pid is None:
         return {
