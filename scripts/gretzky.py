@@ -54,6 +54,9 @@ COMMANDS: list[Cmd] = [
     # ── Phase 1 — Data Pipeline ───────────────────────────────────────────
     Cmd("sync",       "phase1", "Sync all live data feeds (injuries, transactions, EDGE, goalie stats)",
         "scripts.run_phase1_sync"),
+    Cmd("sync-rosters", "phase1",
+        "Sync current NHL rosters for all 32 teams → DataStore.roster()",
+        "scripts.sync_rosters"),
     Cmd("ingest",     "phase1", "Ingest NHL historical PBP + shift data (required for train-rapm)",
         "scripts.run_historical_ingest"),
     Cmd("extract-iptv", "phase1",

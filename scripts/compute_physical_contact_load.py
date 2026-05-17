@@ -43,7 +43,15 @@ CONTACT_SUBDIR  = "physical_contact_load"
 
 
 def _aggregate_contact(pbp: pl.DataFrame) -> pl.DataFrame:
-    """Per-(game, player, team) hits_taken + blocked_shots from PBP."""
+    """Per-(game, player, team) hits_taken + blocked_shots from PBP.
+
+    The current NHL PBP schema doesn't always carry ``hittee_id`` /
+    ``blocker_id`` (those are emitted by a newer parser version; older
+    ingests omit them). Each component is computed if and only if its
+    source column is present, and the function gracefully returns a
+    partial frame — composite-FI degrades the contact-load signal to
+    zero when this output is missing.
+    """
     empty = pl.DataFrame(
         schema={
             "game_id":       pl.Int64,
@@ -56,40 +64,61 @@ def _aggregate_contact(pbp: pl.DataFrame) -> pl.DataFrame:
     if len(pbp) == 0:
         return empty
 
-    hits = (
-        pbp.filter(
-            (pl.col("event_type") == "hit") & pl.col("hittee_id").is_not_null()
-        )
-        .select([
-            "game_id",
-            pl.col("hittee_id").alias("player_id"),
-            # The hittee is on the team being hit, i.e. NOT the event owner.
-            pl.when(pl.col("event_owner_team_id") == pl.col("home_team_id"))
-            .then(pl.col("away_team_id"))
-            .otherwise(pl.col("home_team_id"))
-            .alias("team_id"),
-        ])
-        .group_by(["game_id", "player_id", "team_id"])
-        .agg(pl.len().alias("hits_taken"))
-    )
+    cols = set(pbp.columns)
+    have_hittee  = "hittee_id"  in cols
+    have_blocker = "blocker_id" in cols
+    if not have_hittee and not have_blocker:
+        # Neither component recoverable from the current parquet — emit
+        # empty frame so the downstream rolling tracker still writes a
+        # zero-row parquet rather than crashing the nightly step.
+        return empty
 
-    blocks = (
-        pbp.filter(
-            (pl.col("shot_result") == "blocked") & pl.col("blocker_id").is_not_null()
+    if have_hittee:
+        hits = (
+            pbp.filter(
+                (pl.col("event_type") == "hit") & pl.col("hittee_id").is_not_null()
+            )
+            .select([
+                "game_id",
+                pl.col("hittee_id").alias("player_id"),
+                # The hittee is on the team being hit, i.e. NOT the event owner.
+                pl.when(pl.col("event_owner_team_id") == pl.col("home_team_id"))
+                .then(pl.col("away_team_id"))
+                .otherwise(pl.col("home_team_id"))
+                .alias("team_id"),
+            ])
+            .group_by(["game_id", "player_id", "team_id"])
+            .agg(pl.len().alias("hits_taken"))
         )
-        .select([
-            "game_id",
-            pl.col("blocker_id").alias("player_id"),
-            # The blocker is on the defending team — opposite the shooter's
-            # event_owner_team_id.
-            pl.when(pl.col("event_owner_team_id") == pl.col("home_team_id"))
-            .then(pl.col("away_team_id"))
-            .otherwise(pl.col("home_team_id"))
-            .alias("team_id"),
-        ])
-        .group_by(["game_id", "player_id", "team_id"])
-        .agg(pl.len().alias("blocked_shots"))
-    )
+    else:
+        hits = pl.DataFrame(schema={
+            "game_id": pl.Int64, "player_id": pl.Int64,
+            "team_id": pl.Int64, "hits_taken": pl.Int64,
+        })
+
+    if have_blocker:
+        blocks = (
+            pbp.filter(
+                (pl.col("shot_result") == "blocked") & pl.col("blocker_id").is_not_null()
+            )
+            .select([
+                "game_id",
+                pl.col("blocker_id").alias("player_id"),
+                # The blocker is on the defending team — opposite the
+                # shooter's event_owner_team_id.
+                pl.when(pl.col("event_owner_team_id") == pl.col("home_team_id"))
+                .then(pl.col("away_team_id"))
+                .otherwise(pl.col("home_team_id"))
+                .alias("team_id"),
+            ])
+            .group_by(["game_id", "player_id", "team_id"])
+            .agg(pl.len().alias("blocked_shots"))
+        )
+    else:
+        blocks = pl.DataFrame(schema={
+            "game_id": pl.Int64, "player_id": pl.Int64,
+            "team_id": pl.Int64, "blocked_shots": pl.Int64,
+        })
 
     if len(hits) == 0 and len(blocks) == 0:
         return empty
@@ -126,10 +155,23 @@ def _load_contact_with_date(args) -> pl.DataFrame:
         sys.exit(1)
 
     contact_df = _aggregate_contact(pbp_df)
+    if len(contact_df) == 0:
+        cols = set(pbp_df.columns)
+        missing = [c for c in ("hittee_id", "blocker_id") if c not in cols]
+        if missing:
+            print(
+                f"[contact-load] PBP parquet is missing {missing}; "
+                "writing an empty contact-load parquet so composite-FI can "
+                "still run with the contact signal at its no-effect default."
+            )
+        else:
+            print("[contact-load] PBP yielded no hit/block rows.")
+        return contact_df.join(schedule.head(0), on="game_id", how="inner")
+
     joined = contact_df.join(schedule, on="game_id", how="inner")
     if len(joined) == 0:
         print("[contact-load] No contact rows joined to scheduled games.")
-        sys.exit(1)
+        return joined
     return joined
 
 

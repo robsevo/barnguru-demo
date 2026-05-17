@@ -62,10 +62,33 @@ def _season_ending_year(d: str) -> int:
     return dt.year + 1 if dt.month >= 8 else dt.year
 
 
+# Every PBP column that can identify a player who appeared in a game.
+# `event_player_1_id` is the *legacy* generic-actor column; the modern
+# parser splits it into event-specific columns. We keep the legacy name
+# at the front so a future re-ingest with the older schema still works
+# without code changes.
+_PLAYER_ID_COLS: tuple[str, ...] = (
+    "event_player_1_id",
+    "event_player_2_id",
+    "shooter_id",
+    "shot_goalie_id",
+    "scorer_id",
+    "assist1_id",
+    "assist2_id",
+    "committed_by_id",
+    "drawn_by_id",
+    "winning_player_id",
+    "losing_player_id",
+    "turnover_player_id",
+    "hitter_id",
+    "hittee_id",
+    "blocker_id",
+)
+
+
 def _per_player_per_game(pbp: pl.DataFrame) -> pl.DataFrame:
     """Distinct (player_id, game_id) appearances from PBP."""
-    pid_cols = [c for c in ("event_player_1_id", "event_player_2_id",
-                            "committed_by_id") if c in pbp.columns]
+    pid_cols = [c for c in _PLAYER_ID_COLS if c in pbp.columns]
     if not pid_cols:
         return pl.DataFrame(schema={"player_id": pl.Int64, "game_id": pl.Int64})
     frames = []
@@ -73,6 +96,36 @@ def _per_player_per_game(pbp: pl.DataFrame) -> pl.DataFrame:
         frames.append(
             pbp.select(["game_id", pl.col(col).alias("player_id")])
             .filter(pl.col("player_id").is_not_null())
+        )
+    return pl.concat(frames).unique()
+
+
+def _player_team_from_pbp(pbp: pl.DataFrame) -> pl.DataFrame:
+    """Best-effort (player_id, game_id, team_id) attribution from PBP.
+
+    Uses ``event_owner_team_id`` as the team and unions every available
+    player-id column. A player can show up under multiple events with
+    the same team; we ``.unique()`` afterwards.
+    """
+    if "event_owner_team_id" not in pbp.columns:
+        return pl.DataFrame(schema={
+            "player_id": pl.Int64, "game_id": pl.Int64, "team_id": pl.Int64,
+        })
+    pid_cols = [c for c in _PLAYER_ID_COLS if c in pbp.columns]
+    if not pid_cols:
+        return pl.DataFrame(schema={
+            "player_id": pl.Int64, "game_id": pl.Int64, "team_id": pl.Int64,
+        })
+    frames = []
+    for col in pid_cols:
+        frames.append(
+            pbp.select([
+                "game_id",
+                pl.col(col).alias("player_id"),
+                pl.col("event_owner_team_id").alias("team_id"),
+            ])
+            .filter(pl.col("player_id").is_not_null()
+                    & pl.col("team_id").is_not_null())
         )
     return pl.concat(frames).unique()
 
@@ -136,15 +189,11 @@ def _build_load_df(store: DataStore, args, as_of_iso: str) -> pl.DataFrame:
             .group_by("event_owner_team_id")
             .agg(pl.len().alias("team_playoff_games"))
         )
-        # Map player → team via prior-season appearances
+        # Map player → team via prior-season appearances. Use every
+        # available player-id column (modern PBP splits the legacy
+        # ``event_player_1_id`` into role-specific columns).
         player_team = (
-            pbp.select([
-                pl.col("event_player_1_id").alias("player_id"),
-                pl.col("event_owner_team_id").alias("team_id"),
-                "game_id",
-            ])
-            .filter(pl.col("player_id").is_not_null() & pl.col("team_id").is_not_null())
-            .unique()
+            _player_team_from_pbp(pbp)
             .join(schedule, on="game_id", how="inner")
             .filter(pl.col("game_type") == GAME_TYPE_PLAYOFFS)
             .with_columns(

@@ -44,35 +44,47 @@ SCHEDULE_SUBDIR = "schedule"
 ST_LOAD_SUBDIR  = "special_teams_load"
 
 
+# Batch size for the per-game PP/PK overlap join. The shifts × pp_pk
+# cross-join is bounded by *shifts_in_batch × pp_pk_in_batch*, both of
+# which scale linearly with the number of games in the chunk. 200 games
+# keeps each intermediate frame around 1.5M rows on the 2 GB VPS even
+# after the .filter() pre-pass on event timing. Tuning lever, not a
+# correctness knob — final aggregate is identical to a single-pass run.
+_GAME_BATCH = 200
+
+
 def _per_game_pptoi_shtoi(
     pbp: pl.DataFrame, shifts: pl.DataFrame
 ) -> pl.DataFrame:
     """Per-(game, player, team) PPTOI and SHTOI in seconds.
 
-    Mirrors PlayerStatsAggregator._compute_pptoi_shtoi but keeps game_id in
-    the group-by so callers get one row per game.
+    Mirrors PlayerStatsAggregator._compute_pptoi_shtoi but keeps game_id
+    in the group-by so callers get one row per game. Processes games in
+    fixed-size chunks (see ``_GAME_BATCH``) to bound peak memory — the
+    shifts × pp_pk overlap join is the hottest spot in the whole Phase 3
+    pipeline and previously OOM-killed the 2 GB VPS at single-season
+    scale.
     """
-    empty = pl.DataFrame(
-        schema={
-            "game_id":    pl.Int64,
-            "player_id":  pl.Int64,
-            "team_id":    pl.Int64,
-            "pptoi_secs": pl.Int64,
-            "shtoi_secs": pl.Int64,
-        }
-    )
+    empty_cols = {
+        "game_id":    pl.Int64,
+        "player_id":  pl.Int64,
+        "team_id":    pl.Int64,
+        "pptoi_secs": pl.Int64,
+        "shtoi_secs": pl.Int64,
+    }
+    empty = pl.DataFrame(schema=empty_cols)
     if "home_team_id" not in pbp.columns or len(pbp) == 0 or len(shifts) == 0:
         return empty
 
-    game_teams = (
+    game_teams_all = (
         pbp.filter(pl.col("home_team_id").is_not_null())
         .select(["game_id", "home_team_id", "away_team_id"])
         .unique(subset=["game_id"])
     )
-    if len(game_teams) == 0:
+    if len(game_teams_all) == 0:
         return empty
 
-    pp_pk = (
+    pp_pk_all = (
         pbp.filter(pl.col("strength").is_in(["pp", "pk"]))
         .with_columns(
             ((pl.col("period") - 1) * 1200 + pl.col("time_in_period_secs"))
@@ -80,78 +92,101 @@ def _per_game_pptoi_shtoi(
         )
         .select(["game_id", "event_gsecs", "strength"])
     )
-    if len(pp_pk) == 0:
+    if len(pp_pk_all) == 0:
         return empty
 
-    # Slim shifts to the 5 columns the join needs — the parquet has 12
-    # cols (period, shift_number, start/end_time strings, duration_secs,
-    # start/end_time_secs) that get carried through every joined row and
-    # multiply intermediate memory. On the 2 GB VPS this single .select()
-    # cuts the shifts×pp_pk cross-join peak by roughly 2×.
-    shifts_slim = shifts.select([
+    # Slim shifts to the 5 columns the join needs.
+    shifts_slim_all = shifts.select([
         "game_id", "player_id", "team_id",
         "game_seconds_start", "game_seconds_end",
     ])
-    shifts_with_teams = shifts_slim.join(game_teams, on="game_id", how="left")
-    overlapping = (
-        shifts_with_teams.join(pp_pk, on="game_id", how="inner")
-        .filter(
-            (pl.col("event_gsecs") >= pl.col("game_seconds_start"))
-            & (pl.col("event_gsecs") <= pl.col("game_seconds_end"))
+
+    # Process games in batches. Each batch produces its own small per-
+    # (game, player, team) aggregate; we concat at the end. Memory is
+    # bounded by the size of one batch's cross-join, not the season.
+    all_gids = sorted(game_teams_all["game_id"].to_list())
+    aggregates: list[pl.DataFrame] = []
+
+    for batch_start in range(0, len(all_gids), _GAME_BATCH):
+        batch = all_gids[batch_start: batch_start + _GAME_BATCH]
+        if not batch:
+            break
+
+        game_teams = game_teams_all.filter(pl.col("game_id").is_in(batch))
+        pp_pk      = pp_pk_all.filter(pl.col("game_id").is_in(batch))
+        if len(pp_pk) == 0:
+            continue
+        shifts_slim = shifts_slim_all.filter(pl.col("game_id").is_in(batch))
+        if len(shifts_slim) == 0:
+            continue
+
+        shifts_with_teams = shifts_slim.join(game_teams, on="game_id", how="left")
+        overlapping = (
+            shifts_with_teams.join(pp_pk, on="game_id", how="inner")
+            .filter(
+                (pl.col("event_gsecs") >= pl.col("game_seconds_start"))
+                & (pl.col("event_gsecs") <= pl.col("game_seconds_end"))
+            )
         )
-    )
-    if len(overlapping) == 0:
+        if len(overlapping) == 0:
+            continue
+
+        overlapping = overlapping.with_columns(
+            pl.when(
+                ((pl.col("strength") == "pp") & (pl.col("team_id") == pl.col("home_team_id")))
+                | ((pl.col("strength") == "pk") & (pl.col("team_id") == pl.col("away_team_id")))
+            )
+            .then(pl.lit("pp"))
+            .when(
+                ((pl.col("strength") == "pk") & (pl.col("team_id") == pl.col("home_team_id")))
+                | ((pl.col("strength") == "pp") & (pl.col("team_id") == pl.col("away_team_id")))
+            )
+            .then(pl.lit("pk"))
+            .otherwise(pl.lit("ev"))
+            .alias("shift_type")
+        )
+
+        # One classification per unique shift (sort pp/pk before ev so ST wins).
+        shift_classified = (
+            overlapping
+            .sort(["player_id", "game_id", "game_seconds_start", "shift_type"])
+            .unique(
+                subset=["player_id", "game_id", "game_seconds_start"],
+                keep="first",
+            )
+            .with_columns(
+                (pl.col("game_seconds_end") - pl.col("game_seconds_start"))
+                .alias("shift_dur")
+            )
+        )
+
+        grouped = (
+            shift_classified
+            .group_by(["game_id", "player_id", "team_id", "shift_type"])
+            .agg(pl.col("shift_dur").sum().alias("secs"))
+            .pivot(
+                index=["game_id", "player_id", "team_id"],
+                on="shift_type",
+                values="secs",
+                aggregate_function="sum",
+            )
+        )
+        # Pivot may omit columns when no rows for that strength existed.
+        for col in ("pp", "pk"):
+            if col not in grouped.columns:
+                grouped = grouped.with_columns(pl.lit(0).cast(pl.Int64).alias(col))
+        grouped = grouped.with_columns(
+            pl.col("pp").fill_null(0).cast(pl.Int64).alias("pptoi_secs"),
+            pl.col("pk").fill_null(0).cast(pl.Int64).alias("shtoi_secs"),
+        )
+        aggregates.append(
+            grouped.select(["game_id", "player_id", "team_id",
+                            "pptoi_secs", "shtoi_secs"])
+        )
+
+    if not aggregates:
         return empty
-
-    overlapping = overlapping.with_columns(
-        pl.when(
-            ((pl.col("strength") == "pp") & (pl.col("team_id") == pl.col("home_team_id")))
-            | ((pl.col("strength") == "pk") & (pl.col("team_id") == pl.col("away_team_id")))
-        )
-        .then(pl.lit("pp"))
-        .when(
-            ((pl.col("strength") == "pk") & (pl.col("team_id") == pl.col("home_team_id")))
-            | ((pl.col("strength") == "pp") & (pl.col("team_id") == pl.col("away_team_id")))
-        )
-        .then(pl.lit("pk"))
-        .otherwise(pl.lit("ev"))
-        .alias("shift_type")
-    )
-
-    # One classification per unique shift (sort pp/pk before ev so ST wins).
-    shift_classified = (
-        overlapping
-        .sort(["player_id", "game_id", "game_seconds_start", "shift_type"])
-        .unique(
-            subset=["player_id", "game_id", "game_seconds_start"],
-            keep="first",
-        )
-        .with_columns(
-            (pl.col("game_seconds_end") - pl.col("game_seconds_start"))
-            .alias("shift_dur")
-        )
-    )
-
-    grouped = (
-        shift_classified
-        .group_by(["game_id", "player_id", "team_id", "shift_type"])
-        .agg(pl.col("shift_dur").sum().alias("secs"))
-        .pivot(
-            index=["game_id", "player_id", "team_id"],
-            on="shift_type",
-            values="secs",
-            aggregate_function="sum",
-        )
-    )
-    # Pivot may omit columns when no rows for that strength existed.
-    for col in ("pp", "pk"):
-        if col not in grouped.columns:
-            grouped = grouped.with_columns(pl.lit(0).cast(pl.Int64).alias(col))
-    grouped = grouped.with_columns(
-        pl.col("pp").fill_null(0).cast(pl.Int64).alias("pptoi_secs"),
-        pl.col("pk").fill_null(0).cast(pl.Int64).alias("shtoi_secs"),
-    )
-    return grouped.select(["game_id", "player_id", "team_id", "pptoi_secs", "shtoi_secs"])
+    return pl.concat(aggregates)
 
 
 def _load_st_with_date(args) -> pl.DataFrame:
