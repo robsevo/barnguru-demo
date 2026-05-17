@@ -17,6 +17,7 @@ from data.pbp_parser import (
     DataMissingWarning,
     FaceoffPlay,
     GoalPlay,
+    HitPlay,
     OtherPlay,
     ParsedPlay,
     PenaltyPlay,
@@ -414,9 +415,9 @@ class TestKnownAnswerPenalty:
 
 
 class TestKnownAnswerOther:
-    def test_hit_is_other_play(self):
+    def test_hit_parses_as_hit_play(self):
         play = parse_one(_RAW_HIT)
-        assert isinstance(play, OtherPlay)
+        assert isinstance(play, HitPlay)
         assert play.event_type == "hit"
         assert play.event_type_raw == "hit"
 

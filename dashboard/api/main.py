@@ -3339,6 +3339,458 @@ async def phase2_xga_leaderboard(limit: int = 20) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Phase 3 — Fatigue Engine
+# ---------------------------------------------------------------------------
+
+_PHASE3_FEATURES: list[dict] = [
+    {"id": "schedule_density",    "ref": "3.1",  "subdir": "schedule_density",      "glob": "schedule_density_*.parquet",
+     "name": "Schedule Density",            "desc": "B2B / 3-in-4 / rest-day flags per team-game",                          "feeds": "Composite FI (3.17)"},
+    {"id": "road_trips",          "ref": "3.2",  "subdir": "road_trips",            "glob": "road_trips_*.parquet",
+     "name": "Road Trip Tracker",           "desc": "Trip-id + game-within-trip annotation per team-game",                  "feeds": "Composite FI (3.17)"},
+    {"id": "travel_distance",     "ref": "3.3",  "subdir": "travel_distance",       "glob": "travel_distance_*.parquet",
+     "name": "Travel Distance",             "desc": "City-pair miles + rolling 7-day total per team-game",                  "feeds": "Composite FI (3.17)"},
+    {"id": "time_zone_crossing",  "ref": "3.4",  "subdir": "time_zone_crossing",    "glob": "time_zone_crossing_*.parquet",
+     "name": "Time-Zone Crossing",          "desc": "Zones crossed in 48h + east/west direction",                           "feeds": "Composite FI (3.17)"},
+    {"id": "circadian_alignment", "ref": "3.5",  "subdir": "circadian_alignment",   "glob": "circadian_alignment_*.parquet",
+     "name": "Circadian Alignment",         "desc": "Body-clock vs. game-start misalignment in hours",                      "feeds": "Composite FI (3.17)"},
+    {"id": "altitude_adjustment", "ref": "3.6",  "subdir": "altitude_adjustment",   "glob": "altitude_adjustment_*.parquet",
+     "name": "Altitude Penalty",            "desc": "Aerobic penalty for visitors at high-altitude arenas",                 "feeds": "Composite FI (3.17)"},
+    {"id": "toi_load",            "ref": "3.7",  "subdir": "toi_load",              "glob": "toi_load_*.parquet",
+     "name": "TOI Load",                    "desc": "Rolling 5-game TOI average + spike detector per player",               "feeds": "Composite FI (3.17)"},
+    {"id": "special_teams_load",  "ref": "3.8",  "subdir": "special_teams_load",    "glob": "special_teams_load_*.parquet",
+     "name": "Special-Teams Load",          "desc": "Rolling PP+PK minutes (higher intensity than 5v5)",                    "feeds": "Composite FI (3.17)"},
+    {"id": "physical_contact_load","ref": "3.9", "subdir": "physical_contact_load", "glob": "physical_contact_load_*.parquet",
+     "name": "Physical Contact Load",       "desc": "Rolling 5-game hits-taken + blocks load per skater",                   "feeds": "Composite FI (3.17)"},
+    {"id": "overtime_fatigue",    "ref": "3.10", "subdir": "overtime_fatigue",      "glob": "overtime_fatigue_*.parquet",
+     "name": "Overtime Fatigue",            "desc": "OT games in last 7 days + equivalent-TOI penalty",                     "feeds": "Composite FI (3.17)"},
+    {"id": "fight_fatigue",       "ref": "3.11", "subdir": "fight_fatigue",         "glob": "fight_fatigue_*.parquet",
+     "name": "Fight Fatigue",               "desc": "Rolling fighting-major adrenal-toll score",                            "feeds": "Composite FI (3.17)"},
+    {"id": "age_recovery",        "ref": "3.12", "subdir": "age_recovery",          "glob": "age_recovery_*.parquet",
+     "name": "Age Recovery Coefficient",    "desc": "Exponential recovery-rate decay function of age",                      "feeds": "Composite FI (3.17)"},
+    {"id": "injury_status",       "ref": "3.13", "subdir": "injury_status",         "glob": "injury_status_*.parquet",
+     "name": "Injury Status + Rust",        "desc": "DTD/Out flags + return-from-injury rust factor",                       "feeds": "Composite FI (3.17)"},
+    {"id": "concussion_history",  "ref": "3.14", "subdir": "concussion_history",    "glob": "concussion_history_*.parquet",
+     "name": "Concussion History",          "desc": "Elevated fatigue-sensitivity multiplier for prior concussions",        "feeds": "Composite FI (3.17)"},
+    {"id": "prior_playoff_load",  "ref": "3.15", "subdir": "prior_playoff_load",    "glob": "prior_playoff_load_*.parquet",
+     "name": "Prior Playoff Load",          "desc": "Deep-run summer-rest deficit → season-start penalty",                  "feeds": "Composite FI (3.17)"},
+    {"id": "roster_depth_strain", "ref": "3.16", "subdir": "roster_depth_strain",   "glob": "roster_depth_strain_*.parquet",
+     "name": "Roster Depth Strain",         "desc": "IR-driven minute redistribution onto remaining healthy skaters",       "feeds": "Composite FI (3.17)"},
+    {"id": "composite_fi",        "ref": "3.17", "subdir": "composite_fi",          "glob": "composite_fi_*.parquet",
+     "name": "Composite Fatigue Index",     "desc": "Weighted sum of all signals → FI 0.0–1.0 per (player, game)",          "feeds": "FI multiplier (3.18) · Rust engine"},
+    {"id": "fi_rating_multiplier","ref": "3.18", "subdir": "fi_rating_multiplier",  "glob": "fi_rating_multiplier_*.parquet",
+     "name": "FI → Rating Multiplier",      "desc": "Scaling factor on player ratings fed into Rust simulation",            "feeds": "Rust engine (Phase 5)"},
+    {"id": "performance_anomaly", "ref": "3.19", "subdir": "performance_anomaly",   "glob": "performance_anomaly_*.parquet",
+     "name": "Performance Anomaly Detector","desc": "Z-score + CUSUM SPC; flags hidden injuries (≥2σ below baseline)",      "feeds": "Dashboard alert feed"},
+    {"id": "trade_integration",   "ref": "3.20", "subdir": "trade_integration",     "glob": "trade_integration_*.parquet",
+     "name": "Trade Integration Model",     "desc": "Bidirectional fit-delta modifier; decays ~15–20 games post-trade",     "feeds": "Composite FI (3.17)"},
+    {"id": "fi_edge_degradation", "ref": "3.21", "subdir": "fi_edge_degradation",   "glob": "fi_edge_degradation_*.parquet",
+     "name": "FI → EDGE Degradation",       "desc": "Predicted drop in EDGE speed/distance/carry/burst vs. baseline",        "feeds": "Behavioral net (2.22)"},
+    {"id": "seasonal_performance","ref": "3.22", "subdir": "seasonal_performance",  "glob": "seasonal_performance_*.parquet",
+     "name": "Seasonal Performance Factor", "desc": "Month-of-season motivational modifier (Jan slump / Apr push)",         "feeds": "Composite FI (3.17)"},
+]
+
+
+def _phase3_latest(subdir: str, glob: str) -> tuple[Path | None, datetime | None]:
+    """Return (path, mtime) of the most-recently modified parquet, or (None, None)."""
+    d = _GRETZKY_DATA_DIR / subdir
+    if not d.exists():
+        return None, None
+    paths = sorted(d.glob(glob))
+    if not paths:
+        return None, None
+    latest = max(paths, key=lambda p: p.stat().st_mtime)
+    return latest, datetime.fromtimestamp(latest.stat().st_mtime, tz=timezone.utc)
+
+
+@app.get("/phase3/modules")
+async def phase3_modules() -> dict:
+    """Per-feature build + data status for the Phase 3 fatigue engine.
+
+    Each entry reports whether the model script has been run against the
+    runtime data directory. ``status`` is ``ok`` when at least one
+    parquet exists under ``<GRETZKY_DATA_DIR>/<subdir>/`` matching the
+    feature's glob, ``not_run`` otherwise.
+    """
+    import polars as pl
+
+    out: list[dict] = []
+    for f in _PHASE3_FEATURES:
+        path, mtime = _phase3_latest(f["subdir"], f["glob"])
+        if path is None:
+            out.append({
+                "id":            f["id"],
+                "ref":           f["ref"],
+                "name":          f["name"],
+                "desc":          f["desc"],
+                "feeds":         f["feeds"],
+                "status":        "not_run",
+                "record_count":  0,
+                "last_computed": None,
+                "parquet":       None,
+            })
+            continue
+        try:
+            rc = pl.scan_parquet(path).select(pl.len()).collect().item()
+        except Exception:
+            rc = 0
+        out.append({
+            "id":            f["id"],
+            "ref":           f["ref"],
+            "name":          f["name"],
+            "desc":          f["desc"],
+            "feeds":         f["feeds"],
+            "status":        "ok",
+            "record_count":  int(rc),
+            "last_computed": mtime.date().isoformat() if mtime else None,
+            "parquet":       path.name,
+        })
+
+    built = sum(1 for m in out if m["status"] == "ok")
+    return {"modules": out, "built": built, "total": len(out)}
+
+
+@app.get("/phase3/fatigue/top")
+async def phase3_fatigue_top(limit: int = 25) -> dict:
+    """Top-N players by composite FI (3.17) from the latest parquet.
+
+    Returns rows with fatigue_index, raw_load, rust_load, playoff_load_penalty,
+    and the component_breakdown JSON. ``status`` is ``not_run`` until
+    ``gretzky composite-fi`` has been executed.
+    """
+    import polars as pl
+
+    path, mtime = _phase3_latest("composite_fi", "composite_fi_*.parquet")
+    if path is None:
+        return {"status": "not_run", "rows": [], "as_of": None}
+
+    df = pl.read_parquet(path)
+    if len(df) == 0:
+        return {"status": "empty", "rows": [], "as_of": mtime.date().isoformat() if mtime else None}
+
+    names = _build_name_lookup()
+    top = df.sort("fatigue_index", descending=True).head(int(max(1, limit)))
+    rows: list[dict] = []
+    for r in top.to_dicts():
+        pid = int(r.get("player_id") or 0)
+        rows.append({
+            "player_id":             pid,
+            "player_name":           names.get(pid, f"player_{pid}"),
+            "game_id":               int(r.get("game_id") or 0),
+            "game_date":             r.get("game_date"),
+            "fatigue_index":         r.get("fatigue_index"),
+            "raw_load":              r.get("raw_load"),
+            "rust_load":             r.get("rust_load"),
+            "playoff_load_penalty":  r.get("playoff_load_penalty"),
+            "component_breakdown":   r.get("component_breakdown"),
+        })
+    return {
+        "status": "ok",
+        "rows":   rows,
+        "as_of":  mtime.date().isoformat() if mtime else None,
+        "parquet": path.name,
+    }
+
+
+@app.get("/phase3/anomalies")
+async def phase3_anomalies(limit: int = 25) -> dict:
+    """Active performance anomalies from the latest 3.19 parquet."""
+    import polars as pl
+
+    path, mtime = _phase3_latest("performance_anomaly", "performance_anomaly_*.parquet")
+    if path is None:
+        return {"status": "not_run", "rows": [], "as_of": None}
+
+    df = pl.read_parquet(path)
+    if len(df) == 0:
+        return {"status": "empty", "rows": [], "as_of": mtime.date().isoformat() if mtime else None}
+
+    flagged = df.filter(pl.col("is_anomaly") == True) if "is_anomaly" in df.columns else df
+    if len(flagged) == 0:
+        return {"status": "ok", "rows": [], "as_of": mtime.date().isoformat() if mtime else None}
+
+    top = flagged.sort("z_score").head(int(max(1, limit)))
+    names = _build_name_lookup()
+    rows: list[dict] = []
+    for r in top.to_dicts():
+        pid = int(r.get("player_id") or 0)
+        rows.append({
+            "player_id":            pid,
+            "player_name":          names.get(pid, f"player_{pid}"),
+            "game_id":              int(r.get("game_id") or 0),
+            "game_date":            r.get("game_date"),
+            "z_score":              r.get("z_score"),
+            "cusum":                r.get("cusum"),
+            "consecutive_below_n":  r.get("consecutive_below_n"),
+            "is_z_anomaly":         r.get("is_z_anomaly"),
+            "is_cusum_anomaly":     r.get("is_cusum_anomaly"),
+        })
+    return {
+        "status": "ok",
+        "rows":   rows,
+        "as_of":  mtime.date().isoformat() if mtime else None,
+        "parquet": path.name,
+    }
+
+
+@app.get("/phase3/seasonal-distribution")
+async def phase3_seasonal_distribution() -> dict:
+    """Per-month average seasonal-motivation factor (3.22)."""
+    import polars as pl
+
+    path, mtime = _phase3_latest("seasonal_performance", "seasonal_performance_*.parquet")
+    if path is None:
+        return {"status": "not_run", "months": [], "as_of": None}
+
+    df = pl.read_parquet(path)
+    if len(df) == 0 or "month_of_season" not in df.columns:
+        return {"status": "empty", "months": [], "as_of": mtime.date().isoformat() if mtime else None}
+
+    grouped = (
+        df.group_by("month_of_season")
+          .agg([
+              pl.col("seasonal_motivation_factor").mean().alias("mean_factor"),
+              pl.len().alias("n"),
+          ])
+          .sort("month_of_season")
+    )
+    months = [
+        {"month": int(r["month_of_season"]),
+         "mean_factor": float(r["mean_factor"]) if r["mean_factor"] is not None else 0.0,
+         "n": int(r["n"])}
+        for r in grouped.to_dicts()
+    ]
+    return {
+        "status": "ok",
+        "months": months,
+        "as_of":  mtime.date().isoformat() if mtime else None,
+    }
+
+
+@app.get("/phase3/trade-integration")
+async def phase3_trade_integration(limit: int = 25) -> dict:
+    """Active trade-integration modifiers (3.20), sorted by |factor| descending."""
+    import polars as pl
+
+    path, mtime = _phase3_latest("trade_integration", "trade_integration_*.parquet")
+    if path is None:
+        return {"status": "not_run", "rows": [], "as_of": None}
+
+    df = pl.read_parquet(path)
+    if len(df) == 0:
+        return {"status": "empty", "rows": [], "as_of": mtime.date().isoformat() if mtime else None}
+
+    sorted_df = (
+        df.with_columns(pl.col("integration_factor").abs().alias("_abs"))
+          .sort("_abs", descending=True)
+          .drop("_abs")
+          .head(int(max(1, limit)))
+    )
+    names = _build_name_lookup()
+    rows: list[dict] = []
+    for r in sorted_df.to_dicts():
+        pid = int(r.get("player_id") or 0)
+        rows.append({
+            "player_id":          pid,
+            "player_name":        names.get(pid, f"player_{pid}"),
+            "game_date":          r.get("game_date"),
+            "trade_date":         r.get("trade_date"),
+            "new_team":           r.get("new_team"),
+            "old_team":           r.get("old_team"),
+            "position":           r.get("position"),
+            "games_since_trade":  r.get("games_since_trade"),
+            "decay_factor":       r.get("decay_factor"),
+            "fit_delta":          r.get("fit_delta"),
+            "integration_factor": r.get("integration_factor"),
+            "ci_low":             r.get("ci_low"),
+            "ci_high":            r.get("ci_high"),
+        })
+    return {
+        "status": "ok",
+        "rows":   rows,
+        "as_of":  mtime.date().isoformat() if mtime else None,
+        "parquet": path.name,
+    }
+
+
+@app.get("/phase3/player")
+async def phase3_player(name: str = Query(..., description="Player name")) -> dict:
+    """Per-player Phase 3 lookup — composite FI + components + anomaly + multiplier.
+
+    Returns the most-recent (player, game) row for each Phase 3 feature
+    that has been computed. Fields are ``null`` when a sub-model has not
+    been run yet — the page surfaces that as "not run" rather than
+    inventing a default.
+    """
+    import polars as pl
+    import unicodedata, json as _json
+
+    def _norm(s: str) -> str:
+        return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode().lower().strip()
+
+    needle = _norm(name)
+    names  = _build_name_lookup()
+
+    # Resolve player_id by name (any match — name lookup is built from all parquets).
+    pid: int | None = None
+    matched_name: str | None = None
+    for k, v in names.items():
+        if _norm(v) == needle:
+            pid = int(k)
+            matched_name = v
+            break
+    if pid is None:
+        # Prefix match fallback for truncated names.
+        for k, v in names.items():
+            nv = _norm(v)
+            if nv.startswith(needle) or needle.startswith(nv):
+                pid = int(k)
+                matched_name = v
+                break
+
+    if pid is None:
+        return {
+            "not_found":    True,
+            "player_name":  name,
+            "reason":       "player_id_not_resolved",
+            "message":      "No Phase 1/2 parquet contains this player yet.",
+        }
+
+    out: dict = {
+        "not_found":    False,
+        "player_id":    pid,
+        "player_name":  matched_name or name,
+    }
+
+    # Composite FI (3.17) — newest row for this player.
+    fi_path, fi_mtime = _phase3_latest("composite_fi", "composite_fi_*.parquet")
+    fi_row: dict | None = None
+    if fi_path is not None:
+        try:
+            fi_df = pl.read_parquet(fi_path).filter(pl.col("player_id") == pid)
+            if not fi_df.is_empty():
+                fi_row = fi_df.sort("game_date", descending=True).head(1).to_dicts()[0]
+        except Exception:
+            pass
+    out["fi"] = {
+        "status":                "ok" if fi_row else ("empty" if fi_path else "not_run"),
+        "as_of":                 fi_mtime.date().isoformat() if fi_mtime else None,
+        "fatigue_index":         (fi_row or {}).get("fatigue_index"),
+        "raw_load":              (fi_row or {}).get("raw_load"),
+        "rust_load":             (fi_row or {}).get("rust_load"),
+        "playoff_load_penalty":  (fi_row or {}).get("playoff_load_penalty"),
+        "game_date":             (fi_row or {}).get("game_date"),
+    }
+    # Decode the component_breakdown JSON if present.
+    cb_raw = (fi_row or {}).get("component_breakdown")
+    components: dict | None = None
+    if cb_raw:
+        try:
+            components = _json.loads(cb_raw) if isinstance(cb_raw, str) else dict(cb_raw)
+        except Exception:
+            components = None
+    out["fi"]["component_breakdown"] = components
+
+    # FI → Rating Multiplier (3.18)
+    fm_path, fm_mtime = _phase3_latest("fi_rating_multiplier", "fi_rating_multiplier_*.parquet")
+    fm_row: dict | None = None
+    if fm_path is not None:
+        try:
+            fmdf = pl.read_parquet(fm_path).filter(pl.col("player_id") == pid)
+            if not fmdf.is_empty():
+                fm_row = fmdf.sort("game_date", descending=True).head(1).to_dicts()[0]
+        except Exception:
+            pass
+    out["fi_multiplier"] = {
+        "status":      "ok" if fm_row else ("empty" if fm_path else "not_run"),
+        "as_of":       fm_mtime.date().isoformat() if fm_mtime else None,
+        "multiplier":  (fm_row or {}).get("rating_multiplier"),
+        "game_date":   (fm_row or {}).get("game_date"),
+    }
+
+    # Performance anomaly (3.19)
+    pa_path, pa_mtime = _phase3_latest("performance_anomaly", "performance_anomaly_*.parquet")
+    pa_row: dict | None = None
+    if pa_path is not None:
+        try:
+            padf = pl.read_parquet(pa_path).filter(pl.col("player_id") == pid)
+            if not padf.is_empty():
+                pa_row = padf.sort("game_date", descending=True).head(1).to_dicts()[0]
+        except Exception:
+            pass
+    out["anomaly"] = {
+        "status":               "ok" if pa_row else ("empty" if pa_path else "not_run"),
+        "as_of":                pa_mtime.date().isoformat() if pa_mtime else None,
+        "z_score":              (pa_row or {}).get("z_score"),
+        "cusum":                (pa_row or {}).get("cusum"),
+        "consecutive_below_n":  (pa_row or {}).get("consecutive_below_n"),
+        "is_anomaly":           (pa_row or {}).get("is_anomaly"),
+        "is_on_ir":             (pa_row or {}).get("is_on_ir"),
+        "game_date":            (pa_row or {}).get("game_date"),
+    }
+
+    # Trade integration (3.20)
+    ti_path, ti_mtime = _phase3_latest("trade_integration", "trade_integration_*.parquet")
+    ti_row: dict | None = None
+    if ti_path is not None:
+        try:
+            tidf = pl.read_parquet(ti_path).filter(pl.col("player_id") == pid)
+            if not tidf.is_empty():
+                ti_row = tidf.sort("game_date", descending=True).head(1).to_dicts()[0]
+        except Exception:
+            pass
+    out["trade_integration"] = {
+        "status":             "ok" if ti_row else ("empty" if ti_path else "not_run"),
+        "as_of":              ti_mtime.date().isoformat() if ti_mtime else None,
+        "integration_factor": (ti_row or {}).get("integration_factor"),
+        "games_since_trade":  (ti_row or {}).get("games_since_trade"),
+        "fit_delta":          (ti_row or {}).get("fit_delta"),
+        "trade_date":         (ti_row or {}).get("trade_date"),
+        "new_team":           (ti_row or {}).get("new_team"),
+        "old_team":           (ti_row or {}).get("old_team"),
+    }
+
+    # FI → EDGE degradation (3.21)
+    fe_path, fe_mtime = _phase3_latest("fi_edge_degradation", "fi_edge_degradation_*.parquet")
+    fe_row: dict | None = None
+    if fe_path is not None:
+        try:
+            fedf = pl.read_parquet(fe_path).filter(pl.col("player_id") == pid)
+            if not fedf.is_empty():
+                fe_row = fedf.sort("game_date", descending=True).head(1).to_dicts()[0]
+        except Exception:
+            pass
+    out["edge_degradation"] = {
+        "status":                  "ok" if fe_row else ("empty" if fe_path else "not_run"),
+        "as_of":                   fe_mtime.date().isoformat() if fe_mtime else None,
+        "predicted_load_factor":   (fe_row or {}).get("predicted_load_factor"),
+        "speed_vs_baseline":       (fe_row or {}).get("speed_vs_baseline"),
+        "distance_vs_baseline":    (fe_row or {}).get("distance_vs_baseline"),
+        "carry_vs_baseline":       (fe_row or {}).get("carry_vs_baseline"),
+        "burst_vs_baseline":       (fe_row or {}).get("burst_vs_baseline"),
+    }
+
+    # Seasonal performance (3.22)
+    sp_path, sp_mtime = _phase3_latest("seasonal_performance", "seasonal_performance_*.parquet")
+    sp_row: dict | None = None
+    if sp_path is not None:
+        try:
+            spdf = pl.read_parquet(sp_path).filter(pl.col("player_id") == pid)
+            if not spdf.is_empty():
+                sp_row = spdf.sort("game_date", descending=True).head(1).to_dicts()[0]
+        except Exception:
+            pass
+    out["seasonal"] = {
+        "status":                      "ok" if sp_row else ("empty" if sp_path else "not_run"),
+        "as_of":                       sp_mtime.date().isoformat() if sp_mtime else None,
+        "seasonal_motivation_factor":  (sp_row or {}).get("seasonal_motivation_factor"),
+        "month_of_season":             (sp_row or {}).get("month_of_season"),
+        "base_month_effect":           (sp_row or {}).get("base_month_effect"),
+    }
+
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Player recent game log — NHL API passthrough (last N games)
 # ---------------------------------------------------------------------------
 

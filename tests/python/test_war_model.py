@@ -10,9 +10,6 @@ from models.rapm_model import DataMissingWarning
 from models.war_model import (
     GOALS_PER_WIN,
     MODEL_VERSION,
-    REPLACEMENT_RAPM_EV,
-    REPLACEMENT_RAPM_PK,
-    REPLACEMENT_RAPM_PP,
     WAR_DOLLAR_RATE,
     WAR_SCHEMA,
     WARModel,
@@ -163,10 +160,12 @@ class TestWARModelFit:
         model = WARModel()
         df = model.fit(rapm)
         row = df.row(0, named=True)
-        # gar_ev = (2.0 + 1.0 - (-2.0)) × (600/60) = 5.0 × 10 = 50.0
-        # war = 50.0 / 5.0 = 10.0
-        assert row["gar_ev"] == pytest.approx(50.0)
-        assert row["war"] == pytest.approx(10.0)
+        # ev_off_adj =   2.0 × 1.6 =  3.2     (MULTIPLIER_EV_OFF)
+        # ev_def_adj = -(1.0) × 1.4 = -1.4    (sign flip: +ve RAPM_def = worse defense)
+        # gar_ev = (3.2 + -1.4 - (-2.0)) × (600/60) = 3.8 × 10 = 38.0
+        # war    = 38.0 / 5.5 ≈ 6.9091         (GOALS_PER_WIN)
+        assert row["gar_ev"] == pytest.approx(38.0)
+        assert row["war"]    == pytest.approx(38.0 / GOALS_PER_WIN)
 
     def test_missing_player_id_raises(self):
         bad = pl.DataFrame({"name": ["X"]})
