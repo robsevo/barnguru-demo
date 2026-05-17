@@ -83,7 +83,16 @@ def _per_game_pptoi_shtoi(
     if len(pp_pk) == 0:
         return empty
 
-    shifts_with_teams = shifts.join(game_teams, on="game_id", how="left")
+    # Slim shifts to the 5 columns the join needs — the parquet has 12
+    # cols (period, shift_number, start/end_time strings, duration_secs,
+    # start/end_time_secs) that get carried through every joined row and
+    # multiply intermediate memory. On the 2 GB VPS this single .select()
+    # cuts the shifts×pp_pk cross-join peak by roughly 2×.
+    shifts_slim = shifts.select([
+        "game_id", "player_id", "team_id",
+        "game_seconds_start", "game_seconds_end",
+    ])
+    shifts_with_teams = shifts_slim.join(game_teams, on="game_id", how="left")
     overlapping = (
         shifts_with_teams.join(pp_pk, on="game_id", how="inner")
         .filter(
