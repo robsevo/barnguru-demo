@@ -1821,6 +1821,26 @@ export default function PlayerProfilePage() {
   const [showSugg, setShowSugg]     = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
+  // Phase 3 fatigue data (independent of the main /phase2/player fetch so
+  // the rest of the profile still renders even if Phase 3 is empty/null).
+  interface Phase3Card {
+    fatigue_index:   number | null;
+    fi_game_date:    string | null;
+    fi_components:   Record<string, number> | null;
+    fi_multiplier:   number | null;
+    anomaly_z:       number | null;
+    is_anomaly:      boolean;
+    consecutive_below_n: number | null;
+    seasonal_factor: number | null;
+    seasonal_month:  number | null;
+    edge_load:       number | null;
+    edge_speed:      number | null;
+    edge_distance:   number | null;
+    edge_carry:      number | null;
+    edge_burst:      number | null;
+  }
+  const [phase3, setPhase3] = useState<Phase3Card | null>(null);
+
   useEffect(() => {
     fetch("/api/phase2/players")
       .then(r => r.json())
@@ -1854,6 +1874,31 @@ export default function PlayerProfilePage() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
+
+    // Phase 3 enrichment — fire-and-forget; missing sub-models render as null.
+    setPhase3(null);
+    fetch(`/api/phase3/player?name=${encodeURIComponent(playerName)}`)
+      .then(r => r.json())
+      .then((p) => {
+        if (p?.not_found) return;
+        setPhase3({
+          fatigue_index:   p?.fi?.fatigue_index ?? null,
+          fi_game_date:    p?.fi?.game_date ?? null,
+          fi_components:   p?.fi?.component_breakdown ?? null,
+          fi_multiplier:   p?.fi_multiplier?.multiplier ?? null,
+          anomaly_z:       p?.anomaly?.z_score ?? null,
+          is_anomaly:      Boolean(p?.anomaly?.is_anomaly),
+          consecutive_below_n: p?.anomaly?.consecutive_below_n ?? null,
+          seasonal_factor: p?.seasonal?.seasonal_motivation_factor ?? null,
+          seasonal_month:  p?.seasonal?.month_of_season ?? null,
+          edge_load:       p?.edge_degradation?.predicted_load_factor ?? null,
+          edge_speed:      p?.edge_degradation?.speed_vs_baseline ?? null,
+          edge_distance:   p?.edge_degradation?.distance_vs_baseline ?? null,
+          edge_carry:      p?.edge_degradation?.carry_vs_baseline ?? null,
+          edge_burst:      p?.edge_degradation?.burst_vs_baseline ?? null,
+        });
+      })
+      .catch(() => {});
   }, [playerName]);
 
   // Apply the player's team theme site-wide as a preview (reverts on navigate away).
@@ -2812,6 +2857,120 @@ export default function PlayerProfilePage() {
             </div>
           </Card>
         )}
+
+        {/* Phase 3 — Fatigue & Schedule */}
+        {!isGoalie && phase3 && phase3.fatigue_index != null && (() => {
+          const fi    = phase3.fatigue_index ?? 0;
+          const tier  = fi >= 0.70 ? "Above Average" : fi >= 0.45 ? "Above Average"
+                      : fi >= 0.25 ? "Average"       : "Below Average";
+          const colorHex = fi >= 0.70 ? "#f87171" : fi >= 0.45 ? "#fb923c"
+                         : fi >= 0.25 ? "#fbbf24" : "#4ade80";
+          const sortedComps = phase3.fi_components
+            ? Object.entries(phase3.fi_components).sort(([,a],[,b]) => b - a).filter(([,v]) => v > 0)
+            : [];
+          const monthAbbr: Record<number,string> = { 1:"Jan",2:"Feb",3:"Mar",4:"Apr",5:"May",6:"Jun",
+                                                     7:"Jul",8:"Aug",9:"Sep",10:"Oct",11:"Nov",12:"Dec" };
+          return (
+            <Card title="Fatigue & Schedule" icon="😮‍💨" style={cardStyle}>
+              <div className="space-y-0">
+                <StatRow
+                  label="Fatigue Index"
+                  value={fi.toFixed(3)}
+                  tier={tier as Tier}
+                  sub={phase3.fi_game_date
+                    ? `Latest: ${phase3.fi_game_date} · 0 = rested, 1 = severely fatigued`
+                    : "0 = rested, 1 = severely fatigued"}
+                  tip="Composite Fatigue Index (Feature 3.17): weighted sum of schedule density, travel, special-teams load, contact load, OT/fight load, recovery and roster strain — all in [0, 1]. The Rust engine uses this to scale player ratings game-by-game."
+                />
+                {phase3.fi_multiplier != null && (
+                  <StatRow
+                    label="Rating Multiplier"
+                    value={phase3.fi_multiplier.toFixed(3)}
+                    sub="Scaling factor applied to ratings before Rust sim"
+                    tip="Feature 3.18 — FI → rating multiplier. ≈1.0 means no fatigue effect. Below 1.0 means we expect this player to underperform their rested baseline tonight."
+                  />
+                )}
+                {phase3.is_anomaly && (
+                  <StatRow
+                    label="Anomaly Flag"
+                    value={`z=${(phase3.anomaly_z ?? 0).toFixed(2)}`}
+                    tier="Below Average"
+                    sub={`Below baseline ${phase3.consecutive_below_n ?? 0} games in a row · not on IR`}
+                    tip="Feature 3.19 — CUSUM + z-score SPC over a 20-game rolling baseline. The player is performing >2σ below their own norm without an injury report — possible hidden injury."
+                  />
+                )}
+                {phase3.seasonal_factor != null && Math.abs(phase3.seasonal_factor) > 0.005 && (
+                  <StatRow
+                    label="Seasonal Motivation"
+                    value={`${phase3.seasonal_factor >= 0 ? "+" : ""}${(phase3.seasonal_factor * 100).toFixed(2)}%`}
+                    sub={`${monthAbbr[phase3.seasonal_month ?? 0] ?? ""} effect (Apr push / Jan dog days)`}
+                    tip="Feature 3.22 — Month-of-season motivational modifier. April playoff push adds boost; January dog days subtract. Older players & high GP-to-date amplify January drag."
+                  />
+                )}
+                {phase3.edge_load != null && Math.abs(phase3.edge_load) > 0.005 && (
+                  <StatRow
+                    label="EDGE Degradation"
+                    value={`${phase3.edge_load >= 0 ? "+" : ""}${(phase3.edge_load * 100).toFixed(1)}%`}
+                    sub="Predicted skating-metric drop vs. baseline"
+                    tip="Feature 3.21 — average of predicted relative drop in speed / distance / carry / burst vs. the player's rested EDGE baseline (2.20), conditioned on current FI."
+                  />
+                )}
+              </div>
+
+              {/* Component breakdown bars */}
+              {sortedComps.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-white/[0.05] space-y-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/40">
+                    FI Component Breakdown
+                  </p>
+                  {sortedComps.map(([k, v]) => (
+                    <div key={k} className="flex items-center gap-2">
+                      <span className="text-[10px] text-white/55 w-32 shrink-0 truncate">
+                        {k.replace(/_/g, " ").replace(/ load$/, "")}
+                      </span>
+                      <div className="flex-1 h-1.5 rounded-full bg-white/[0.04] overflow-hidden">
+                        <div
+                          className="h-full"
+                          style={{
+                            width: `${Math.min(100, (v / 0.3) * 100)}%`,
+                            backgroundColor: colorHex,
+                            opacity: 0.85,
+                          }}
+                        />
+                      </div>
+                      <span className="text-[10px] font-mono text-white/65 w-12 text-right shrink-0">
+                        {v.toFixed(3)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* EDGE per-metric grid */}
+              {(phase3.edge_speed != null || phase3.edge_distance != null) && (
+                <div className="mt-4 pt-4 border-t border-white/[0.05]">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/40 mb-2">
+                    Skating Δ vs Baseline (EDGE)
+                  </p>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] font-mono">
+                    {(["speed","distance","carry","burst"] as const).map((k) => {
+                      const v = phase3[`edge_${k}` as keyof Phase3Card] as number | null;
+                      const col = v == null ? "text-white/40" : v < 0 ? "text-[#f87171]" : "text-[#4ade80]";
+                      return (
+                        <div key={k} className="flex justify-between">
+                          <span className="text-white/40">{k}</span>
+                          <span className={col}>
+                            {v == null ? "—" : (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </Card>
+          );
+        })()}
 
         {/* Behavioral NN + Skating */}
         {!isGoalie && (

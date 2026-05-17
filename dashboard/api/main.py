@@ -3819,6 +3819,219 @@ async def phase3_player(name: str = Query(..., description="Player name")) -> di
 
 
 # ---------------------------------------------------------------------------
+# Chart endpoints — feed the Phase 1/2/3 dashboard visualizations
+# ---------------------------------------------------------------------------
+
+@app.get("/phase3/fi-histogram")
+async def phase3_fi_histogram(bins: int = 20) -> dict:
+    """Distribution of fatigue_index across every (player, game) row.
+
+    Returns ``bins`` evenly-spaced buckets over [0, 1] with a count per
+    bucket — feeds the dashboard histogram. Pulls a single column out
+    of the latest composite_fi parquet (cheap even at 28k rows).
+    """
+    import polars as pl
+
+    path, mtime = _phase3_latest("composite_fi", "composite_fi_*.parquet")
+    if path is None:
+        return {"status": "not_run", "bins": [], "as_of": None, "total": 0}
+    df = pl.read_parquet(path, columns=["fatigue_index"])
+    if len(df) == 0:
+        return {"status": "empty", "bins": [], "as_of": mtime.date().isoformat(), "total": 0}
+
+    n_bins = max(4, min(40, int(bins)))
+    width = 1.0 / n_bins
+    vals  = df["fatigue_index"].drop_nulls().to_list()
+    counts = [0] * n_bins
+    for v in vals:
+        idx = min(n_bins - 1, max(0, int(v / width)))
+        counts[idx] += 1
+    buckets = [
+        {
+            "bin_lo": round(i * width, 3),
+            "bin_hi": round((i + 1) * width, 3),
+            "count":  counts[i],
+        }
+        for i in range(n_bins)
+    ]
+    return {
+        "status": "ok",
+        "bins":   buckets,
+        "total":  len(vals),
+        "mean":   float(sum(vals) / len(vals)) if vals else 0.0,
+        "max":    float(max(vals)) if vals else 0.0,
+        "as_of":  mtime.date().isoformat() if mtime else None,
+    }
+
+
+@app.get("/phase3/team-fatigue")
+async def phase3_team_fatigue() -> dict:
+    """Average fatigue index per team in the latest FI snapshot.
+
+    Joins composite_fi with the most recent roster JSONs to map
+    player_id → team_code, then averages FI by team. Surfaces which
+    teams are skating tired league-wide — Polymarket-actionable.
+    """
+    import polars as pl
+
+    fi_path, mtime = _phase3_latest("composite_fi", "composite_fi_*.parquet")
+    if fi_path is None:
+        return {"status": "not_run", "teams": [], "as_of": None}
+    fi_df = pl.read_parquet(fi_path, columns=["player_id", "fatigue_index"])
+    if len(fi_df) == 0:
+        return {"status": "empty", "teams": [], "as_of": mtime.date().isoformat()}
+
+    # Build player_id → team_code from cached roster JSON
+    import json as _json
+    raw_dir = _GRETZKY_DATA_DIR / "raw"
+    pid_team: dict[int, str] = {}
+    if raw_dir.exists():
+        for f in sorted(raw_dir.glob("roster_*.json")):
+            try:
+                data = _json.loads(f.read_text())
+                team = data.get("team_code", "")
+                for p in data.get("profiles", []):
+                    pid = p.get("player_id")
+                    if pid:
+                        pid_team[int(pid)] = team
+            except Exception:
+                pass
+    if not pid_team:
+        return {"status": "no_roster", "teams": [], "as_of": mtime.date().isoformat()}
+
+    team_df = pl.DataFrame(
+        [{"player_id": k, "team": v} for k, v in pid_team.items()],
+        schema={"player_id": pl.Int64, "team": pl.Utf8},
+    )
+    agg = (
+        fi_df.join(team_df, on="player_id", how="inner")
+             .group_by("team")
+             .agg([
+                 pl.col("fatigue_index").mean().alias("mean_fi"),
+                 pl.col("fatigue_index").max().alias("max_fi"),
+                 pl.len().alias("rows"),
+             ])
+             .sort("mean_fi", descending=True)
+    )
+    return {
+        "status": "ok",
+        "teams":  [
+            {
+                "team":    r["team"],
+                "mean_fi": float(r["mean_fi"] or 0.0),
+                "max_fi":  float(r["max_fi"]  or 0.0),
+                "rows":    int(r["rows"]),
+            }
+            for r in agg.to_dicts()
+        ],
+        "as_of":  mtime.date().isoformat() if mtime else None,
+    }
+
+
+@app.get("/phase2/war-distribution")
+async def phase2_war_distribution(bins: int = 18) -> dict:
+    """Histogram of WAR values + summary stats.
+
+    Reads the latest war/war_*.parquet (Feature 2.25) and bins WAR into
+    ``bins`` buckets between the min and max in the data. Returns the
+    top-10 ranked WAR rows alongside so the chart card can render a
+    leaderboard tooltip.
+    """
+    import polars as pl
+
+    war_dir = _GRETZKY_DATA_DIR / "war"
+    if not war_dir.exists():
+        return {"status": "not_run", "bins": [], "top": [], "as_of": None}
+    parquets = sorted(war_dir.glob("war_*.parquet"))
+    if not parquets:
+        return {"status": "not_run", "bins": [], "top": [], "as_of": None}
+
+    path = parquets[-1]
+    df = pl.read_parquet(path)
+    if "war" not in df.columns or len(df) == 0:
+        return {"status": "empty", "bins": [], "top": [], "as_of": None}
+
+    vals = df["war"].drop_nulls().to_list()
+    if not vals:
+        return {"status": "empty", "bins": [], "top": [], "as_of": None}
+
+    lo = float(min(vals))
+    hi = float(max(vals))
+    if hi <= lo:
+        hi = lo + 1e-6
+    n_bins = max(4, min(40, int(bins)))
+    width = (hi - lo) / n_bins
+    counts = [0] * n_bins
+    for v in vals:
+        idx = min(n_bins - 1, max(0, int((v - lo) / width)))
+        counts[idx] += 1
+    buckets = [
+        {
+            "bin_lo": round(lo + i * width, 3),
+            "bin_hi": round(lo + (i + 1) * width, 3),
+            "count":  counts[i],
+        }
+        for i in range(n_bins)
+    ]
+
+    # Top-10 by WAR
+    cols = [c for c in ("player_name", "team", "position", "war") if c in df.columns]
+    top10 = (
+        df.select(cols).sort("war", descending=True).head(10).to_dicts()
+        if "war" in df.columns else []
+    )
+
+    import datetime
+    mtime = datetime.datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    return {
+        "status": "ok",
+        "bins":   buckets,
+        "top":    top10,
+        "mean":   float(sum(vals) / len(vals)),
+        "max":    hi,
+        "min":    lo,
+        "total":  len(vals),
+        "as_of":  mtime.date().isoformat(),
+    }
+
+
+@app.get("/phase1/freshness")
+async def phase1_freshness() -> dict:
+    """Per-module sync freshness — last_synced_at + records for each Phase 1 module.
+
+    Reuses /phase1/modules' shape but adds an ``age_hours`` field that
+    the frontend renders as a color-coded chip (green < 12h, amber < 36h,
+    red ≥ 36h). Used by the Phase 1 page's data-pipeline freshness chart.
+    """
+    # Delegate to the existing module status function
+    mods_resp = await phase1_modules()
+    modules = mods_resp.get("modules", [])
+    now = datetime.now(timezone.utc)
+    out = []
+    for m in modules:
+        synced = m.get("synced_at")
+        age_hours: float | None = None
+        if synced:
+            try:
+                # Accept both Z-suffixed and offset-naive ISO timestamps
+                s = synced.replace("Z", "+00:00")
+                dt = datetime.fromisoformat(s)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                age_hours = round((now - dt).total_seconds() / 3600.0, 2)
+            except Exception:
+                age_hours = None
+        out.append({
+            "name":         m.get("name"),
+            "status":       m.get("status"),
+            "record_count": m.get("record_count", 0),
+            "synced_at":    synced,
+            "age_hours":    age_hours,
+        })
+    return {"modules": out, "now": now.isoformat()}
+
+
+# ---------------------------------------------------------------------------
 # Player recent game log — NHL API passthrough (last N games)
 # ---------------------------------------------------------------------------
 
