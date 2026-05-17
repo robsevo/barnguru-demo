@@ -2322,6 +2322,21 @@ export default function PlayerProfilePage() {
                 🏆 #{data.war_rank} in NHL
               </span>
             )}
+            {phase3?.fatigue_index != null && (() => {
+              const v = phase3.fatigue_index;
+              const col = v >= 0.45 ? "#f87171" : v >= 0.25 ? "#fb923c" : v >= 0.12 ? "#fbbf24" : "#4ade80";
+              const label = v >= 0.45 ? "GASSED" : v >= 0.25 ? "TIRED" : v >= 0.12 ? "WORKED" : "FRESH";
+              return (
+                <span
+                  title={`Composite Fatigue Index (3.17) for ${phase3.fi_game_date ?? "latest game"}. Lower is better — measures schedule, travel, TOI, contact, recovery and seasonal load.`}
+                  className="text-[10px] font-semibold rounded-full px-2.5 py-0.5 inline-flex items-center gap-1.5"
+                  style={{ color: col, borderColor: `${col}55`, backgroundColor: `${col}1a`, border: "1px solid" }}
+                >
+                  😮‍💨 {label}
+                  <span className="font-mono opacity-80">FI {v.toFixed(2)}</span>
+                </span>
+              );
+            })()}
           </div>
         </div>
 
@@ -2382,6 +2397,19 @@ export default function PlayerProfilePage() {
                   </span>
                   <span className="text-[8px] text-white/30 uppercase tracking-wider">+/-</span>
                 </div>
+                {phase3?.fatigue_index != null && (() => {
+                  const v = phase3.fatigue_index;
+                  const col = v >= 0.45 ? "#f87171" : v >= 0.25 ? "#fb923c" : v >= 0.12 ? "#fbbf24" : "#4ade80";
+                  return (
+                    <div className="flex flex-col items-center min-w-[36px]"
+                         title={`Fatigue Index — composite Phase 3 score for ${phase3.fi_game_date ?? "latest game"}`}>
+                      <span className="text-sm font-bold tabular-nums" style={{ color: col }}>
+                        {v.toFixed(2)}
+                      </span>
+                      <span className="text-[8px] text-white/30 uppercase tracking-wider">FI</span>
+                    </div>
+                  );
+                })()}
               </>
             )}
           </div>
