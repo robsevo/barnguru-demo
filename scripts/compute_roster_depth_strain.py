@@ -90,13 +90,23 @@ def _build_roster_df(store: DataStore, injury: pl.DataFrame) -> pl.DataFrame:
         sys.exit(1)
 
     cols = raw.columns
-    name_col = "full_name" if "full_name" in cols else "player_name"
-    team_col = "team_abbrev" if "team_abbrev" in cols else "team"
-    pos_col  = "position" if "position" in cols else (
+    # DataStore.roster() returns ``team_code``; older callers used
+    # ``team_abbrev`` / ``team``. ``position`` is canonical; some legacy
+    # cache shapes used ``position_code``.
+    team_col = (
+        "team_code"   if "team_code"   in cols else
+        "team_abbrev" if "team_abbrev" in cols else
+        "team"        if "team"        in cols else None
+    )
+    pos_col = (
+        "position"      if "position"      in cols else
         "position_code" if "position_code" in cols else None
     )
-    if "player_id" not in cols or team_col not in cols or pos_col is None:
-        print("[roster-depth-strain] Roster cache missing required cols.")
+    if "player_id" not in cols or team_col is None or pos_col is None:
+        print(
+            "[roster-depth-strain] Roster cache missing required cols. "
+            f"Have: {cols}"
+        )
         sys.exit(1)
 
     roster = (
