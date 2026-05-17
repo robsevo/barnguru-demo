@@ -339,6 +339,30 @@ export default function TeamPage() {
   const [goalieSortKey, setGoalieSortKey] = useState<GoalieSortKey>("wins");
   const [goalieSortDir, setGoalieSortDir] = useState<1 | -1>(1);
 
+  // Phase 3 team fatigue snapshot (regular-season last 3 weeks).
+  const [teamFI, setTeamFI] = useState<{
+    mean_fi: number; max_fi: number; last_game: string | null; rows: number;
+    window_start: string; window_end: string;
+  } | null>(null);
+  useEffect(() => {
+    fetch("/api/phase3/team-fatigue?window_days=21")
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d || d.status !== "ok") return;
+        const row = (d.teams ?? []).find((t: { team: string }) => t.team === team);
+        if (!row) return;
+        setTeamFI({
+          mean_fi: row.mean_fi,
+          max_fi:  row.max_fi,
+          last_game: row.last_game,
+          rows: row.rows,
+          window_start: d.window_start,
+          window_end:   d.window_end,
+        });
+      })
+      .catch(() => {});
+  }, [team]);
+
   // Fetch standings + stats on mount
   useEffect(() => {
     setStatsLoading(true);
@@ -547,10 +571,36 @@ export default function TeamPage() {
                       {standing.streak_count}{standing.streak_code}
                     </span>
                   ) : null}
+                  {teamFI && (() => {
+                    const v = teamFI.mean_fi;
+                    const c = v >= 0.18 ? "#f87171" : v >= 0.14 ? "#fb923c" : v >= 0.11 ? "#fbbf24" : "#4ade80";
+                    return (
+                      <span
+                        className="text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded border font-mono"
+                        title={`Phase 3 mean Fatigue Index across ${teamFI.window_start} → ${teamFI.window_end} (${teamFI.rows.toLocaleString()} player-games)`}
+                        style={{
+                          color:           c,
+                          borderColor:     `${c}55`,
+                          backgroundColor: `${c}1a`,
+                        }}
+                      >
+                        FI {v.toFixed(3)}
+                      </span>
+                    );
+                  })()}
                 </div>
                 {/* Division — second line */}
                 <p className="text-[10px] sm:text-[11px] text-white/30">
                   {["1st","2nd","3rd"][standing.div_rank - 1] ?? `${standing.div_rank}th`} in {standing.division}
+                  {teamFI && (
+                    <>
+                      <span className="text-white/20 mx-1.5">·</span>
+                      <span className="text-white/30">
+                        FI {teamFI.window_start} → {teamFI.window_end}, max{" "}
+                        <span className="text-white/55">{teamFI.max_fi.toFixed(3)}</span>
+                      </span>
+                    </>
+                  )}
                 </p>
               </div>
             ) : (

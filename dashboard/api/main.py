@@ -2281,6 +2281,83 @@ def _build_name_lookup() -> dict[int, str]:
     return lookup
 
 
+def _build_player_meta() -> dict[int, dict]:
+    """Build player_id → {team, position, name} from cached roster JSONs.
+
+    Used by dashboard endpoints to enrich leaderboard rows with team
+    abbreviation and position so the frontend can render logos + tier
+    badges instead of bare names. Falls back to xg_finishing /
+    goalie_stats parquets for IDs that aren't on a current roster
+    (recently traded / retired but still in season-aggregate data).
+    """
+    import json as _json
+    import polars as pl
+
+    meta: dict[int, dict] = {}
+
+    # Roster JSON is the most accurate "current team" source.
+    raw_dir = _GRETZKY_DATA_DIR / "raw"
+    if raw_dir.exists():
+        for f in sorted(raw_dir.glob("roster_*.json")):
+            try:
+                data = _json.loads(f.read_text())
+                team_code = data.get("team_code", "")
+                for p in data.get("profiles", []):
+                    pid = p.get("player_id")
+                    if not pid:
+                        continue
+                    pid_i = int(pid)
+                    first = p.get("first_name") or ""
+                    last  = p.get("last_name") or ""
+                    meta[pid_i] = {
+                        "team":     team_code,
+                        "position": p.get("position") or "",
+                        "name":     f"{first} {last}".strip(),
+                    }
+            except Exception:
+                pass
+
+    # Fall back to skater stats parquet for any IDs not on a roster.
+    xg_dir = _GRETZKY_DATA_DIR / "xg_finishing"
+    xg_files = sorted(xg_dir.glob("xg_finishing_*.parquet")) if xg_dir.exists() else []
+    if xg_files:
+        try:
+            df = pl.read_parquet(xg_files[-1])
+            if "shooter_id" in df.columns:
+                pos_map = _shots_name_position_map()
+                for r in df.select(["shooter_id", "shooter_name", "team"]).drop_nulls(subset=["shooter_id"]).unique(subset=["shooter_id"]).to_dicts():
+                    pid = int(r["shooter_id"])
+                    if pid in meta:
+                        continue
+                    meta[pid] = {
+                        "team":     r.get("team") or "",
+                        "position": pos_map.get(r.get("shooter_name") or "", ""),
+                        "name":     r.get("shooter_name") or "",
+                    }
+        except Exception:
+            pass
+
+    # Goalies fallback.
+    goalie_dir = _GRETZKY_DATA_DIR / "goalie_stats"
+    g_files = sorted(goalie_dir.glob("goalie_stats_*.parquet")) if goalie_dir.exists() else []
+    if g_files:
+        try:
+            gdf = pl.read_parquet(g_files[-1], columns=["player_id", "player_name", "team"])
+            for r in gdf.drop_nulls(subset=["player_id"]).unique(subset=["player_id"]).to_dicts():
+                pid = int(r["player_id"])
+                if pid in meta:
+                    continue
+                meta[pid] = {
+                    "team":     r.get("team") or "",
+                    "position": "G",
+                    "name":     r.get("player_name") or "",
+                }
+        except Exception:
+            pass
+
+    return meta
+
+
 def _resolve_names_via_nhl_api(player_ids: list[int]) -> None:
     """Fetch real names for unresolved player IDs from the NHL API and persist to cache.
 
@@ -3468,13 +3545,17 @@ async def phase3_fatigue_top(limit: int = 25) -> dict:
         return {"status": "empty", "rows": [], "as_of": mtime.date().isoformat() if mtime else None}
 
     names = _build_name_lookup()
+    meta  = _build_player_meta()
     top = df.sort("fatigue_index", descending=True).head(int(max(1, limit)))
     rows: list[dict] = []
     for r in top.to_dicts():
         pid = int(r.get("player_id") or 0)
+        m   = meta.get(pid, {})
         rows.append({
             "player_id":             pid,
-            "player_name":           names.get(pid, f"player_{pid}"),
+            "player_name":           names.get(pid, m.get("name") or f"player_{pid}"),
+            "team":                  m.get("team") or "",
+            "position":              m.get("position") or "",
             "game_id":               int(r.get("game_id") or 0),
             "game_date":             r.get("game_date"),
             "fatigue_index":         r.get("fatigue_index"),
@@ -3510,12 +3591,16 @@ async def phase3_anomalies(limit: int = 25) -> dict:
 
     top = flagged.sort("z_score").head(int(max(1, limit)))
     names = _build_name_lookup()
+    meta  = _build_player_meta()
     rows: list[dict] = []
     for r in top.to_dicts():
         pid = int(r.get("player_id") or 0)
+        m   = meta.get(pid, {})
         rows.append({
             "player_id":            pid,
-            "player_name":          names.get(pid, f"player_{pid}"),
+            "player_name":          names.get(pid, m.get("name") or f"player_{pid}"),
+            "team":                 m.get("team") or "",
+            "position":             m.get("position") or "",
             "game_id":              int(r.get("game_id") or 0),
             "game_date":            r.get("game_date"),
             "z_score":              r.get("z_score"),
@@ -3586,17 +3671,23 @@ async def phase3_trade_integration(limit: int = 25) -> dict:
           .head(int(max(1, limit)))
     )
     names = _build_name_lookup()
+    meta  = _build_player_meta()
     rows: list[dict] = []
     for r in sorted_df.to_dicts():
         pid = int(r.get("player_id") or 0)
+        m   = meta.get(pid, {})
+        # Position from trade_integration parquet takes priority — captures
+        # the position used at trade time; fall back to roster snapshot.
+        pos = r.get("position") or m.get("position") or ""
         rows.append({
             "player_id":          pid,
-            "player_name":        names.get(pid, f"player_{pid}"),
+            "player_name":        names.get(pid, m.get("name") or f"player_{pid}"),
+            "team":               m.get("team") or "",
             "game_date":          r.get("game_date"),
             "trade_date":         r.get("trade_date"),
             "new_team":           r.get("new_team"),
             "old_team":           r.get("old_team"),
-            "position":           r.get("position"),
+            "position":           pos,
             "games_since_trade":  r.get("games_since_trade"),
             "decay_factor":       r.get("decay_factor"),
             "fit_delta":          r.get("fit_delta"),
@@ -3683,10 +3774,17 @@ async def phase3_player(name: str = Query(..., description="Player name")) -> di
             "message":      "No Phase 1/2 parquet contains this player yet.",
         }
 
+    # Enrich with current team + position so the dashboard can render a
+    # logo + position pill in the search-result header.
+    meta = _build_player_meta()
+    pmeta = meta.get(pid, {}) if pid is not None else {}
+
     out: dict = {
         "not_found":    False,
         "player_id":    pid,
         "player_name":  matched_name or name,
+        "team":         pmeta.get("team") or "",
+        "position":     pmeta.get("position") or "",
     }
 
     # Composite FI (3.17) — newest row for this player.

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { TEAM_COLORS, TEAM_SECONDARY, TEAM_FULL_NAMES, logoUrl } from "@/utils/nhl";
 
@@ -41,9 +42,17 @@ function hexToRgb(hex: string): [number, number, number] {
 interface TeamCardProps {
   abbrev: string;
   onSelect: (abbrev: string) => void;
+  fatigue?: { mean_fi: number; last_game: string | null } | null;
 }
 
-function TeamCard({ abbrev, onSelect }: TeamCardProps) {
+function fiHex(v: number): string {
+  if (v >= 0.18) return "#f87171";   // most-fatigued end of league range
+  if (v >= 0.14) return "#fb923c";
+  if (v >= 0.11) return "#fbbf24";
+  return "#4ade80";
+}
+
+function TeamCard({ abbrev, onSelect, fatigue }: TeamCardProps) {
   const primary   = TEAM_COLORS[abbrev]   ?? "#888888";
   const secondary = TEAM_SECONDARY[abbrev] ?? "#333333";
   const fullName  = TEAM_FULL_NAMES[abbrev] ?? abbrev;
@@ -53,6 +62,9 @@ function TeamCard({ abbrev, onSelect }: TeamCardProps) {
   const nameParts = fullName.split(" ");
   const nickname  = nameParts[nameParts.length - 1];
   const city      = nameParts.slice(0, -1).join(" ");
+
+  const fiColor = fatigue ? fiHex(fatigue.mean_fi) : "#374151";
+  const fiPct   = fatigue ? Math.min(100, Math.max(4, fatigue.mean_fi * 400)) : 0;
 
   return (
     <button
@@ -104,6 +116,22 @@ function TeamCard({ abbrev, onSelect }: TeamCardProps) {
         </p>
         <p className="text-[9px] font-semibold text-white/20 mt-0.5 tracking-widest">{abbrev}</p>
       </div>
+
+      {/* Fatigue indicator — only renders once the API responds */}
+      {fatigue && (
+        <div className="w-full space-y-1">
+          <div className="flex items-center justify-between gap-2 text-[9px] font-mono">
+            <span className="text-white/30 uppercase tracking-[0.16em]">FI · 3wk</span>
+            <span style={{ color: fiColor }}>{fatigue.mean_fi.toFixed(3)}</span>
+          </div>
+          <div className="h-1 rounded-full bg-white/[0.05] overflow-hidden">
+            <div
+              className="h-full rounded-full"
+              style={{ width: `${fiPct}%`, backgroundColor: fiColor, opacity: 0.85 }}
+            />
+          </div>
+        </div>
+      )}
     </button>
   );
 }
@@ -111,8 +139,25 @@ function TeamCard({ abbrev, onSelect }: TeamCardProps) {
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
+interface TeamFatigueRow { team: string; mean_fi: number; max_fi: number; last_game: string | null; rows: number; }
+
 export default function LeagueTeamsPage() {
   const router = useRouter();
+  const [fatigue, setFatigue] = useState<Record<string, TeamFatigueRow> | null>(null);
+  const [fatigueMeta, setFatigueMeta] = useState<{ window_start?: string; window_end?: string } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/phase3/team-fatigue?window_days=21")
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d || d.status !== "ok") return;
+        const map: Record<string, TeamFatigueRow> = {};
+        for (const t of d.teams ?? []) map[t.team] = t;
+        setFatigue(map);
+        setFatigueMeta({ window_start: d.window_start, window_end: d.window_end });
+      })
+      .catch(() => {});
+  }, []);
 
   function handleTeamClick(abbrev: string) {
     router.push(`/teams/${abbrev}`);
@@ -131,6 +176,18 @@ export default function LeagueTeamsPage() {
         <p className="mt-1 text-[11px] text-white/30">
           Select a team to view their roster, cap, and injuries.
         </p>
+        {fatigueMeta?.window_end && (
+          <p className="mt-2 text-[9px] font-mono text-white/30">
+            Cards show <span className="text-white/55">Phase 3 Fatigue Index</span> — mean FI per team across the
+            final 3 weeks of the regular season ({fatigueMeta.window_start} → {fatigueMeta.window_end}).
+            <span className="ml-2 inline-flex items-center gap-1">
+              <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: "#4ade80" }} /> rested
+              <span className="ml-3 inline-block w-2 h-2 rounded-full" style={{ backgroundColor: "#fbbf24" }} /> avg
+              <span className="ml-3 inline-block w-2 h-2 rounded-full" style={{ backgroundColor: "#fb923c" }} /> tired
+              <span className="ml-3 inline-block w-2 h-2 rounded-full" style={{ backgroundColor: "#f87171" }} /> heavy
+            </span>
+          </p>
+        )}
       </div>
 
       {/* Divisions */}
@@ -153,7 +210,12 @@ export default function LeagueTeamsPage() {
             {/* Team grid */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {div.teams.map((abbrev) => (
-                <TeamCard key={abbrev} abbrev={abbrev} onSelect={handleTeamClick} />
+                <TeamCard
+                  key={abbrev}
+                  abbrev={abbrev}
+                  onSelect={handleTeamClick}
+                  fatigue={fatigue?.[abbrev] ?? null}
+                />
               ))}
             </div>
           </section>
