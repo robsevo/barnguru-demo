@@ -2099,8 +2099,8 @@ async def phase2_player(
     bayesian_rating:      float | None = None
     bayesian_uncertainty: float | None = None
     try:
-        br_dir = _GRETZKY_DATA_DIR / "bayes_ratings"
-        br_parquets = sorted(br_dir.glob("player_ratings_*.parquet")) if br_dir.exists() else []
+        br_parquets = _context_parquets("bayes_ratings", "player_ratings_", context) \
+                      or _context_parquets("bayes_ratings", "player_ratings_", "season")
         if br_parquets and player_id_val is not None:
             br_df = pl.read_parquet(br_parquets[-1])
             br_row = br_df.filter(pl.col("player_id") == player_id_val)

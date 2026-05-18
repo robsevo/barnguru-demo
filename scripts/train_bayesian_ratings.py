@@ -139,30 +139,39 @@ def _aggregate_xgf_from_shots(shots_df: pl.DataFrame) -> pl.DataFrame:
 def _load_season(
     data_dir: Path,
     season: int,
+    season_type: str = "regular",
 ) -> tuple[pl.DataFrame | None, pl.DataFrame | None]:
     """Load player xGF data and optional RAPM for one season.
+
+    season_type filters shots (by is_playoff) and selects the matching
+    RAPM parquet. The pre-aggregated cache is only used for regular season
+    (its filename has no _playoffs suffix yet).
 
     Returns (player_game_df or None, rapm_df or None).
     """
     from models.rapm_model import DataMissingWarning
 
-    # Prefer pre-aggregated
-    preagg_path = data_dir / "bayes_ratings" / f"player_game_xgf_{season}.parquet"
+    suffix = "_playoffs" if season_type == "playoffs" else ""
+    preagg_path = data_dir / "bayes_ratings" / f"player_game_xgf_{season}{suffix}.parquet"
     shots_path  = data_dir / "shots"         / f"shots_{season}.parquet"
-    rapm_path   = data_dir / "rapm"          / f"rapm_{season}.parquet"
+    rapm_path   = data_dir / "rapm"          / f"rapm_{season}{suffix}.parquet"
+    if season_type == "playoffs" and not rapm_path.exists():
+        rapm_path = data_dir / "rapm" / f"rapm_{season}.parquet"
 
     player_df: pl.DataFrame | None = None
 
     if preagg_path.exists():
         player_df = pl.read_parquet(preagg_path)
-        print(f"  Season {season}: loaded pre-aggregated ({len(player_df)} players)")
+        print(f"  Season {season} ({season_type}): loaded pre-aggregated ({len(player_df)} players)")
     elif shots_path.exists():
         shots_df = pl.read_parquet(shots_path)
-        # Regular season only
         if "is_playoff" in shots_df.columns:
-            shots_df = shots_df.filter(pl.col("is_playoff") == False)  # noqa: E712
+            if season_type == "playoffs":
+                shots_df = shots_df.filter(pl.col("is_playoff") == True)  # noqa: E712
+            else:
+                shots_df = shots_df.filter(pl.col("is_playoff") == False)  # noqa: E712
         player_df = _aggregate_xgf_from_shots(shots_df)
-        print(f"  Season {season}: aggregated from shots ({len(player_df)} players)")
+        print(f"  Season {season} ({season_type}): aggregated from shots ({len(player_df)} players)")
     else:
         warnings.warn(
             f"Season {season}: no shot data at {shots_path} or pre-agg at {preagg_path}.",
@@ -222,10 +231,20 @@ def main() -> None:
         metavar="PATH",
         help="Root data directory.",
     )
+    parser.add_argument(
+        "--season-type",
+        choices=["regular", "playoffs"],
+        default="regular",
+        help="'regular' writes player_ratings_{year}.parquet (default). "
+             "'playoffs' filters shots by is_playoff and writes "
+             "player_ratings_{year}_playoffs.parquet.",
+    )
     args = parser.parse_args()
 
     data_dir      = args.data_dir
     target_seasons = sorted(args.seasons)
+    season_type    = args.season_type
+    out_suffix     = "_playoffs" if season_type == "playoffs" else ""
     bayes_dir     = data_dir / "bayes_ratings"
     bayes_dir.mkdir(parents=True, exist_ok=True)
 
@@ -240,10 +259,10 @@ def main() -> None:
     if not args.force:
         existing = [
             s for s in target_seasons
-            if (bayes_dir / f"player_ratings_{s}.parquet").exists()
+            if (bayes_dir / f"player_ratings_{s}{out_suffix}.parquet").exists()
         ]
         if existing:
-            print(f"Outputs already exist for seasons {existing}. Use --force to retrain.")
+            print(f"Outputs already exist for seasons {existing}{out_suffix}. Use --force to retrain.")
             if len(existing) == len(target_seasons):
                 return
 
@@ -252,12 +271,12 @@ def main() -> None:
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         for season in target_seasons:
-            out_path = bayes_dir / f"player_ratings_{season}.parquet"
+            out_path = bayes_dir / f"player_ratings_{season}{out_suffix}.parquet"
             if out_path.exists() and not args.force:
                 print(f"  Season {season}: output exists, skipping.")
                 continue
 
-            player_df, rapm_df = _load_season(data_dir, season)
+            player_df, rapm_df = _load_season(data_dir, season, season_type=season_type)
             if player_df is None or player_df.is_empty():
                 print(f"  Season {season}: skipping (no data).")
                 continue
@@ -269,8 +288,8 @@ def main() -> None:
                 season         = season,
                 rapm_df        = rapm_df,
             )
-            saved = write_player_ratings(ratings, bayes_dir, season)
-            print(f"  Saved player_ratings_{season}.parquet  ({len(ratings)} players) → {saved}")
+            saved = write_player_ratings(ratings, bayes_dir, season, season_type=season_type)
+            print(f"  Saved player_ratings_{season}{out_suffix}.parquet  ({len(ratings)} players) → {saved}")
             _print_top_players(ratings, season)
 
             # Feature 2.10 — sequential updater state

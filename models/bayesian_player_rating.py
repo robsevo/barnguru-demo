@@ -603,11 +603,14 @@ class BayesianPlayerRating:
 # I/O
 # ---------------------------------------------------------------------------
 
-def write_player_ratings(df: pl.DataFrame, output_dir: Path, season: int) -> Path:
-    """Write Bayesian ratings to ``output_dir/player_ratings_{season}.parquet``."""
+def write_player_ratings(
+    df: pl.DataFrame, output_dir: Path, season: int, season_type: str = "regular"
+) -> Path:
+    """Write Bayesian ratings. season_type='playoffs' appends _playoffs suffix."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / f"player_ratings_{season}.parquet"
+    suffix = "_playoffs" if season_type == "playoffs" else ""
+    path = output_dir / f"player_ratings_{season}{suffix}.parquet"
     for col, dtype in PLAYER_RATING_SCHEMA.items():
         if col not in df.columns:
             df = df.with_columns(pl.lit(None).cast(dtype).alias(col))
