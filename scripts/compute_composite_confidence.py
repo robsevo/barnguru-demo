@@ -303,28 +303,110 @@ def _broadcast_team_signals(
             team_summary = team_summary.with_columns(pl.lit(0.0).cast(pl.Float64).alias(col))
         team_summary = team_summary.with_columns(pl.col(col).fill_null(0.0))
 
-    # Broadcast: join roster (player_id → team_abbrev) → team_summary
+    # Broadcast: player_id → team_abbrev. Multiple sources, picked in this order:
+    #   1. rosters_latest.parquet (if present)
+    #   2. data/raw/roster_*.json (the canonical source the dashboard already uses
+    #      in `_build_player_meta`)
+    #   3. xg_finishing parquet (shooter_id + team) as a final skater fallback
+    #   4. goalie_stats parquet (player_id + team) for goalies
+    # On Bob's prod machine (1) doesn't exist; (2) does. Without this fallback the
+    # team-broadcast silently no-ops and every team_score is 0.0.
+    pid_to_team: dict[int, str] = {}
+
     rosters_path = d / "rosters_latest.parquet"
     if rosters_path.exists():
-        rosters_df = pl.read_parquet(rosters_path)
-        if {"player_id", "team_abbrev"}.issubset(rosters_df.columns):
-            roster = rosters_df.select(["player_id", "team_abbrev"]).unique()
-            spine_with_team = player_spine.join(roster, on="player_id", how="left")
-            spine_with_team = spine_with_team.join(
-                team_summary.rename({"team": "team_abbrev"}),
-                on="team_abbrev", how="left",
-            )
-            for col in ["team_streak", "score_adj_corsi_trend", "special_teams_trend",
-                        "coach_challenge_rate", "comeback_quality", "goalie_confidence",
-                        "team_injury_context"]:
-                if col not in spine_with_team.columns:
-                    spine_with_team = spine_with_team.with_columns(
-                        pl.lit(0.0).cast(pl.Float64).alias(col)
-                    )
-                spine_with_team = spine_with_team.with_columns(pl.col(col).fill_null(0.0))
-            return spine_with_team.drop("team_abbrev") if "team_abbrev" in spine_with_team.columns else spine_with_team
+        try:
+            rdf = pl.read_parquet(rosters_path)
+            if {"player_id", "team_abbrev"}.issubset(rdf.columns):
+                for r in rdf.select(["player_id", "team_abbrev"]).unique().to_dicts():
+                    pid_to_team[int(r["player_id"])] = str(r["team_abbrev"])
+        except Exception:
+            pass
 
-    # No rosters → team signals contribute zero
+    # raw/roster_*.json — dashboard's canonical source
+    raw_dir = d / "raw"
+    if raw_dir.exists():
+        for f in sorted(raw_dir.glob("roster_*.json")):
+            try:
+                data = json.loads(f.read_text())
+                team_code = data.get("team_code", "")
+                for p in data.get("profiles", []):
+                    pid_raw = p.get("player_id")
+                    if not pid_raw or not team_code:
+                        continue
+                    pid_i = int(pid_raw)
+                    pid_to_team.setdefault(pid_i, team_code)
+            except Exception:
+                continue
+
+    # xg_finishing fallback (catches recently-traded / off-roster shooters)
+    xg_dir = d / "xg_finishing"
+    if xg_dir.exists():
+        xg_files = sorted(xg_dir.glob("xg_finishing_*.parquet"))
+        if xg_files:
+            try:
+                xg = pl.read_parquet(xg_files[-1])
+                if {"shooter_id", "team"}.issubset(xg.columns):
+                    for r in (
+                        xg.select(["shooter_id", "team"])
+                          .drop_nulls(subset=["shooter_id"])
+                          .unique(subset=["shooter_id"])
+                          .to_dicts()
+                    ):
+                        pid_to_team.setdefault(int(r["shooter_id"]), str(r.get("team") or ""))
+            except Exception:
+                pass
+
+    # goalie_stats fallback
+    goalie_dir = d / "goalie_stats"
+    if goalie_dir.exists():
+        g_files = sorted(goalie_dir.glob("goalie_stats_*.parquet"))
+        if g_files:
+            try:
+                gs = pl.read_parquet(g_files[-1])
+                if {"player_id", "team"}.issubset(gs.columns):
+                    for r in (
+                        gs.select(["player_id", "team"])
+                          .unique(subset=["player_id"])
+                          .to_dicts()
+                    ):
+                        pid_to_team.setdefault(int(r["player_id"]), str(r.get("team") or ""))
+            except Exception:
+                pass
+
+    if pid_to_team:
+        roster_df = pl.DataFrame(
+            [{"player_id": k, "team_abbrev": v} for k, v in pid_to_team.items() if v],
+            schema={"player_id": pl.Int64, "team_abbrev": pl.Utf8},
+        )
+        spine_with_team = player_spine.join(roster_df, on="player_id", how="left")
+        spine_with_team = spine_with_team.join(
+            team_summary.rename({"team": "team_abbrev"}),
+            on="team_abbrev", how="left",
+        )
+        for col in ["team_streak", "score_adj_corsi_trend", "special_teams_trend",
+                    "coach_challenge_rate", "comeback_quality", "goalie_confidence",
+                    "team_injury_context"]:
+            if col not in spine_with_team.columns:
+                spine_with_team = spine_with_team.with_columns(
+                    pl.lit(0.0).cast(pl.Float64).alias(col)
+                )
+            spine_with_team = spine_with_team.with_columns(pl.col(col).fill_null(0.0))
+        if "team_abbrev" in spine_with_team.columns:
+            spine_with_team = spine_with_team.drop("team_abbrev")
+        n_mapped = (
+            spine_with_team.filter(
+                (pl.col("team_streak").abs()
+                 + pl.col("goalie_confidence").abs()
+                 + pl.col("team_injury_context").abs()) > 1e-9
+            ).height
+        )
+        print(f"  Player→team mapping: {len(pid_to_team):,} ids; "
+              f"{n_mapped:,} players received non-zero team signal")
+        return spine_with_team
+
+    # No roster source at all — team signals contribute zero (true no-op)
+    print("  WARN: no roster source found; team_score will be 0.0 for every player")
     for col in ["team_streak", "score_adj_corsi_trend", "special_teams_trend",
                 "coach_challenge_rate", "comeback_quality", "goalie_confidence",
                 "team_injury_context"]:

@@ -719,7 +719,11 @@ def team_injury_context(roster_disruption_df: pl.DataFrame) -> pl.DataFrame:
         return _empty({"team": pl.Utf8, "game_id": pl.Int64,
                        "game_date": pl.Utf8, "team_injury_context": pl.Float64})
     cols = roster_disruption_df.columns
-    rdi_col = next((c for c in ("rdi", "roster_disruption_index", "disruption_score") if c in cols), None)
+    rdi_col = next(
+        (c for c in ("disruption_index", "rdi", "roster_disruption_index", "disruption_score")
+         if c in cols),
+        None,
+    )
     team_col = next((c for c in ("team", "team_abbrev") if c in cols), None)
     if rdi_col is None or team_col is None:
         return _empty({"team": pl.Utf8, "game_id": pl.Int64,
