@@ -85,6 +85,23 @@ def _module_dir(subdir: str) -> Path:
     return _GRETZKY_DATA_DIR / subdir
 
 
+def _context_parquets(subdir: str, prefix: str, context: str) -> list[Path]:
+    """Pick the right set of parquets for a season-or-playoff context.
+
+    context="playoffs" → files matching {prefix}*_playoffs.parquet
+    anything else      → files matching {prefix}*.parquet, EXCLUDING *_playoffs.parquet
+
+    Returns an empty list if the directory doesn't exist.
+    """
+    d = _GRETZKY_DATA_DIR / subdir
+    if not d.exists():
+        return []
+    all_files = sorted(d.glob(f"{prefix}*.parquet"))
+    if context == "playoffs":
+        return [p for p in all_files if p.stem.endswith("_playoffs")]
+    return [p for p in all_files if not p.stem.endswith("_playoffs")]
+
+
 _TEAM_KEYWORDS: dict[str, list[str]] = {
     "ANA": ["anaheim"], "ARI": ["arizona"], "BOS": ["boston"], "BUF": ["buffalo"],
     "CGY": ["calgary"], "CAR": ["carolina"], "CHI": ["chicago"], "COL": ["colorado"],
@@ -1791,8 +1808,15 @@ async def phase2_player(
     """
     import polars as pl
 
-    xg_dir = _GRETZKY_DATA_DIR / "xg_finishing"
-    parquets = sorted(xg_dir.glob("xg_finishing_*.parquet")) if xg_dir.exists() else []
+    # Context-aware xG finishing source: when ?context=playoffs is requested
+    # and a playoff parquet exists, use it directly. Otherwise fall back to
+    # the season-aggregate file.
+    parquets = _context_parquets("xg_finishing", "xg_finishing_", context)
+    xg_source = "playoffs" if context == "playoffs" and parquets else "season"
+    # When playoffs requested but no playoff parquet yet, fall back to season so
+    # the page still renders (cards will be season-aggregate and labelled).
+    if not parquets:
+        parquets = _context_parquets("xg_finishing", "xg_finishing_", "season")
 
     if not parquets:
         return {
@@ -2183,7 +2207,12 @@ async def phase2_player(
     # genuine playoff split. The remaining (RAPM, WAR, hot hand, ...)
     # stay season-aggregate — flagged via ``context_applied`` so the
     # dashboard knows what is or isn't context-aware.
-    context_applied = "season"
+    #
+    # NOTE: xG Finishing (shots / goals / xg_sum / finishing / finishing_per60)
+    # is already context-correct because we picked the right xg_finishing
+    # parquet above based on ``xg_source``. So we flag it via context_applied
+    # as soon as that was a playoffs read, even if playoff_delta itself fails.
+    context_applied = "playoffs" if xg_source == "playoffs" else "season"
     playoff_gp_val:       int   | None = None
     playoff_toi_ev_min:   float | None = None
     playoff_goals_total:  int   | None = None
@@ -2223,7 +2252,12 @@ async def phase2_player(
         "context":              context,
         "context_applied":      context_applied,
         "shots":                r.get("shots"),
-        "goals":                playoff_goals_total if context_applied == "playoffs" else r.get("goals"),
+        # If finishing data already came from the playoff parquet, r["goals"]
+        # is playoff goals directly. Only fall back to playoff_delta's derived
+        # estimate when finishing was season-aggregate but we still want to
+        # surface a playoff goal count.
+        "goals":                r.get("goals") if xg_source == "playoffs" else (playoff_goals_total if context_applied == "playoffs" else r.get("goals")),
+        "xg_source":            xg_source,
         "playoff_gp":           playoff_gp_val,
         "xg_sum":               round(r["xg_sum"], 3) if r.get("xg_sum") is not None else None,
         "finishing":            round(r["finishing"], 3) if r.get("finishing") is not None else None,

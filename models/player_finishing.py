@@ -46,8 +46,11 @@ FINISHING_SCHEMA: dict[str, pl.DataType] = {
     "model_version":    pl.Utf8,
 }
 
-# Minimum shots for a player to be included in the output
+# Minimum shots for a player to be included in the output.
+# Regular-season threshold filters tiny call-up samples; playoffs are
+# capped at ~28 GP per team so the threshold drops accordingly.
 MIN_SHOTS = 20
+MIN_SHOTS_PLAYOFFS = 5
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +76,7 @@ class PlayerFinishingAggregator:
         icetime_df: pl.DataFrame | None = None,
         season: int | None = None,
         model_version: str | None = None,
+        min_shots: int | None = None,
     ) -> pl.DataFrame:
         """Compute per-player Finishing for a single season's shot data.
 
@@ -104,6 +108,7 @@ class PlayerFinishingAggregator:
             season = int(df["season"].drop_nulls()[0]) if "season" in df.columns else 0
 
         mv = model_version or "xg_v1"
+        threshold = min_shots if min_shots is not None else MIN_SHOTS
 
         # Group by shooter
         agg = (
@@ -114,7 +119,7 @@ class PlayerFinishingAggregator:
                 pl.col("is_goal").cast(pl.Int64).sum().alias("goals"),
                 pl.col("xg_pred").sum().alias("xg_sum"),
             ])
-            .filter(pl.col("shots") >= MIN_SHOTS)
+            .filter(pl.col("shots") >= threshold)
             .with_columns([
                 (pl.col("goals") - pl.col("xg_sum")).alias("finishing"),
                 pl.lit(season).cast(pl.Int64).alias("season"),
@@ -172,11 +177,21 @@ class PlayerFinishingAggregator:
 # ---------------------------------------------------------------------------
 
 
-def write_finishing(df: pl.DataFrame, output_dir: Path, season: int) -> Path:
-    """Write finishing DataFrame to {output_dir}/xg_finishing_{season}.parquet."""
+def write_finishing(
+    df: pl.DataFrame,
+    output_dir: Path,
+    season: int,
+    season_type: str = "regular",
+) -> Path:
+    """Write finishing DataFrame.
+
+    season_type="regular"  → xg_finishing_{season}.parquet
+    season_type="playoffs" → xg_finishing_{season}_playoffs.parquet
+    """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / f"xg_finishing_{season}.parquet"
+    suffix = "_playoffs" if season_type == "playoffs" else ""
+    path = output_dir / f"xg_finishing_{season}{suffix}.parquet"
     df.write_parquet(path)
     return path
 

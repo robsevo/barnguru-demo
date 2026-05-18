@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import importlib
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
@@ -48,6 +48,9 @@ class Cmd:
     description: str
     module:      str   # e.g. "scripts.train_xg_model"
     fn:          str = "main"
+    # Fixed args prepended to sys.argv before user-supplied passthrough.
+    # Lets us register e.g. train-xg-playoffs as a preset of train-xg.
+    args:        list[str] = field(default_factory=list)
 
 
 COMMANDS: list[Cmd] = [
@@ -69,6 +72,9 @@ COMMANDS: list[Cmd] = [
     # ── Phase 2 — Player Rating Models ───────────────────────────────────
     Cmd("train-xg",   "phase2", "Train xG Finishing model (MoneyPuck shots)",
         "scripts.train_xg_model"),
+    Cmd("train-xg-playoffs", "phase2",
+        "Train xG Finishing — playoffs variant (writes xg_finishing_{year}_playoffs.parquet)",
+        "scripts.train_xg_model", args=["--season-type", "playoffs"]),
     Cmd("train-rapm",    "phase2", "Train RAPM model with daisy-chain priors",
         "scripts.train_rapm_model"),
     Cmd("train-matchup", "phase2", "Train Matchup Efficiency Matrix — QoT, QoC, pair xGF% (Feature 2.3)",
@@ -275,9 +281,10 @@ def _run_cmd(cmd: Cmd, passthrough: list[str]) -> int:
     mod = importlib.import_module(cmd.module)
     fn  = getattr(mod, cmd.fn)
 
-    # Patch sys.argv so argparse inside the script sees the right args
+    # Patch sys.argv so argparse inside the script sees the right args.
+    # cmd.args (registry preset) come first, then user-supplied passthrough.
     old_argv = sys.argv[:]
-    sys.argv = [cmd.module] + passthrough
+    sys.argv = [cmd.module] + list(cmd.args) + passthrough
     try:
         fn()
         return 0

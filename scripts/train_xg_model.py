@@ -37,7 +37,12 @@ import polars as pl
 from data.moneypuck_client import MoneyPuckClient
 from data.moneypuck_sync import MoneyPuckSync
 from models.xg_model import XGModel
-from models.player_finishing import PlayerFinishingAggregator, write_finishing
+from models.player_finishing import (
+    PlayerFinishingAggregator,
+    write_finishing,
+    MIN_SHOTS,
+    MIN_SHOTS_PLAYOFFS,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -133,8 +138,17 @@ def _game_based_split(
     return train, eval_
 
 
-def _load_shots(data_dir: Path, seasons: list[int]) -> pl.DataFrame:
-    """Load shot parquets for given seasons, concatenating into one DataFrame."""
+def _load_shots(
+    data_dir: Path,
+    seasons: list[int],
+    season_type: str = "regular",
+) -> pl.DataFrame:
+    """Load shot parquets for given seasons, concatenating into one DataFrame.
+
+    season_type="regular"  → exclude is_playoff=True shots (default)
+    season_type="playoffs" → keep only is_playoff=True shots
+    season_type="all"      → no filter (used for model training on combined corpus)
+    """
     shots_dir = data_dir / "shots"
     dfs = []
     for season in seasons:
@@ -149,9 +163,12 @@ def _load_shots(data_dir: Path, seasons: list[int]) -> pl.DataFrame:
             if _col in df.columns:
                 df = df.with_columns(pl.col(_col).cast(pl.Int64, strict=False))
         if not df.is_empty():
-            # Regular season only — filter out playoff shots
             if "is_playoff" in df.columns:
-                df = df.filter(pl.col("is_playoff") == False)  # noqa: E712
+                if season_type == "playoffs":
+                    df = df.filter(pl.col("is_playoff") == True)  # noqa: E712
+                elif season_type == "regular":
+                    df = df.filter(pl.col("is_playoff") == False)  # noqa: E712
+                # season_type == "all" → no filter
             dfs.append(df)
     if not dfs:
         raise RuntimeError("No shot data found. Run without --force or check download errors.")
@@ -214,9 +231,19 @@ def main() -> None:
         action="store_true",
         help="Re-download shots and overwrite cached parquets",
     )
+    parser.add_argument(
+        "--season-type",
+        choices=["regular", "playoffs"],
+        default="regular",
+        help="Which shots feed the per-player aggregation. "
+             "'regular' writes xg_finishing_{season}.parquet (default). "
+             "'playoffs' writes xg_finishing_{season}_playoffs.parquet. "
+             "The xG model itself always trains on regular-season for stability.",
+    )
     args = parser.parse_args()
 
     target_season = args.target_season or max(args.seasons)
+    season_type = args.season_type
 
     data_dir   = _data_dir()
     models_dir = _models_dir()
@@ -229,6 +256,7 @@ def main() -> None:
     print("=" * 60)
     print(f"  Seasons          : {args.seasons}")
     print(f"  Target season    : {target_season}")
+    print(f"  Season type      : {season_type}")
     print(f"  Data dir         : {data_dir}")
     print(f"  Models dir       : {models_dir}")
     print()
@@ -239,8 +267,10 @@ def main() -> None:
     print()
 
     # ── 2. Load all shots and split ───────────────────────────────────────────
+    # Model training always uses regular-season shots (larger corpus, more stable
+    # calibration). The season_type filter only governs the per-player aggregation.
     print(f"[ 2/5 ] Loading shots (seasons {args.seasons}) + splitting…")
-    all_df = _load_shots(data_dir, args.seasons)
+    all_df = _load_shots(data_dir, args.seasons, season_type="regular")
     train_seasons = [s for s in args.seasons if s != target_season]
     if train_seasons and "season" in all_df.columns:
         # Season-based split: train on all seasons except target, eval on target
@@ -289,12 +319,13 @@ def main() -> None:
     print()
 
     # ── 4. Compute player finishing ───────────────────────────────────────────
-    print(f"[ 4/5 ] Computing player Finishing for season {target_season}…")
-    # Reuse already-loaded data if target season is in the training set
-    if target_season in args.seasons:
+    print(f"[ 4/5 ] Computing player Finishing for season {target_season} ({season_type})…")
+    # For the per-player aggregation, honour --season-type. When playoffs are
+    # requested we must reload (the cached all_df above is regular-season-only).
+    if season_type == "regular" and target_season in args.seasons:
         target_df = all_df.filter(pl.col("season") == target_season) if "season" in all_df.columns else all_df
     else:
-        target_df = _load_shots(data_dir, [target_season])
+        target_df = _load_shots(data_dir, [target_season], season_type=season_type)
     icetime_df = _load_icetime(data_dir, target_season)
     if icetime_df is not None:
         print(f"  EDGE icetime loaded ({len(icetime_df)} players)")
@@ -308,9 +339,12 @@ def main() -> None:
         icetime_df=icetime_df,
         season=target_season,
         model_version=f"xg_v1_{today}",
+        min_shots=MIN_SHOTS_PLAYOFFS if season_type == "playoffs" else MIN_SHOTS,
     )
 
-    out_path = write_finishing(finishing_df, data_dir / "xg_finishing", target_season)
+    out_path = write_finishing(
+        finishing_df, data_dir / "xg_finishing", target_season, season_type=season_type
+    )
 
     n_players = len(finishing_df)
     top5 = finishing_df.sort("finishing", descending=True).head(5)
