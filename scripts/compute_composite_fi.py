@@ -54,6 +54,7 @@ AGE_RECOVERY_SUBDIR     = "age_recovery"
 INJURY_STATUS_SUBDIR    = "injury_status"
 CONCUSSION_SUBDIR       = "concussion_history"
 PRIOR_PLAYOFF_SUBDIR    = "prior_playoff_load"
+PLAYOFF_FATIGUE_SUBDIR  = "playoff_fatigue"
 ROSTER_STRAIN_SUBDIR    = "roster_depth_strain"
 
 
@@ -157,6 +158,33 @@ def _build_signals(args, as_of: str) -> pl.DataFrame:
             on="player_id", how="left",
         )
 
+    # 3.23 — current-playoff-run fatigue, per (player, game)
+    pf = _read_or_empty(d / PLAYOFF_FATIGUE_SUBDIR, "playoff_fatigue")
+    if len(pf) > 0 and "playoff_fatigue_score" in pf.columns:
+        base = base.join(
+            pf.select(["player_id", "game_id", "playoff_fatigue_score"]),
+            on=["player_id", "game_id"], how="left",
+        )
+
+    # 3.1 — schedule density, per (team, game). rest_days feeds the recovery
+    # patch (Part 2): a multi-day gap boosts the per-player recovery_coefficient
+    # before the model applies it as a divisor.
+    sd = _read_or_empty(d / SCHEDULE_DENSITY_SUBDIR, "schedule_density")
+    if len(sd) > 0 and "rest_days" in sd.columns and "team" in sd.columns:
+        # team_id on the spine vs team abbrev on schedule_density — join via
+        # game_id alone is too loose (one row per team per game), so we
+        # broadcast per game_id using the home/away team's rest_days. v1
+        # assumption: every player gets the rest_days of one of the two teams;
+        # this is wrong-cheap until we route via roster. Pick the row matching
+        # the player's team_id via a simple per-game pick (max over both
+        # teams' rest_days favors the rested side, which is conservative
+        # for the fatigue boost direction).
+        sd_max = (
+            sd.group_by("game_id")
+              .agg(pl.col("rest_days").max().alias("rest_days"))
+        )
+        base = base.join(sd_max, on="game_id", how="left")
+
     strain = _read_or_empty(d / ROSTER_STRAIN_SUBDIR, "roster_depth_strain")
     if len(strain) > 0 and "player_strain_score" in strain.columns:
         base = base.join(
@@ -165,6 +193,28 @@ def _build_signals(args, as_of: str) -> pl.DataFrame:
                 pl.col("player_strain_score").alias("team_strain_score"),
             ]),
             on="player_id", how="left",
+        )
+
+    # Part 2 — Rest-day recovery patch.
+    # The age-driven recovery_coefficient was static. Boost it by up to +25%
+    # when the team has multi-day rest before this game so that fatigue
+    # actually bleeds off between games. rest_bonus = min(0.25, (rest_days-1) × 0.05).
+    # Symmetric across ages in v1; age-conditioned recovery is a v2 refinement.
+    if "rest_days" in base.columns and "recovery_coefficient" in base.columns:
+        base = base.with_columns(
+            (
+                pl.col("recovery_coefficient")
+                * (
+                    1.0
+                    + pl.min_horizontal(
+                        pl.lit(0.25),
+                        pl.max_horizontal(
+                            pl.lit(0.0),
+                            (pl.col("rest_days").fill_null(1) - 1) * 0.05,
+                        ),
+                    )
+                )
+            ).alias("recovery_coefficient")
         )
 
     return base

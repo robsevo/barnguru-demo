@@ -1838,6 +1838,23 @@ export default function PlayerProfilePage() {
     edge_distance:   number | null;
     edge_carry:      number | null;
     edge_burst:      number | null;
+    // Goalie fatigue (3.24) — populated for goalies only
+    goalie_fi:           number | null;
+    goalie_fi_date:      string | null;
+    goalie_sv_delta:     number | null;
+    goalie_is_b2b:       number | null;
+    goalie_rest_days:    number | null;
+    goalie_gp_last_7:    number | null;
+    goalie_shots_last_7: number | null;
+    // Confidence (Phase 17.24)
+    confidence_index:     number | null;
+    confidence_date:      string | null;
+    confidence_player:    number | null;
+    confidence_team:      number | null;
+    confidence_components: Record<string, number> | null;
+    conf_shoot_bias:      number | null;
+    conf_risk_bias:       number | null;
+    conf_turnover_bias:   number | null;
   }
   const [phase3, setPhase3] = useState<Phase3Card | null>(null);
 
@@ -1896,6 +1913,21 @@ export default function PlayerProfilePage() {
           edge_distance:   p?.edge_degradation?.distance_vs_baseline ?? null,
           edge_carry:      p?.edge_degradation?.carry_vs_baseline ?? null,
           edge_burst:      p?.edge_degradation?.burst_vs_baseline ?? null,
+          goalie_fi:           p?.goalie_fatigue?.goalie_fi ?? null,
+          goalie_fi_date:      p?.goalie_fatigue?.game_date ?? null,
+          goalie_sv_delta:     p?.goalie_fatigue?.fatigue_sv_delta ?? null,
+          goalie_is_b2b:       p?.goalie_fatigue?.is_b2b ?? null,
+          goalie_rest_days:    p?.goalie_fatigue?.rest_days ?? null,
+          goalie_gp_last_7:    p?.goalie_fatigue?.gp_last_7 ?? null,
+          goalie_shots_last_7: p?.goalie_fatigue?.shots_faced_last_7 ?? null,
+          confidence_index:     p?.confidence?.confidence_index ?? null,
+          confidence_date:      p?.confidence?.game_date ?? null,
+          confidence_player:    p?.confidence?.player_score ?? null,
+          confidence_team:      p?.confidence?.team_score ?? null,
+          confidence_components: p?.confidence?.component_breakdown ?? null,
+          conf_shoot_bias:      p?.confidence_multiplier?.shoot_bias ?? null,
+          conf_risk_bias:       p?.confidence_multiplier?.risk_bias ?? null,
+          conf_turnover_bias:   p?.confidence_multiplier?.turnover_bias ?? null,
         });
       })
       .catch(() => {});
@@ -2996,6 +3028,173 @@ export default function PlayerProfilePage() {
                   </div>
                 </div>
               )}
+            </Card>
+          );
+        })()}
+
+        {/* Confidence (Phase 17) — all players */}
+        {phase3?.confidence_index != null && (() => {
+          const ci = phase3.confidence_index;
+          const tier = ci >= 0.30 ? "Above Average"
+                     : ci >= 0.10 ? "Average"
+                     : ci >= -0.10 ? "Average"
+                     : ci >= -0.30 ? "Below Average"
+                     : "Below Average";
+          const sortedComps = phase3.confidence_components
+            ? Object.entries(phase3.confidence_components)
+                .sort(([,a],[,b]) => Math.abs(b) - Math.abs(a))
+                .filter(([,v]) => Math.abs(v) > 0.001)
+                .slice(0, 12)
+            : [];
+          return (
+            <Card title="Confidence (Phase 17." icon="📈" style={cardStyle}>
+              <div className="space-y-0">
+                <StatRow
+                  label="Confidence Index"
+                  value={`${ci >= 0 ? "+" : ""}${ci.toFixed(3)}`}
+                  tier={tier as Tier}
+                  sub={phase3.confidence_date
+                    ? `Latest: ${phase3.confidence_date} · −1 = cold/passive, +1 = hot/aggressive`
+                    : "−1 = cold/passive, +1 = hot/aggressive"}
+                  tip="Composite Confidence Index (Phase 17.24): signed [-1, +1] weighted sum of hot-hand, EWMA form, TOI trust, role usage, injury drag, targeting, media, home/away, contract pressure, ref bias, and team-side streak/Corsi/special teams/goalie/injury context. The Rust engine will use this to bias decision-making (shoot-vs-pass, pinch-vs-retreat)."
+                />
+                {phase3.confidence_player != null && (
+                  <StatRow
+                    label="Player Component"
+                    value={`${phase3.confidence_player >= 0 ? "+" : ""}${phase3.confidence_player.toFixed(3)}`}
+                    sub="Pre-blend sum of player-side signals (4.1–4.15)"
+                    tip="The player's individual signals before the 30% team-context blend."
+                  />
+                )}
+                {phase3.confidence_team != null && (
+                  <StatRow
+                    label="Team Component"
+                    value={`${phase3.confidence_team >= 0 ? "+" : ""}${phase3.confidence_team.toFixed(3)}`}
+                    sub="Pre-blend sum of team-side signals (4.16–4.22)"
+                    tip="Team confidence context: streak, score-adjusted Corsi trend, special teams, goalie confidence, injury context, comeback quality."
+                  />
+                )}
+                {phase3.conf_shoot_bias != null && (
+                  <StatRow
+                    label="Shoot Bias"
+                    value={phase3.conf_shoot_bias.toFixed(3)}
+                    sub="Multiplier on shoot-vs-pass probability"
+                    tip="Phase 17.25 — confidence rating multiplier on shooting decisions. ≈1.0 = no effect. >1.0 = more likely to shoot in a contested moment."
+                  />
+                )}
+                {phase3.conf_risk_bias != null && (
+                  <StatRow
+                    label="Risk Bias"
+                    value={phase3.conf_risk_bias.toFixed(3)}
+                    sub="Multiplier on aggressive plays (pinch, forecheck)"
+                    tip="Phase 17.25 — risk-taking knob. >1.0 = D-men more likely to pinch, forwards more aggressive on the forecheck."
+                  />
+                )}
+                {phase3.conf_turnover_bias != null && (
+                  <StatRow
+                    label="Turnover Bias"
+                    value={phase3.conf_turnover_bias.toFixed(3)}
+                    sub="Multiplier on turnover probability"
+                    tip="Phase 17.25 — when confidence is low, turnover probability rises. >1.0 = more giveaways expected."
+                  />
+                )}
+              </div>
+
+              {sortedComps.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-white/[0.05] space-y-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/40">
+                    Top Contributors
+                  </p>
+                  {sortedComps.map(([k, v]) => {
+                    const isTeam = k.startsWith("team:");
+                    const label = k.replace(/^team:/, "").replace(/_/g, " ");
+                    const color = v >= 0 ? "#4ade80" : "#f87171";
+                    return (
+                      <div key={k} className="flex items-center gap-2">
+                        <span className={`text-[10px] w-32 shrink-0 truncate ${isTeam ? "text-white/40" : "text-white/55"}`}>
+                          {isTeam ? `(team) ${label}` : label}
+                        </span>
+                        <div className="flex-1 h-1.5 rounded-full bg-white/[0.04] overflow-hidden">
+                          <div
+                            className="h-full"
+                            style={{
+                              width: `${Math.min(100, (Math.abs(v) / 0.15) * 100)}%`,
+                              backgroundColor: color,
+                              opacity: 0.85,
+                            }}
+                          />
+                        </div>
+                        <span className="text-[10px] font-mono text-white/65 w-14 text-right shrink-0">
+                          {v >= 0 ? "+" : ""}{v.toFixed(3)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </Card>
+          );
+        })()}
+
+        {/* Goalie Fatigue (3.24) — goalies only */}
+        {isGoalie && phase3?.goalie_fi != null && (() => {
+          const gfi  = phase3.goalie_fi ?? 0;
+          const tier = gfi >= 0.70 ? "Above Average" : gfi >= 0.45 ? "Above Average"
+                     : gfi >= 0.25 ? "Average"       : "Below Average";
+          const svDelta = phase3.goalie_sv_delta ?? 0;
+          const svPct   = (svDelta * 100).toFixed(2);
+          return (
+            <Card title="Fatigue & Schedule" icon="🥅" style={cardStyle}>
+              <div className="space-y-0">
+                <StatRow
+                  label="Goalie Fatigue Index"
+                  value={gfi.toFixed(3)}
+                  tier={tier as Tier}
+                  sub={phase3.goalie_fi_date
+                    ? `Latest start: ${phase3.goalie_fi_date} · 0 = rested, 1 = saturated`
+                    : "0 = rested, 1 = saturated"}
+                  tip="Feature 3.24 — daily goalie FI snapshot. Built from B2B starts, rest days, games in last 7 days, shots faced. Negative save% delta is rescaled into the same [0, 1] frame as skater FI."
+                />
+                <StatRow
+                  label="Expected Save% Δ"
+                  value={`${svDelta >= 0 ? "+" : ""}${svPct}%`}
+                  sub="Predicted save% drift from fatigue (negative = degraded)"
+                  tip="GoalieFatigueModel (2.6) coefficient sum on the goalie's current workload window. Negative = expected save% drop tonight."
+                />
+                {phase3.goalie_is_b2b === 1 && (
+                  <StatRow
+                    label="Back-to-Back"
+                    value="Yes"
+                    tier="Below Average"
+                    sub="Starting on 0-1 days rest"
+                    tip="B2B starts carry the largest single fatigue penalty in the goalie model."
+                  />
+                )}
+                {phase3.goalie_rest_days != null && (
+                  <StatRow
+                    label="Rest Days"
+                    value={`${phase3.goalie_rest_days.toFixed(0)}`}
+                    sub="Calendar days since last start"
+                    tip="Each rest day adds back ≈ +0.12% save% in the default model."
+                  />
+                )}
+                {phase3.goalie_gp_last_7 != null && (
+                  <StatRow
+                    label="Starts (last 7d)"
+                    value={`${phase3.goalie_gp_last_7}`}
+                    sub="Rolling workload count"
+                    tip="Each extra start in the prior 7 days subtracts ≈ −0.35% save%."
+                  />
+                )}
+                {phase3.goalie_shots_last_7 != null && (
+                  <StatRow
+                    label="Shots Faced (last 7d)"
+                    value={`${phase3.goalie_shots_last_7}`}
+                    sub="Volume toll on the body"
+                    tip="High shot volume in the last week proxies for cumulative physical load on the goalie."
+                  />
+                )}
+              </div>
             </Card>
           );
         })()}

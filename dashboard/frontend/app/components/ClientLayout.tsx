@@ -79,7 +79,7 @@ type PhaseStatus = "complete" | "in_progress" | "not_started";
 const PHASES: { num: number; name: string; status: PhaseStatus }[] = [
   { num: 1,  name: "Data Pipeline",             status: "complete"    },
   { num: 2,  name: "Player Rating Models",       status: "complete"    },
-  { num: 3,  name: "Fatigue Engine",             status: "not_started" },
+  { num: 3,  name: "Fatigue Engine",             status: "complete"    },
   { num: 4,  name: "Coaching Tendency Models",   status: "not_started" },
   { num: 5,  name: "Rust Simulation Engine",     status: "not_started" },
   { num: 6,  name: "Lineup / Roster Forecaster", status: "not_started" },
@@ -93,6 +93,7 @@ const PHASES: { num: number; name: string; status: PhaseStatus }[] = [
   { num: 14, name: "Reinforcement Learning",     status: "not_started" },
   { num: 15, name: "Living Model",               status: "not_started" },
   { num: 16, name: "CV Tracking Engine",         status: "in_progress" },
+  { num: 17, name: "Confidence Layer",           status: "complete"    },
 ];
 
 const DOT_CLASS: Record<PhaseStatus, string> = {

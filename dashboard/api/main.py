@@ -3572,6 +3572,270 @@ async def phase3_fatigue_top(limit: int = 25) -> dict:
     }
 
 
+@app.get("/phase17/confidence/top")
+async def phase17_confidence_top(limit: int = 25) -> dict:
+    """Top-N most-confident players from the latest 4.24 parquet."""
+    import polars as pl
+
+    path, mtime = _phase3_latest("composite_confidence", "composite_confidence_*.parquet")
+    if path is None:
+        return {"status": "not_run", "rows": [], "as_of": None}
+
+    df = pl.read_parquet(path)
+    if len(df) == 0:
+        return {"status": "empty", "rows": [], "as_of": mtime.date().isoformat() if mtime else None}
+
+    names = _build_name_lookup()
+    meta  = _build_player_meta()
+    top = df.sort("confidence_index", descending=True).head(int(max(1, limit)))
+    rows: list[dict] = []
+    for r in top.to_dicts():
+        pid = int(r.get("player_id") or 0)
+        m   = meta.get(pid, {})
+        rows.append({
+            "player_id":           pid,
+            "player_name":         names.get(pid, m.get("name") or f"player_{pid}"),
+            "team":                m.get("team") or "",
+            "position":            m.get("position") or "",
+            "game_id":             int(r.get("game_id") or 0),
+            "game_date":           r.get("game_date"),
+            "confidence_index":    r.get("confidence_index"),
+            "player_score":        r.get("player_score"),
+            "team_score":          r.get("team_score"),
+            "component_breakdown": r.get("component_breakdown"),
+        })
+    return {
+        "status": "ok",
+        "rows":   rows,
+        "as_of":  mtime.date().isoformat() if mtime else None,
+        "parquet": path.name,
+    }
+
+
+@app.get("/phase17/confidence/bottom")
+async def phase17_confidence_bottom(limit: int = 25) -> dict:
+    """Bottom-N (least-confident) players from the latest 4.24 parquet."""
+    import polars as pl
+
+    path, mtime = _phase3_latest("composite_confidence", "composite_confidence_*.parquet")
+    if path is None:
+        return {"status": "not_run", "rows": [], "as_of": None}
+
+    df = pl.read_parquet(path)
+    if len(df) == 0:
+        return {"status": "empty", "rows": [], "as_of": mtime.date().isoformat() if mtime else None}
+
+    names = _build_name_lookup()
+    meta  = _build_player_meta()
+    bot = df.sort("confidence_index", descending=False).head(int(max(1, limit)))
+    rows: list[dict] = []
+    for r in bot.to_dicts():
+        pid = int(r.get("player_id") or 0)
+        m   = meta.get(pid, {})
+        rows.append({
+            "player_id":           pid,
+            "player_name":         names.get(pid, m.get("name") or f"player_{pid}"),
+            "team":                m.get("team") or "",
+            "position":            m.get("position") or "",
+            "game_id":             int(r.get("game_id") or 0),
+            "game_date":           r.get("game_date"),
+            "confidence_index":    r.get("confidence_index"),
+            "player_score":        r.get("player_score"),
+            "team_score":          r.get("team_score"),
+            "component_breakdown": r.get("component_breakdown"),
+        })
+    return {
+        "status": "ok",
+        "rows":   rows,
+        "as_of":  mtime.date().isoformat() if mtime else None,
+        "parquet": path.name,
+    }
+
+
+@app.get("/phase17/confidence/player/{player_id}")
+async def phase17_confidence_player(player_id: int) -> dict:
+    """Single-player confidence detail."""
+    import polars as pl
+
+    path, mtime = _phase3_latest("composite_confidence", "composite_confidence_*.parquet")
+    if path is None:
+        return {"status": "not_run", "row": None, "as_of": None}
+
+    df = pl.read_parquet(path)
+    sub = df.filter(pl.col("player_id") == int(player_id))
+    if len(sub) == 0:
+        return {"status": "no_data", "row": None,
+                "as_of": mtime.date().isoformat() if mtime else None}
+    latest = sub.sort("game_date", descending=True).head(1).to_dicts()[0]
+    names = _build_name_lookup()
+    meta  = _build_player_meta().get(int(player_id), {})
+    return {
+        "status": "ok",
+        "row": {
+            "player_id":           int(player_id),
+            "player_name":         names.get(int(player_id), meta.get("name") or f"player_{player_id}"),
+            "team":                meta.get("team") or "",
+            "position":            meta.get("position") or "",
+            "game_id":             int(latest.get("game_id") or 0),
+            "game_date":           latest.get("game_date"),
+            "confidence_index":    latest.get("confidence_index"),
+            "player_score":        latest.get("player_score"),
+            "team_score":          latest.get("team_score"),
+            "component_breakdown": latest.get("component_breakdown"),
+        },
+        "as_of":  mtime.date().isoformat() if mtime else None,
+        "parquet": path.name,
+    }
+
+
+@app.get("/phase17/confidence/team/{team_abbrev}")
+async def phase17_confidence_team(team_abbrev: str) -> dict:
+    """Team-confidence rollup: per-player rows for the team's roster."""
+    import polars as pl
+
+    path, mtime = _phase3_latest("composite_confidence", "composite_confidence_*.parquet")
+    if path is None:
+        return {"status": "not_run", "rows": [], "as_of": None}
+
+    df = pl.read_parquet(path)
+    if len(df) == 0:
+        return {"status": "empty", "rows": [],
+                "as_of": mtime.date().isoformat() if mtime else None}
+
+    names = _build_name_lookup()
+    meta  = _build_player_meta()
+    abbrev = str(team_abbrev).upper()
+    pids = [pid for pid, m in meta.items() if str(m.get("team", "")).upper() == abbrev]
+    if not pids:
+        return {"status": "no_roster", "rows": [],
+                "as_of": mtime.date().isoformat() if mtime else None}
+
+    sub = df.filter(pl.col("player_id").is_in([int(p) for p in pids]))
+    if len(sub) == 0:
+        return {"status": "no_data", "rows": [],
+                "as_of": mtime.date().isoformat() if mtime else None}
+
+    latest_per_player = (
+        sub.sort("game_date", descending=True)
+           .group_by("player_id").head(1)
+    )
+    rows: list[dict] = []
+    team_scores: list[float] = []
+    for r in latest_per_player.to_dicts():
+        pid = int(r.get("player_id") or 0)
+        m = meta.get(pid, {})
+        ci = r.get("confidence_index")
+        if ci is not None:
+            team_scores.append(float(ci))
+        rows.append({
+            "player_id":        pid,
+            "player_name":      names.get(pid, m.get("name") or f"player_{pid}"),
+            "position":         m.get("position") or "",
+            "confidence_index": ci,
+            "player_score":     r.get("player_score"),
+            "team_score":       r.get("team_score"),
+            "game_date":        r.get("game_date"),
+        })
+    rows.sort(key=lambda x: (x["confidence_index"] or 0.0), reverse=True)
+    return {
+        "status": "ok",
+        "team":   abbrev,
+        "team_avg_confidence": (sum(team_scores) / len(team_scores)) if team_scores else 0.0,
+        "rows":   rows,
+        "as_of":  mtime.date().isoformat() if mtime else None,
+        "parquet": path.name,
+    }
+
+
+@app.get("/phase3/goalie-fatigue/top")
+async def phase3_goalie_fatigue_top(limit: int = 25) -> dict:
+    """Top-N goalies by goalie_fi (3.24) from the latest snapshot parquet."""
+    import polars as pl
+
+    path, mtime = _phase3_latest("goalie_fatigue", "goalie_fi_*.parquet")
+    if path is None:
+        return {"status": "not_run", "rows": [], "as_of": None}
+
+    df = pl.read_parquet(path)
+    if len(df) == 0:
+        return {"status": "empty", "rows": [], "as_of": mtime.date().isoformat() if mtime else None}
+
+    names = _build_name_lookup()
+    meta  = _build_player_meta()
+    top = df.sort("goalie_fi", descending=True).head(int(max(1, limit)))
+    rows: list[dict] = []
+    for r in top.to_dicts():
+        gid = int(r.get("goalie_id") or 0)
+        m   = meta.get(gid, {})
+        rows.append({
+            "player_id":           gid,
+            "player_name":         names.get(gid, m.get("name") or f"goalie_{gid}"),
+            "team":                m.get("team") or "",
+            "position":            m.get("position") or "G",
+            "game_id":             int(r.get("game_id") or 0),
+            "game_date":           r.get("game_date"),
+            "goalie_fi":           r.get("goalie_fi"),
+            "fatigue_sv_delta":    r.get("fatigue_sv_delta"),
+            "is_b2b":              r.get("is_b2b"),
+            "rest_days":           r.get("rest_days"),
+            "gp_last_7":           r.get("gp_last_7"),
+            "shots_faced_last_7":  r.get("shots_faced_last_7"),
+            "component_breakdown": r.get("component_breakdown"),
+        })
+    return {
+        "status": "ok",
+        "rows":   rows,
+        "as_of":  mtime.date().isoformat() if mtime else None,
+        "parquet": path.name,
+    }
+
+
+@app.get("/goalies/{goalie_id}/fatigue")
+async def goalie_fatigue_detail(goalie_id: int) -> dict:
+    """Single-goalie fatigue snapshot from the latest 3.24 parquet."""
+    import polars as pl
+
+    path, mtime = _phase3_latest("goalie_fatigue", "goalie_fi_*.parquet")
+    if path is None:
+        return {"status": "not_run", "row": None, "as_of": None}
+
+    df = pl.read_parquet(path)
+    if len(df) == 0:
+        return {"status": "empty", "row": None,
+                "as_of": mtime.date().isoformat() if mtime else None}
+
+    # Most recent row for this goalie (highest game_date)
+    sub = df.filter(pl.col("goalie_id") == int(goalie_id))
+    if len(sub) == 0:
+        return {"status": "no_data", "row": None,
+                "as_of": mtime.date().isoformat() if mtime else None}
+    latest = sub.sort("game_date", descending=True).head(1).to_dicts()[0]
+
+    names = _build_name_lookup()
+    meta  = _build_player_meta().get(int(goalie_id), {})
+    return {
+        "status": "ok",
+        "row": {
+            "player_id":           int(goalie_id),
+            "player_name":         names.get(int(goalie_id), meta.get("name") or f"goalie_{goalie_id}"),
+            "team":                meta.get("team") or "",
+            "position":            meta.get("position") or "G",
+            "game_id":             int(latest.get("game_id") or 0),
+            "game_date":           latest.get("game_date"),
+            "goalie_fi":           latest.get("goalie_fi"),
+            "fatigue_sv_delta":    latest.get("fatigue_sv_delta"),
+            "is_b2b":              latest.get("is_b2b"),
+            "rest_days":           latest.get("rest_days"),
+            "gp_last_7":           latest.get("gp_last_7"),
+            "shots_faced_last_7":  latest.get("shots_faced_last_7"),
+            "road_game_num":       latest.get("road_game_num"),
+            "component_breakdown": latest.get("component_breakdown"),
+        },
+        "as_of":  mtime.date().isoformat() if mtime else None,
+        "parquet": path.name,
+    }
+
+
 @app.get("/phase3/anomalies")
 async def phase3_anomalies(limit: int = 25) -> dict:
     """Active performance anomalies from the latest 3.19 parquet."""
@@ -3911,6 +4175,83 @@ async def phase3_player(name: str = Query(..., description="Player name")) -> di
         "seasonal_motivation_factor":  (sp_row or {}).get("seasonal_motivation_factor"),
         "month_of_season":             (sp_row or {}).get("month_of_season"),
         "base_month_effect":           (sp_row or {}).get("base_month_effect"),
+    }
+
+    # Confidence (Phase 17.24) — most-recent confidence_index row
+    cf_path, cf_mtime = _phase3_latest("composite_confidence", "composite_confidence_*.parquet")
+    cf_row: dict | None = None
+    if cf_path is not None:
+        try:
+            cfdf = pl.read_parquet(cf_path).filter(pl.col("player_id") == pid)
+            if not cfdf.is_empty():
+                cf_row = cfdf.sort("game_date", descending=True).head(1).to_dicts()[0]
+        except Exception:
+            pass
+    cf_comps_raw = (cf_row or {}).get("component_breakdown")
+    cf_comps: dict | None = None
+    if cf_comps_raw:
+        try:
+            cf_comps = _json.loads(cf_comps_raw) if isinstance(cf_comps_raw, str) else dict(cf_comps_raw)
+        except Exception:
+            cf_comps = None
+    out["confidence"] = {
+        "status":              "ok" if cf_row else ("empty" if cf_path else "not_run"),
+        "as_of":               cf_mtime.date().isoformat() if cf_mtime else None,
+        "confidence_index":    (cf_row or {}).get("confidence_index"),
+        "player_score":        (cf_row or {}).get("player_score"),
+        "team_score":          (cf_row or {}).get("team_score"),
+        "game_date":           (cf_row or {}).get("game_date"),
+        "component_breakdown": cf_comps,
+    }
+
+    # Confidence rating multiplier (Phase 17.25)
+    cm_path, cm_mtime = _phase3_latest("confidence_multiplier", "confidence_multiplier_*.parquet")
+    cm_row: dict | None = None
+    if cm_path is not None:
+        try:
+            cmdf = pl.read_parquet(cm_path).filter(pl.col("player_id") == pid)
+            if not cmdf.is_empty():
+                cm_row = cmdf.sort("game_date", descending=True).head(1).to_dicts()[0]
+        except Exception:
+            pass
+    out["confidence_multiplier"] = {
+        "status":          "ok" if cm_row else ("empty" if cm_path else "not_run"),
+        "as_of":           cm_mtime.date().isoformat() if cm_mtime else None,
+        "shoot_bias":      (cm_row or {}).get("shoot_bias"),
+        "risk_bias":       (cm_row or {}).get("risk_bias"),
+        "turnover_bias":   (cm_row or {}).get("turnover_bias"),
+        "game_date":       (cm_row or {}).get("game_date"),
+    }
+
+    # Goalie fatigue (3.24) — goalies only; empty for skaters
+    gf_path, gf_mtime = _phase3_latest("goalie_fatigue", "goalie_fi_*.parquet")
+    gf_row: dict | None = None
+    if gf_path is not None:
+        try:
+            gfdf = pl.read_parquet(gf_path).filter(pl.col("goalie_id") == pid)
+            if not gfdf.is_empty():
+                gf_row = gfdf.sort("game_date", descending=True).head(1).to_dicts()[0]
+        except Exception:
+            pass
+    gf_comps_raw = (gf_row or {}).get("component_breakdown")
+    gf_comps: dict | None = None
+    if gf_comps_raw:
+        try:
+            gf_comps = _json.loads(gf_comps_raw) if isinstance(gf_comps_raw, str) else dict(gf_comps_raw)
+        except Exception:
+            gf_comps = None
+    out["goalie_fatigue"] = {
+        "status":              "ok" if gf_row else ("empty" if gf_path else "not_run"),
+        "as_of":               gf_mtime.date().isoformat() if gf_mtime else None,
+        "goalie_fi":           (gf_row or {}).get("goalie_fi"),
+        "fatigue_sv_delta":    (gf_row or {}).get("fatigue_sv_delta"),
+        "is_b2b":              (gf_row or {}).get("is_b2b"),
+        "rest_days":           (gf_row or {}).get("rest_days"),
+        "gp_last_7":           (gf_row or {}).get("gp_last_7"),
+        "shots_faced_last_7":  (gf_row or {}).get("shots_faced_last_7"),
+        "road_game_num":       (gf_row or {}).get("road_game_num"),
+        "game_date":           (gf_row or {}).get("game_date"),
+        "component_breakdown": gf_comps,
     }
 
     return out

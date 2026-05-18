@@ -172,6 +172,12 @@ COMMANDS: list[Cmd] = [
     Cmd("roster-depth-strain", "phase3",
         "Compute per-skater roster-depth strain from IR-minute redistribution (Feature 3.16)",
         "scripts.compute_roster_depth_strain"),
+    Cmd("playoff-fatigue", "phase3",
+        "Compute per-player-per-game current-playoff-run fatigue (Feature 3.23)",
+        "scripts.compute_playoff_fatigue"),
+    Cmd("goalie-fi", "phase3",
+        "Compute daily per-goalie Fatigue Index snapshot (Feature 3.24)",
+        "scripts.compute_goalie_fi"),
     Cmd("composite-fi", "phase3",
         "Compute composite Fatigue Index per (player, game) (Feature 3.17)",
         "scripts.compute_composite_fi"),
@@ -190,6 +196,11 @@ COMMANDS: list[Cmd] = [
     Cmd("seasonal-performance", "phase3",
         "Compute seasonal motivation factor per (player, game) (Feature 3.22)",
         "scripts.compute_seasonal_performance"),
+
+    # ── Phase 17 — Confidence Layer ───────────────────────────────────────
+    Cmd("composite-confidence", "phase17",
+        "Compute Phase 17 composite Confidence Index + rating multiplier (Features 17.1–17.25)",
+        "scripts.compute_composite_confidence"),
 
     # ── Phase 16 — CV Tracking Engine ────────────────────────────────────
     # Removed temporarily; will be reintroduced once stable. Static formation
@@ -211,6 +222,7 @@ def _phase_label(phase: str) -> str:
         "phase3":  "PHASE 3  — Fatigue Engine",
         "phase4":  "PHASE 4  — Coaching Tendency Models",
         "phase5":  "PHASE 5  — Rust Simulation Engine",
+        "phase17": "PHASE 17 — Confidence Layer",
     }
     return labels.get(phase, phase.upper())
 

@@ -25,9 +25,11 @@ Then apply the two per-player multipliers:
                      max(recovery_floor, recovery_coefficient),
                      0.0, 1.0)
 
-And add the always-present absolute penalties (rust + playoff load):
+And add the always-present absolute penalties (rust + playoff load +
+current-run playoff fatigue):
 
-    fi = clamp(base_fi + rust_load + playoff_load_penalty, 0.0, 1.0)
+    fi = clamp(base_fi + rust_load + playoff_load_penalty
+                       + playoff_fatigue_score, 0.0, 1.0)
 
 where ``rust_load = 1.0 − rust_factor`` (so a fully-recovered player
 contributes 0).
@@ -79,6 +81,7 @@ Inputs
     fatigue_sensitivity_multiplier  Float64      (3.14) ; default 1.0
     rust_factor                     Float64      (3.13) ; default 1.0
     playoff_load_penalty            Float64      (3.15) ; default 0.0
+    playoff_fatigue_score           Float64      (3.23) ; default 0.0
 
 All optional columns default to a *no-effect* value when absent — the
 weighted sum simply omits them. Required columns are ``player_id`` and
@@ -99,6 +102,7 @@ One row per (player, game) with COMPOSITE_FI_SCHEMA:
     raw_load               Float64   pre-multiplier weighted sum
     rust_load              Float64   1.0 − rust_factor
     playoff_load_penalty   Float64   carried through (additive)
+    playoff_fatigue_score  Float64   carried through (additive) — 3.23
     concussion_multiplier  Float64   carried through (applied)
     recovery_coefficient   Float64   carried through (applied)
     component_breakdown    Utf8      JSON of (signal → contribution)
@@ -134,6 +138,7 @@ COMPOSITE_FI_SCHEMA: dict[str, pl.DataType] = {
     "raw_load":               pl.Float64,
     "rust_load":              pl.Float64,
     "playoff_load_penalty":   pl.Float64,
+    "playoff_fatigue_score":  pl.Float64,
     "concussion_multiplier":  pl.Float64,
     "recovery_coefficient":   pl.Float64,
     "component_breakdown":    pl.Utf8,
@@ -362,8 +367,15 @@ class CompositeFatigueIndex:
             playoff_v = 0.0
         playoff_v = max(0.0, playoff_v)
 
+        pf = r.get("playoff_fatigue_score")
+        try:
+            pf_v = float(pf) if pf is not None else 0.0
+        except (TypeError, ValueError):
+            pf_v = 0.0
+        pf_v = max(0.0, pf_v)
+
         base = raw_load * conc_v / recov_v
-        fi   = _clamp01(base + rust_load + playoff_v)
+        fi   = _clamp01(base + rust_load + playoff_v + pf_v)
         return fi, comps
 
     # ------------------------------------------------------------------
@@ -420,6 +432,13 @@ class CompositeFatigueIndex:
             except (TypeError, ValueError):
                 playoff_v = 0.0
 
+            pf = r.get("playoff_fatigue_score")
+            try:
+                pf_v = float(pf) if pf is not None else 0.0
+            except (TypeError, ValueError):
+                pf_v = 0.0
+            pf_v = max(0.0, pf_v)
+
             game_id = r.get("game_id")
             try:
                 gid = int(game_id) if game_id is not None else 0
@@ -435,6 +454,7 @@ class CompositeFatigueIndex:
                 "raw_load":               float(sum(comps.values())),
                 "rust_load":              float(max(0.0, 1.0 - rust_v)),
                 "playoff_load_penalty":   float(max(0.0, playoff_v)),
+                "playoff_fatigue_score":  float(pf_v),
                 "concussion_multiplier":  float(max(1.0, conc_v)),
                 "recovery_coefficient":   float(recov_v),
                 "component_breakdown":    json.dumps(
