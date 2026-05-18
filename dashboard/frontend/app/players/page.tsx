@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { TEAM_COLORS, TEAM_SECONDARY, normalizePlayerName } from "@/utils/nhl";
 import TeamLogoLink from "@/components/TeamLogoLink";
 import { useTheme } from "@/utils/themeContext";
-import { SeasonContextPill } from "@/utils/contextToggle";
+import { SeasonContextPill, useSeasonContext } from "@/utils/contextToggle";
 
 function darkBlend(hex: string, darkness = 0.88): string {
   const base = [9, 10, 12];
@@ -975,6 +975,7 @@ function CortexIcon({ size = 32 }: { size?: number }) {
 
 export default function PlayersPage() {
   const router = useRouter();
+  const { ctx: seasonCtx, hydrated: ctxHydrated } = useSeasonContext();
 
   // Search state
   const [query, setQuery]         = useState("");
@@ -1001,6 +1002,8 @@ export default function PlayersPage() {
   const [txns,      setTxns]      = useState<Transaction[] | null>(null);
   const [scoringCategories, setScoringCategories] = useState<Record<string, SkaterEntry[]> | null>(null);
   const [scoringSort, setScoringSort] = useState<"points" | "goals" | "assists">("points");
+  const [goalieLeaders, setGoalieLeaders] = useState<Record<string, SkaterEntry[]> | null>(null);
+  const [goalieLeaderSort, setGoalieLeaderSort] = useState<"wins" | "savePctg" | "goalsAgainstAverage" | "shutouts">("wins");
   const [qotList,        setQotList]        = useState<QoTEntry[] | null>(null);
 
   // Advanced leaderboards
@@ -1058,15 +1061,6 @@ export default function PlayersPage() {
       .then(d => setTxns(d.transactions ?? []))
       .catch(() => setTxns([]));
 
-    fetch("/api/skater-stats")
-      .then(r => r.json())
-      .then(d => setScoringCategories({
-        points:  d.categories?.points  ?? [],
-        goals:   d.categories?.goals   ?? [],
-        assists: d.categories?.assists ?? [],
-      }))
-      .catch(() => setScoringCategories({ points: [], goals: [], assists: [] }));
-
     fetch("/api/phase2/matchup-explorer?limit=20")
       .then(r => r.json())
       .then(d => setQotList(d.qot ?? []))
@@ -1096,6 +1090,41 @@ export default function PlayersPage() {
     fetch("/api/phase2/xga-leaderboard?limit=20")
       .then(r => r.json()).then(d => setXgaList(d.players ?? [])).catch(() => setXgaList([]));
   }, []);
+
+  // Scoring Leaders — context-aware. Flips between regular-season
+  // (/skater-stats, gameTypeId=2) and playoffs (/skater-stats-playoffs,
+  // gameTypeId=3) so the Season/Playoffs pill actually changes the data.
+  useEffect(() => {
+    if (!ctxHydrated) return;
+    setScoringCategories(null);
+    const endpoint = seasonCtx === "playoffs" ? "/api/skater-stats-playoffs" : "/api/skater-stats";
+    fetch(endpoint)
+      .then(r => r.json())
+      .then(d => setScoringCategories({
+        points:  d.categories?.points  ?? [],
+        goals:   d.categories?.goals   ?? [],
+        assists: d.categories?.assists ?? [],
+      }))
+      .catch(() => setScoringCategories({ points: [], goals: [], assists: [] }));
+  }, [seasonCtx, ctxHydrated]);
+
+  // Goalie Leaders — context-aware NHL counting stats (W / Sv% / GAA / SO).
+  // Mirrors Scoring Leaders so the toggle flips goalie data too. The separate
+  // "Goalies" section below stays on the GRTZKY GSAx model (season-only).
+  useEffect(() => {
+    if (!ctxHydrated) return;
+    setGoalieLeaders(null);
+    const endpoint = seasonCtx === "playoffs" ? "/api/goalie-stats-playoffs" : "/api/goalie-stats";
+    fetch(endpoint)
+      .then(r => r.json())
+      .then(d => setGoalieLeaders({
+        wins:                d.categories?.wins                ?? [],
+        savePctg:            d.categories?.savePctg            ?? [],
+        goalsAgainstAverage: d.categories?.goalsAgainstAverage ?? [],
+        shutouts:            d.categories?.shutouts            ?? [],
+      }))
+      .catch(() => setGoalieLeaders({ wins: [], savePctg: [], goalsAgainstAverage: [], shutouts: [] }));
+  }, [seasonCtx, ctxHydrated]);
 
   // Autocomplete
   const suggestions = query.trim().length >= 2
@@ -1323,9 +1352,9 @@ export default function PlayersPage() {
         </Section>
 
         {/* Scoring Leaders */}
-        <Section title="Scoring Leaders" count={scoringCategories?.[scoringSort]?.length}>
+        <Section title={seasonCtx === "playoffs" ? "Scoring Leaders · Playoffs" : "Scoring Leaders · Regular Season"} count={scoringCategories?.[scoringSort]?.length}>
           {scoringCategories === null ? <SectionLoading /> :
-           (scoringCategories[scoringSort]?.length ?? 0) === 0 ? <SectionEmpty msg="NHL stats unavailable." /> : (
+           (scoringCategories[scoringSort]?.length ?? 0) === 0 ? <SectionEmpty msg={seasonCtx === "playoffs" ? "No 2025-26 playoff stats available yet." : "NHL stats unavailable."} /> : (
            <>
              {/* Sort tabs */}
              <div className="flex gap-1.5 mb-2">
@@ -1360,6 +1389,60 @@ export default function PlayersPage() {
                        <p className="text-[9px] text-white/35 mt-0.5">{fmtPos(p.position)} · {p.team}</p>
                      </div>
                      <span className="text-[10px] font-bold tabular-nums shrink-0" style={{ color: "#a78bfa" }}>{p.value} {unit}</span>
+                   </div>
+                 );
+               })}
+             </div>
+           </>
+          )}
+        </Section>
+
+        {/* Goalie Leaders — context-aware NHL counting stats (W / Sv% / GAA / SO) */}
+        <Section title={seasonCtx === "playoffs" ? "Goalie Leaders · Playoffs" : "Goalie Leaders · Regular Season"} count={goalieLeaders?.[goalieLeaderSort]?.length}>
+          {goalieLeaders === null ? <SectionLoading /> :
+           (goalieLeaders[goalieLeaderSort]?.length ?? 0) === 0 ? <SectionEmpty msg={seasonCtx === "playoffs" ? "No 2025-26 playoff goalie stats yet." : "NHL goalie stats unavailable."} /> : (
+           <>
+             <div className="flex gap-1.5 mb-2 flex-wrap">
+               {([
+                 { k: "wins",                label: "Wins" },
+                 { k: "savePctg",            label: "Sv%" },
+                 { k: "goalsAgainstAverage", label: "GAA" },
+                 { k: "shutouts",            label: "SO" },
+               ] as const).map(({ k, label }) => (
+                 <button key={k} onClick={() => setGoalieLeaderSort(k)}
+                   className="px-2.5 py-1 rounded-lg text-[10px] font-semibold uppercase tracking-wide border transition-all duration-150"
+                   style={goalieLeaderSort === k ? {
+                     color: "#a78bfa",
+                     borderColor: "rgba(167,139,250,0.40)",
+                     backgroundColor: "rgba(167,139,250,0.12)",
+                   } : {
+                     color: "rgba(255,255,255,0.30)",
+                     borderColor: "rgba(255,255,255,0.08)",
+                     backgroundColor: "transparent",
+                   }}
+                 >{label}</button>
+               ))}
+             </div>
+             <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
+               {goalieLeaders[goalieLeaderSort].map((p, i) => {
+                 const v = p.value;
+                 const display =
+                   goalieLeaderSort === "savePctg"            ? (v != null ? `.${Math.round(v * 1000)}`        : "—") :
+                   goalieLeaderSort === "goalsAgainstAverage" ? (v != null ? v.toFixed(2)                      : "—") :
+                                                                 (v != null ? String(v)                         : "—");
+                 const unit =
+                   goalieLeaderSort === "wins"     ? "W" :
+                   goalieLeaderSort === "shutouts" ? "SO" :
+                                                     "";
+                 return (
+                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.name)}>
+                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
+                     {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
+                     <div className="flex-1 min-w-0">
+                       <p className="text-[11px] font-semibold text-white/80 truncate">{p.name}</p>
+                       <p className="text-[9px] text-white/35 mt-0.5">G · {p.team}</p>
+                     </div>
+                     <span className="text-[10px] font-bold tabular-nums shrink-0" style={{ color: "#a78bfa" }}>{display}{unit ? ` ${unit}` : ""}</span>
                    </div>
                  );
                })}
