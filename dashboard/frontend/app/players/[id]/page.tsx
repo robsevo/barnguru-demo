@@ -3085,22 +3085,28 @@ export default function PlayerProfilePage() {
                     : "−1 = cold/passive, +1 = hot/aggressive"}
                   tip="Composite Confidence Index (Phase 17.24): signed [-1, +1] weighted sum of hot-hand, EWMA form, TOI trust, role usage, injury drag, targeting, media, home/away, contract pressure, ref bias, and team-side streak/Corsi/special teams/goalie/injury context. The Rust engine will use this to bias decision-making (shoot-vs-pass, pinch-vs-retreat)."
                 />
-                {phase3.confidence_player != null && (
-                  <StatRow
-                    label="Player Component"
-                    value={`${phase3.confidence_player >= 0 ? "+" : ""}${phase3.confidence_player.toFixed(3)}`}
-                    sub="Pre-blend sum of player-side signals (4.1–4.15)"
-                    tip="The player's individual signals before the 30% team-context blend."
-                  />
-                )}
-                {phase3.confidence_team != null && (
-                  <StatRow
-                    label="Team Component"
-                    value={`${phase3.confidence_team >= 0 ? "+" : ""}${phase3.confidence_team.toFixed(3)}`}
-                    sub="Pre-blend sum of team-side signals (4.16–4.22)"
-                    tip="Team confidence context: streak, score-adjusted Corsi trend, special teams, goalie confidence, injury context, comeback quality."
-                  />
-                )}
+                {phase3.confidence_player != null && (() => {
+                  const blended = phase3.confidence_player * 0.7;
+                  return (
+                    <StatRow
+                      label="Player Component"
+                      value={`${phase3.confidence_player >= 0 ? "+" : ""}${phase3.confidence_player.toFixed(3)}`}
+                      sub={`Sum of player signals (17.1–17.15) · × 0.70 weight = ${blended >= 0 ? "+" : ""}${blended.toFixed(3)} of CI`}
+                      tip="Pre-blend sum of the 15 player-side signals. The 0.70 weight is the player/team blend ratio — multiply this value by 0.7 to see how much it actually moves the final Confidence Index."
+                    />
+                  );
+                })()}
+                {phase3.confidence_team != null && (() => {
+                  const blended = phase3.confidence_team * 0.3;
+                  return (
+                    <StatRow
+                      label="Team Component"
+                      value={`${phase3.confidence_team >= 0 ? "+" : ""}${phase3.confidence_team.toFixed(3)}`}
+                      sub={`Sum of team signals (17.16–17.22) · × 0.30 weight = ${blended >= 0 ? "+" : ""}${blended.toFixed(3)} of CI`}
+                      tip="Pre-blend sum of the 7 team-side signals (streak, Corsi, special teams, coach challenges, comeback quality, goalie confidence, injury context). Multiplied by 0.30 before being added to the Confidence Index."
+                    />
+                  );
+                })()}
                 {phase3.conf_shoot_bias != null && (
                   <StatRow
                     label="Shoot Bias"
