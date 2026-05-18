@@ -822,11 +822,14 @@ def _enforce_player_schema(df: pl.DataFrame) -> pl.DataFrame:
     return df.select(list(PLAYER_CHEMISTRY_SCHEMA.keys()))
 
 
-def write_pair_chemistry(df: pl.DataFrame, output_dir: Path, season: int) -> Path:
-    """Write pair chemistry parquet to ``output_dir/pair_chemistry_{season}.parquet``."""
+def write_pair_chemistry(
+    df: pl.DataFrame, output_dir: Path, season: int, season_type: str = "regular"
+) -> Path:
+    """Write pair chemistry parquet. season_type='playoffs' appends _playoffs suffix."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / f"pair_chemistry_{season}.parquet"
+    suffix = "_playoffs" if season_type == "playoffs" else ""
+    path = output_dir / f"pair_chemistry_{season}{suffix}.parquet"
     _enforce_pair_schema(df).write_parquet(path)
     return path
 
@@ -837,11 +840,14 @@ def read_pair_chemistry(data_dir: Path, season: int) -> pl.DataFrame:
     return pl.read_parquet(path)
 
 
-def write_player_chemistry(df: pl.DataFrame, output_dir: Path, season: int) -> Path:
-    """Write player chemistry parquet to ``output_dir/player_chemistry_{season}.parquet``."""
+def write_player_chemistry(
+    df: pl.DataFrame, output_dir: Path, season: int, season_type: str = "regular"
+) -> Path:
+    """Write player chemistry parquet. season_type='playoffs' appends _playoffs suffix."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / f"player_chemistry_{season}.parquet"
+    suffix = "_playoffs" if season_type == "playoffs" else ""
+    path = output_dir / f"player_chemistry_{season}{suffix}.parquet"
     _enforce_player_schema(df).write_parquet(path)
     return path
 

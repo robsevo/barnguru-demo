@@ -2728,17 +2728,26 @@ async def phase2_ewma_movers(
 
 
 @app.get("/phase2/matchup-explorer")
-async def phase2_matchup_explorer(limit: int = 10, player_id: int | None = None) -> dict:
+async def phase2_matchup_explorer(
+    limit: int = 10,
+    player_id: int | None = None,
+    context: str = Query("season", description="season | playoffs"),
+) -> dict:
     """QoT/QoC leaders and top player-pair matchup predictions."""
     import polars as pl
-    qot_dir = _GRETZKY_DATA_DIR / "qot_qoc"
-    mp_dir  = _GRETZKY_DATA_DIR / "matchup_preds"
-    qot_parquets = sorted(qot_dir.glob("qot_qoc_*.parquet")) if qot_dir.exists() else []
-    mp_parquets  = sorted(mp_dir.glob("matchup_preds_*.parquet")) if mp_dir.exists() else []
+    qot_parquets = _context_parquets("qot_qoc", "qot_qoc_", context) \
+                   or _context_parquets("qot_qoc", "qot_qoc_", "season")
+    mp_parquets  = _context_parquets("matchup_preds", "matchup_preds_", context) \
+                   or _context_parquets("matchup_preds", "matchup_preds_", "season")
+    source = "playoffs" if context == "playoffs" and (
+        _context_parquets("qot_qoc", "qot_qoc_", context) or
+        _context_parquets("matchup_preds", "matchup_preds_", context)
+    ) else "season"
     if not qot_parquets and not mp_parquets:
-        return {"qot": [], "qoc": [], "top_pairs": [], "built": False}
+        return {"qot": [], "qoc": [], "top_pairs": [], "built": False, "source": source}
 
-    MIN_GP = 20  # minimum games played to appear in QoT/QoC leaderboards
+    # Playoff GP caps at ~28 — drop the floor accordingly.
+    MIN_GP = 4 if source == "playoffs" else 20
 
     try:
         # QoT / QoC leaders
@@ -2922,9 +2931,10 @@ async def phase2_matchup_explorer(limit: int = 10, player_id: int | None = None)
             "selected_player": selected_player,
             "selected_pairs":  selected_pairs,
             "built":           True,
+            "source":          source,
         }
     except Exception:
-        return {"qot": [], "qoc": [], "top_pairs": [], "selected_player": None, "selected_pairs": [], "built": False}
+        return {"qot": [], "qoc": [], "top_pairs": [], "selected_player": None, "selected_pairs": [], "built": False, "source": source}
 
 
 # ---------------------------------------------------------------------------
@@ -3015,27 +3025,31 @@ async def phase2_regime_alerts(limit: int = 10) -> dict:
 # ---------------------------------------------------------------------------
 
 @app.get("/phase2/top-pairs")
-async def phase2_top_pairs(limit: int = 10) -> dict:
+async def phase2_top_pairs(
+    limit: int = 10,
+    context: str = Query("season", description="season | playoffs"),
+) -> dict:
     """Return top line pairs by chemistry delta (how much better they are together vs. expected)."""
     import polars as pl
 
-    chem_dir = _GRETZKY_DATA_DIR / "chemistry"
-    files = sorted(chem_dir.glob("pair_chemistry_*.parquet")) if chem_dir.exists() else []
+    files = _context_parquets("chemistry", "pair_chemistry_", context)
+    source = "playoffs" if context == "playoffs" and files else "season"
     if not files:
-        return {"pairs": [], "status": "not_built"}
+        files = _context_parquets("chemistry", "pair_chemistry_", "season")
+    if not files:
+        return {"pairs": [], "status": "not_built", "source": source}
 
     try:
         df = pl.read_parquet(files[-1])
         if df.is_empty():
-            return {"pairs": [], "status": "empty"}
+            return {"pairs": [], "status": "empty", "source": source}
 
         name_lookup = _build_name_lookup()
 
-        # Team lookup from RAPM
+        # Team lookup from RAPM — match the context so playoff rosters surface correctly.
         team_lookup: dict[int, str] = {}
         try:
-            rapm_dir = _GRETZKY_DATA_DIR / "rapm"
-            rapm_files = sorted(rapm_dir.glob("rapm_*.parquet"))
+            rapm_files = _context_parquets("rapm", "rapm_", context) or _context_parquets("rapm", "rapm_", "season")
             if rapm_files:
                 rapm_df = pl.read_parquet(rapm_files[-1], columns=["player_id", "team"])
                 for row in rapm_df.drop_nulls().to_dicts():
@@ -3067,9 +3081,9 @@ async def phase2_top_pairs(limit: int = 10) -> dict:
                 "games_together":  int(r["games_together"]) if r.get("games_together") is not None else None,
             })
 
-        return {"pairs": pairs, "status": "ok"}
+        return {"pairs": pairs, "status": "ok", "source": source}
     except Exception:
-        return {"pairs": [], "status": "error"}
+        return {"pairs": [], "status": "error", "source": source}
 
 
 # ---------------------------------------------------------------------------

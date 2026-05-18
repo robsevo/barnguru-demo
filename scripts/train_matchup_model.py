@@ -53,8 +53,12 @@ def _default_seasons() -> list[int]:
 def _load_season(
     data_dir: Path,
     season: int,
+    season_type: str = "regular",
 ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame | None, pl.DataFrame | None]:
     """Load all inputs for one season.
+
+    season_type filters shifts (by game_id type) + shots (by is_playoff)
+    and selects the matching RAPM parquet variant.
 
     Returns:
         (stints_df, rapm_df, vs_team_df, player_stats_df)
@@ -62,9 +66,12 @@ def _load_season(
     """
     from models.rapm_model import DataMissingWarning, build_stints
 
+    suffix = "_playoffs" if season_type == "playoffs" else ""
     shifts_path      = data_dir / "raw"   / f"shifts_{season}.parquet"
     shots_path       = data_dir / "shots" / f"shots_{season}.parquet"
-    rapm_path        = data_dir / "rapm"  / f"rapm_{season}.parquet"
+    rapm_path        = data_dir / "rapm"  / f"rapm_{season}{suffix}.parquet"
+    if season_type == "playoffs" and not rapm_path.exists():
+        rapm_path = data_dir / "rapm" / f"rapm_{season}.parquet"
     vs_team_path     = data_dir / "raw"   / f"vs_team_{season}.parquet"
     player_stats_path = data_dir / "raw"  / f"player_stats_{season}.parquet"
 
@@ -78,11 +85,24 @@ def _load_season(
             )
             return pl.DataFrame(), pl.DataFrame(), None, None
 
-    print(f"  Loading {season}: shifts, shots, rapm", end="", flush=True)
+    print(f"  Loading {season} ({season_type}): shifts, shots, rapm", end="", flush=True)
 
     shifts_df = pl.read_parquet(shifts_path)
     shots_df  = pl.read_parquet(shots_path)
     rapm_df   = pl.read_parquet(rapm_path)
+
+    if season_type == "playoffs":
+        if "game_id" in shifts_df.columns:
+            gt = (pl.col("game_id") % 1_000_000) // 10_000
+            shifts_df = shifts_df.filter(gt == 3)
+        if "is_playoff" in shots_df.columns:
+            shots_df = shots_df.filter(pl.col("is_playoff") == True)  # noqa: E712
+    elif season_type == "regular":
+        if "game_id" in shifts_df.columns:
+            gt = (pl.col("game_id") % 1_000_000) // 10_000
+            shifts_df = shifts_df.filter(gt == 2)
+        if "is_playoff" in shots_df.columns:
+            shots_df = shots_df.filter(pl.col("is_playoff") == False)  # noqa: E712
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -175,10 +195,20 @@ def main() -> None:
         metavar="PATH",
         help="Root data directory.",
     )
+    parser.add_argument(
+        "--season-type",
+        choices=["regular", "playoffs"],
+        default="regular",
+        help="'regular' writes qot_qoc_{year}.parquet (default). "
+             "'playoffs' filters shifts+shots to playoff games and writes "
+             "qot_qoc_{year}_playoffs.parquet + matchup_preds_{year}_playoffs.parquet.",
+    )
     args = parser.parse_args()
 
     data_dir: Path    = args.data_dir
     target_seasons    = sorted(args.seasons)
+    season_type:  str = args.season_type
+    out_suffix        = "_playoffs" if season_type == "playoffs" else ""
     matchup_dir       = data_dir / "matchup"
     qot_qoc_dir       = data_dir / "qot_qoc"
     matchup_preds_dir = data_dir / "matchup_preds"
@@ -190,8 +220,8 @@ def main() -> None:
     if not args.force:
         existing = [
             s for s in target_seasons
-            if (qot_qoc_dir / f"qot_qoc_{s}.parquet").exists()
-            and (matchup_preds_dir / f"matchup_preds_{s}.parquet").exists()
+            if (qot_qoc_dir / f"qot_qoc_{s}{out_suffix}.parquet").exists()
+            and (matchup_preds_dir / f"matchup_preds_{s}{out_suffix}.parquet").exists()
         ]
         if existing:
             print(
@@ -237,7 +267,9 @@ def main() -> None:
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         for season in target_seasons:
-            stints_df, rapm_df, vs_team_df, stats_df = _load_season(data_dir, season)
+            stints_df, rapm_df, vs_team_df, stats_df = _load_season(
+                data_dir, season, season_type=season_type
+            )
             if stints_df.is_empty() or rapm_df.is_empty():
                 print(f"  Season {season}: skipping (data missing).")
                 continue
@@ -289,22 +321,22 @@ def main() -> None:
         print(f"  Season {season}:")
 
         # QoT / QoC
-        qot_path = qot_qoc_dir / f"qot_qoc_{season}.parquet"
+        qot_path = qot_qoc_dir / f"qot_qoc_{season}{out_suffix}.parquet"
         if qot_path.exists() and not args.force:
-            print(f"    qot_qoc_{season}.parquet already exists, skipping.")
+            print(f"    qot_qoc_{season}{out_suffix}.parquet already exists, skipping.")
         else:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 qot_qoc_df = compute_qot_qoc(stints_df, rapm_df, season)
-            write_qot_qoc(qot_qoc_df, qot_qoc_dir, season)
-            print(f"    Saved qot_qoc_{season}.parquet  ({len(qot_qoc_df)} players)")
+            write_qot_qoc(qot_qoc_df, qot_qoc_dir, season, season_type=season_type)
+            print(f"    Saved qot_qoc_{season}{out_suffix}.parquet  ({len(qot_qoc_df)} players)")
             _print_qot_qoc_leaders(qot_qoc_df, season)
             saved_qot += 1
 
         # Matchup predictions
-        preds_path = matchup_preds_dir / f"matchup_preds_{season}.parquet"
+        preds_path = matchup_preds_dir / f"matchup_preds_{season}{out_suffix}.parquet"
         if preds_path.exists() and not args.force:
-            print(f"    matchup_preds_{season}.parquet already exists, skipping.")
+            print(f"    matchup_preds_{season}{out_suffix}.parquet already exists, skipping.")
         else:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
@@ -315,8 +347,8 @@ def main() -> None:
                     player_stats_df=stats_df,
                     season=season,
                 )
-            write_matchup_preds(preds_df, matchup_preds_dir, season)
-            print(f"    Saved matchup_preds_{season}.parquet  ({len(preds_df):,} pairs)")
+            write_matchup_preds(preds_df, matchup_preds_dir, season, season_type=season_type)
+            print(f"    Saved matchup_preds_{season}{out_suffix}.parquet  ({len(preds_df):,} pairs)")
             saved_preds += 1
 
     print(

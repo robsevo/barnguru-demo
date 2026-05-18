@@ -1033,10 +1033,6 @@ export default function PlayersPage() {
 
 
 
-    fetch("/api/phase2/top-pairs?limit=6")
-      .then(r => r.json())
-      .then(d => setPairs(d.pairs ?? []))
-      .catch(() => setPairs([]));
 
     fetch("/api/phase2/roster-disruption")
       .then(r => r.json())
@@ -1053,10 +1049,6 @@ export default function PlayersPage() {
       .then(d => setTxns(d.transactions ?? []))
       .catch(() => setTxns([]));
 
-    fetch("/api/phase2/matchup-explorer?limit=20")
-      .then(r => r.json())
-      .then(d => setQotList(d.qot ?? []))
-      .catch(() => setQotList([]));
 
     // Advanced leaderboards
     fetch("/api/phase2/edge-leaderboard?metric=max_speed_kmh&limit=20")
@@ -1168,6 +1160,26 @@ export default function PlayersPage() {
       .then(r => r.json())
       .then(d => setWarList(d.players ?? []))
       .catch(() => setWarList([]));
+  }, [seasonCtx, ctxHydrated]);
+
+  // Top Pairs (chemistry) — context-aware.
+  useEffect(() => {
+    if (!ctxHydrated) return;
+    setPairs(null);
+    fetch(`/api/phase2/top-pairs?limit=6&context=${seasonCtx}`)
+      .then(r => r.json())
+      .then(d => setPairs(d.pairs ?? []))
+      .catch(() => setPairs([]));
+  }, [seasonCtx, ctxHydrated]);
+
+  // QoT/QoC (matchup explorer) — context-aware.
+  useEffect(() => {
+    if (!ctxHydrated) return;
+    setQotList(null);
+    fetch(`/api/phase2/matchup-explorer?limit=20&context=${seasonCtx}`)
+      .then(r => r.json())
+      .then(d => setQotList(d.qot ?? []))
+      .catch(() => setQotList([]));
   }, [seasonCtx, ctxHydrated]);
 
   // Goalie Leaders — context-aware NHL counting stats (W / Sv% / GAA / SO).

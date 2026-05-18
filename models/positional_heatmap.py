@@ -489,11 +489,14 @@ class PositionalHeatmapModel:
 # I/O
 # ---------------------------------------------------------------------------
 
-def write_positional_heatmap(df: pl.DataFrame, output_dir: Path, season: int) -> Path:
-    """Write positional heatmap scores to parquet."""
+def write_positional_heatmap(
+    df: pl.DataFrame, output_dir: Path, season: int, season_type: str = "regular"
+) -> Path:
+    """Write positional heatmap scores to parquet. season_type='playoffs' appends suffix."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / f"positional_heatmap_{season}.parquet"
+    suffix = "_playoffs" if season_type == "playoffs" else ""
+    path = output_dir / f"positional_heatmap_{season}{suffix}.parquet"
     for col, dtype in POSITIONAL_HEATMAP_SCHEMA.items():
         if col not in df.columns:
             df = df.with_columns(pl.lit(None).cast(dtype).alias(col))

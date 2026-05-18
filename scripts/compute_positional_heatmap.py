@@ -63,7 +63,9 @@ def _fix_null_columns(frames: list[pl.DataFrame]) -> list[pl.DataFrame]:
     return frames
 
 
-def _load_shots_parquets(shots_dir: Path, seasons: list[int]) -> pl.DataFrame:
+def _load_shots_parquets(
+    shots_dir: Path, seasons: list[int], season_type: str = "regular"
+) -> pl.DataFrame:
     """Load and concatenate MoneyPuck shots parquets for the requested seasons."""
     frames: list[pl.DataFrame] = []
     for season in seasons:
@@ -72,8 +74,14 @@ def _load_shots_parquets(shots_dir: Path, seasons: list[int]) -> pl.DataFrame:
             files = sorted(shots_dir.glob(f"moneypuck_shots_{season}*.parquet"))
         for f in files:
             try:
-                frames.append(pl.read_parquet(f))
-                print(f"  Loaded shots: {f.name}")
+                df = pl.read_parquet(f)
+                if "is_playoff" in df.columns:
+                    if season_type == "playoffs":
+                        df = df.filter(pl.col("is_playoff") == True)  # noqa: E712
+                    elif season_type == "regular":
+                        df = df.filter(pl.col("is_playoff") == False)  # noqa: E712
+                frames.append(df)
+                print(f"  Loaded shots: {f.name} ({season_type}, {len(df):,} rows)")
             except Exception as e:
                 print(f"  Warning: could not load {f.name}: {e}")
     if not frames:
@@ -122,15 +130,25 @@ def main() -> None:
         action="store_true",
         help="Overwrite existing output parquet.",
     )
+    parser.add_argument(
+        "--season-type",
+        choices=["regular", "playoffs"],
+        default="regular",
+        help="'regular' writes positional_heatmap_{year}.parquet (default). "
+             "'playoffs' filters shots by is_playoff and writes "
+             "positional_heatmap_{year}_playoffs.parquet.",
+    )
     args = parser.parse_args()
 
     seasons: list[int] = sorted(args.seasons)
     data_dir: Path = args.data_dir
     target_season = max(seasons)
+    season_type: str = args.season_type
+    out_suffix       = "_playoffs" if season_type == "playoffs" else ""
 
     # ── Check output ──────────────────────────────────────────────────────
     heatmap_dir = data_dir / HEATMAP_SUBDIR
-    out_path = heatmap_dir / f"positional_heatmap_{target_season}.parquet"
+    out_path = heatmap_dir / f"positional_heatmap_{target_season}{out_suffix}.parquet"
     if out_path.exists() and not args.force:
         print(f"[positional-heatmap] Output already exists: {out_path}")
         print("  Use --force to overwrite.")
@@ -144,7 +162,7 @@ def main() -> None:
         sys.exit(1)
 
     print(f"[positional-heatmap] Loading shot data for seasons: {seasons}")
-    shots_df = _load_shots_parquets(shots_dir, seasons)
+    shots_df = _load_shots_parquets(shots_dir, seasons, season_type=season_type)
 
     if len(shots_df) == 0:
         print("[positional-heatmap] No shot data found.")
@@ -200,7 +218,7 @@ def main() -> None:
                 )
 
     # ── Save ──────────────────────────────────────────────────────────────
-    path = write_positional_heatmap(heatmap_df, heatmap_dir, target_season)
+    path = write_positional_heatmap(heatmap_df, heatmap_dir, target_season, season_type=season_type)
     print(f"\n[positional-heatmap] Written: {path}")
 
     model_path = heatmap_dir / "positional_heatmap_model.pkl"

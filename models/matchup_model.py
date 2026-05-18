@@ -827,11 +827,14 @@ class MatchupModel:
 # ---------------------------------------------------------------------------
 
 
-def write_qot_qoc(df: pl.DataFrame, out_dir: Path, season: int) -> Path:
-    """Write QoT/QoC parquet to ``out_dir/qot_qoc_{season}.parquet``."""
+def write_qot_qoc(
+    df: pl.DataFrame, out_dir: Path, season: int, season_type: str = "regular"
+) -> Path:
+    """Write QoT/QoC parquet. season_type='playoffs' appends _playoffs suffix."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"qot_qoc_{season}.parquet"
+    suffix = "_playoffs" if season_type == "playoffs" else ""
+    path = out_dir / f"qot_qoc_{season}{suffix}.parquet"
     df.write_parquet(path)
     return path
 
@@ -850,11 +853,14 @@ def read_qot_qoc(data_dir: Path, season: int | None = None) -> pl.DataFrame | No
     return pl.read_parquet(parquets[-1])
 
 
-def write_matchup_preds(df: pl.DataFrame, out_dir: Path, season: int) -> Path:
-    """Write matchup predictions parquet to ``out_dir/matchup_preds_{season}.parquet``."""
+def write_matchup_preds(
+    df: pl.DataFrame, out_dir: Path, season: int, season_type: str = "regular"
+) -> Path:
+    """Write matchup predictions parquet. season_type='playoffs' appends suffix."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"matchup_preds_{season}.parquet"
+    suffix = "_playoffs" if season_type == "playoffs" else ""
+    path = out_dir / f"matchup_preds_{season}{suffix}.parquet"
     df.write_parquet(path)
     return path
 
