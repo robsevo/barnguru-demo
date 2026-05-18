@@ -44,13 +44,20 @@ def _current_nhl_season() -> int:
 # ---------------------------------------------------------------------------
 
 
-def _load_rapm(data_dir: Path, season: int) -> pl.DataFrame:
+def _load_rapm(data_dir: Path, season: int, season_type: str = "regular") -> pl.DataFrame:
     """Load internally computed RAPM parquet for *season*.
 
     Evolving Hockey was removed — it moved behind a paywall.
     RAPM is computed from NHL shift + MoneyPuck shot data via gretzky train-rapm.
+
+    season_type="playoffs" reads rapm_{season}_playoffs.parquet; falls back to
+    the regular-season parquet if the playoff one doesn't exist so CDR doesn't
+    crash mid-season before playoffs have been trained.
     """
-    path = data_dir / "rapm" / f"rapm_{season}.parquet"
+    suffix = "_playoffs" if season_type == "playoffs" else ""
+    path = data_dir / "rapm" / f"rapm_{season}{suffix}.parquet"
+    if season_type == "playoffs" and not path.exists():
+        path = data_dir / "rapm" / f"rapm_{season}.parquet"
     if not path.exists():
         raise FileNotFoundError(
             f"RAPM parquet not found: {path}\n"
@@ -72,11 +79,15 @@ def _load_rapm(data_dir: Path, season: int) -> pl.DataFrame:
     return df
 
 
-def _load_pbp_stats(data_dir: Path, season: int) -> pl.DataFrame:
+def _load_pbp_stats(
+    data_dir: Path, season: int, season_type: str = "regular"
+) -> pl.DataFrame:
     """Load historical ingestor player stats (T/G counts) for *season*.
 
     Falls back to empty DataFrame if not yet available — CDR will use league
     medians for the T/G component instead of per-player values.
+
+    season_type filters by game_id encoded game type.
     """
     stats_dir = data_dir / "raw"
     path = stats_dir / f"player_stats_{season}.parquet"
@@ -86,7 +97,14 @@ def _load_pbp_stats(data_dir: Path, season: int) -> pl.DataFrame:
             f"  Run: uv run python scripts/run_phase1_sync.py to populate player stats."
         )
         return pl.DataFrame()
-    return pl.read_parquet(path)
+    df = pl.read_parquet(path)
+    if "game_id" in df.columns:
+        gt = (pl.col("game_id") % 1_000_000) // 10_000
+        if season_type == "playoffs":
+            df = df.filter(gt == 3)
+        elif season_type == "regular":
+            df = df.filter(gt == 2)
+    return df
 
 
 # ---------------------------------------------------------------------------
@@ -104,9 +122,18 @@ def main() -> None:
         default=None,
         help="Season to compute CDR for (default: current NHL season)",
     )
+    parser.add_argument(
+        "--season-type",
+        choices=["regular", "playoffs"],
+        default="regular",
+        help="'regular' writes cdr_{year}.parquet (default). "
+             "'playoffs' uses playoff RAPM + filters PBP stats, writes "
+             "cdr_{year}_playoffs.parquet.",
+    )
     args = parser.parse_args()
 
     season = args.season or _current_nhl_season()
+    season_type = args.season_type
     data_dir = _data_dir()
     cdr_dir = data_dir / "cdr"
 
@@ -120,7 +147,7 @@ def main() -> None:
     # ── 1. Load RAPM ──────────────────────────────────────────────────────────
     print("[ 1/3 ] Loading internally computed RAPM data…")
     try:
-        rapm_df = _load_rapm(data_dir, season)
+        rapm_df = _load_rapm(data_dir, season, season_type=season_type)
     except FileNotFoundError as e:
         print(f"  SKIPPED: {e}")
         print("  Run: uv run python scripts/gretzky.py ingest && "
@@ -130,7 +157,7 @@ def main() -> None:
 
     # ── 2. Load PBP player stats (T/G) ────────────────────────────────────────
     print("[ 2/3 ] Loading player stats (giveaways / takeaways)…")
-    pbp_stats_df = _load_pbp_stats(data_dir, season)
+    pbp_stats_df = _load_pbp_stats(data_dir, season, season_type=season_type)
     if not pbp_stats_df.is_empty():
         n_with_tg = pbp_stats_df.filter(
             pl.col("takeaway_count").is_not_null() | pl.col("giveaway_count").is_not_null()
@@ -143,12 +170,13 @@ def main() -> None:
     print("[ 3/3 ] Computing CDR…")
     try:
         cdr = CompositeDefensiveRating()
-        cdr_df = cdr.compute(rapm_df, pbp_stats_df, season)
+        cdr_min_gp = 4 if season_type == "playoffs" else None
+        cdr_df = cdr.compute(rapm_df, pbp_stats_df, season, min_gp=cdr_min_gp)
     except ValueError as e:
         print(f"  ERROR: {e}")
         sys.exit(1)
 
-    out_path = write_cdr(cdr_df, cdr_dir, season)
+    out_path = write_cdr(cdr_df, cdr_dir, season, season_type=season_type)
 
     n_players = len(cdr_df)
     top5    = cdr_df.head(5)

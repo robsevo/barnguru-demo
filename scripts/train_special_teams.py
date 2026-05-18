@@ -68,17 +68,24 @@ def _default_seasons() -> list[int]:
 def _load_season(
     data_dir: Path,
     season: int,
+    season_type: str = "regular",
 ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
     """Load shifts, shots, and RAPM for a season.
+
+    season_type filters shifts (by game_id encoded type) and shots (by
+    is_playoff column), and reads the matching RAPM parquet variant.
 
     Returns:
         (shifts_df, shots_df, rapm_df).  Empty DataFrames on any missing file.
     """
     from models.rapm_model import DataMissingWarning
 
+    suffix = "_playoffs" if season_type == "playoffs" else ""
     shifts_path = data_dir / "raw"   / f"shifts_{season}.parquet"
     shots_path  = data_dir / "shots" / f"shots_{season}.parquet"
-    rapm_path   = data_dir / "rapm"  / f"rapm_{season}.parquet"
+    rapm_path   = data_dir / "rapm"  / f"rapm_{season}{suffix}.parquet"
+    if season_type == "playoffs" and not rapm_path.exists():
+        rapm_path = data_dir / "rapm" / f"rapm_{season}.parquet"
 
     empty = pl.DataFrame()
 
@@ -109,10 +116,23 @@ def _load_season(
         )
         return empty, empty, empty
 
-    print(f"  Loading season {season}...")
+    print(f"  Loading season {season} ({season_type})...")
     shifts_df = pl.read_parquet(shifts_path)
     shots_df  = pl.read_parquet(shots_path)
     rapm_df   = pl.read_parquet(rapm_path)
+
+    if season_type == "playoffs":
+        if "game_id" in shifts_df.columns:
+            gt = (pl.col("game_id") % 1_000_000) // 10_000
+            shifts_df = shifts_df.filter(gt == 3)
+        if "is_playoff" in shots_df.columns:
+            shots_df = shots_df.filter(pl.col("is_playoff") == True)  # noqa: E712
+    elif season_type == "regular":
+        if "game_id" in shifts_df.columns:
+            gt = (pl.col("game_id") % 1_000_000) // 10_000
+            shifts_df = shifts_df.filter(gt == 2)
+        if "is_playoff" in shots_df.columns:
+            shots_df = shots_df.filter(pl.col("is_playoff") == False)  # noqa: E712
     return shifts_df, shots_df, rapm_df
 
 
@@ -178,18 +198,28 @@ def main() -> None:
         metavar="PATH",
         help="Root data directory.",
     )
+    parser.add_argument(
+        "--season-type",
+        choices=["regular", "playoffs"],
+        default="regular",
+        help="'regular' writes special_teams_{year}.parquet (default). "
+             "'playoffs' filters shifts+shots to playoff games and writes "
+             "special_teams_{year}_playoffs.parquet.",
+    )
     args = parser.parse_args()
 
     data_dir:  Path      = args.data_dir
     output_dir: Path     = data_dir / "special_teams"
     output_dir.mkdir(parents=True, exist_ok=True)
+    season_type: str     = args.season_type
+    out_suffix           = "_playoffs" if season_type == "playoffs" else ""
 
     target_seasons: list[int] = sorted(args.seasons)
 
     # Skip seasons that already have output (unless --force)
     if not args.force:
         all_exist = all(
-            (output_dir / f"special_teams_{s}.parquet").exists()
+            (output_dir / f"special_teams_{s}{out_suffix}.parquet").exists()
             for s in target_seasons
         )
         if all_exist:
@@ -217,14 +247,14 @@ def main() -> None:
 
     saved = 0
     for season in target_seasons:
-        out_path = output_dir / f"special_teams_{season}.parquet"
+        out_path = output_dir / f"special_teams_{season}{out_suffix}.parquet"
         if out_path.exists() and not args.force:
             print(f"  Season {season}: already exists, skipping (use --force)")
             continue
 
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            shifts_df, shots_df, rapm_df = _load_season(data_dir, season)
+            shifts_df, shots_df, rapm_df = _load_season(data_dir, season, season_type=season_type)
 
         for w in caught:
             print(f"  [WARN] {w.message}", file=sys.stderr)
@@ -244,7 +274,7 @@ def main() -> None:
         print(f"  Computing special teams ratings for {season}...")
         st_df = compute_special_teams(stints_df, rapm_df, season)
 
-        path = write_special_teams(st_df, output_dir, season)
+        path = write_special_teams(st_df, output_dir, season, season_type=season_type)
         print(f"  Saved {path}  ({len(st_df)} players)")
         _print_leaders(st_df, season)
         saved += 1

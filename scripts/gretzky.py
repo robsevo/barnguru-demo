@@ -88,6 +88,9 @@ COMMANDS: list[Cmd] = [
         "scripts.train_goalie_model"),
     Cmd("train-special-teams", "phase2", "Compute per-player PP/PK special teams ratings (Feature 2.7)",
         "scripts.train_special_teams"),
+    Cmd("train-special-teams-playoffs", "phase2",
+        "Special Teams — playoffs variant",
+        "scripts.train_special_teams", args=["--season-type", "playoffs"]),
     Cmd("train-bayesian", "phase2", "Train Bayesian Player Rating system (Features 2.9 + 2.10)",
         "scripts.train_bayesian_ratings"),
     Cmd("cluster-archetypes", "phase2", "Fit player archetype clusters K-means (Feature 2.11)",
@@ -119,6 +122,8 @@ COMMANDS: list[Cmd] = [
         "scripts.train_behavior_net"),
     Cmd("rate-def",      "phase2", "Compute Composite Defensive Rating (CDR)",
         "scripts.compute_defensive_rating"),
+    Cmd("rate-def-playoffs", "phase2", "CDR — playoffs variant",
+        "scripts.compute_defensive_rating", args=["--season-type", "playoffs"]),
     Cmd("playoff-delta", "phase2", "Compute Playoff Performance Delta with Bayesian shrinkage (Feature 2.23)",
         "scripts.compute_playoff_delta"),
     Cmd("train-nhle",    "phase2", "Train NHLe/Prospect Projection Model — league translations (Feature 2.24)",
@@ -137,6 +142,9 @@ COMMANDS: list[Cmd] = [
     Cmd("clutch-index", "phase2",
         "Compute Clutch Index (Win Probability Added) per player (Feature 2.29)",
         "scripts.compute_clutch_index"),
+    Cmd("clutch-index-playoffs", "phase2",
+        "Clutch Index — playoffs variant",
+        "scripts.compute_clutch_index", args=["--season-type", "playoffs"]),
 
     # ── Phase 3 — Fatigue Engine ─────────────────────────────────────────
     Cmd("schedule-density", "phase3",

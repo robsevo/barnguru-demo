@@ -1896,13 +1896,14 @@ async def phase2_player(
 
     r = row.to_dicts()[0]
 
-    # Try to join CDR
+    # Try to join CDR — pick context-matching parquet directly so we don't
+    # rely on the model's read_cdr (which doesn't know about _playoffs files).
     cdr_val: float | None = None
     try:
-        from models.defensive_rating import read_cdr, lookup_player as _lookup_cdr
-        cdr_df = read_cdr(_GRETZKY_DATA_DIR, season=r.get("season"))
-        if cdr_df is not None:
-            cdr_row = _lookup_cdr(cdr_df, r["shooter_name"])
+        cdr_files = _context_parquets("cdr", "cdr_", context) or _context_parquets("cdr", "cdr_", "season")
+        if cdr_files:
+            cdr_df = pl.read_parquet(cdr_files[-1])
+            cdr_row = cdr_df.filter(pl.col("player_name").str.to_lowercase() == r["shooter_name"].lower())
             if not cdr_row.is_empty():
                 raw = cdr_row["cdr"][0]
                 cdr_val = round(float(raw), 3) if raw is not None else None
@@ -2066,8 +2067,8 @@ async def phase2_player(
     clutch_index:       float | None = None
     clutch_wpa_per60:   float | None = None
     try:
-        ci_dir = _GRETZKY_DATA_DIR / "clutch_index"
-        ci_parquets = sorted(ci_dir.glob("clutch_index_[0-9]*.parquet")) if ci_dir.exists() else []
+        ci_parquets = _context_parquets("clutch_index", "clutch_index_2", context) \
+                      or _context_parquets("clutch_index", "clutch_index_2", "season")
         if ci_parquets and player_id_val is not None:
             ci_df = pl.read_parquet(ci_parquets[-1])
             ci_row = ci_df.filter(pl.col("player_id") == player_id_val)
@@ -2082,8 +2083,8 @@ async def phase2_player(
     special_teams_pp: float | None = None
     special_teams_pk: float | None = None
     try:
-        st_dir = _GRETZKY_DATA_DIR / "special_teams"
-        st_parquets = sorted(st_dir.glob("special_teams_*.parquet")) if st_dir.exists() else []
+        st_parquets = _context_parquets("special_teams", "special_teams_", context) \
+                      or _context_parquets("special_teams", "special_teams_", "season")
         if st_parquets and player_id_val is not None:
             st_df = pl.read_parquet(st_parquets[-1])
             st_row = st_df.filter(pl.col("player_id") == player_id_val)
@@ -3186,13 +3187,18 @@ async def phase2_goalie_leaderboard(
 
 
 @app.get("/phase2/clutch-leaderboard")
-async def phase2_clutch_leaderboard(limit: int = 20) -> dict:
+async def phase2_clutch_leaderboard(
+    limit: int = 20,
+    context: str = Query("season", description="season | playoffs"),
+) -> dict:
     """Clutch Index leaderboard (WPA above expected, Bayesian-shrunk)."""
     import polars as pl
-    ci_dir = _GRETZKY_DATA_DIR / "clutch_index"
-    files = sorted(ci_dir.glob("clutch_index_2*.parquet")) if ci_dir.exists() else []
+    files = _context_parquets("clutch_index", "clutch_index_2", context)
+    source = "playoffs" if context == "playoffs" and files else "season"
     if not files:
-        return {"players": [], "built": False}
+        files = _context_parquets("clutch_index", "clutch_index_2", "season")
+    if not files:
+        return {"players": [], "built": False, "source": source}
     try:
         df = pl.read_parquet(files[-1])
         col = "clutch_index_shrunk" if "clutch_index_shrunk" in df.columns else "clutch_index"
@@ -3220,7 +3226,8 @@ async def phase2_clutch_leaderboard(limit: int = 20) -> dict:
                         pass
                 break  # use first successful source
 
-        MIN_TOI_HRS = 5.0  # toi_60 column is in hours (e.g. 35h max for top players)
+        # Playoffs have ~10% of regular-season TOI; drop the floor accordingly.
+        MIN_TOI_HRS = 0.5 if source == "playoffs" else 5.0
         df = df.filter(pl.col(col).is_not_null())
         if "toi_60" in df.columns:
             df = df.filter(pl.col("toi_60") >= MIN_TOI_HRS)
@@ -3238,29 +3245,34 @@ async def phase2_clutch_leaderboard(limit: int = 20) -> dict:
                 "value":       round(float(r[col]), 4),
                 "wpa_per60":   round(float(r["actual_wpa_per60"]), 4) if r.get("actual_wpa_per60") is not None else None,
             })
-        return {"players": rows, "built": True}
+        return {"players": rows, "built": True, "source": source}
     except Exception:
-        return {"players": [], "built": False}
+        return {"players": [], "built": False, "source": source}
 
 
 @app.get("/phase2/special-teams-leaderboard")
 async def phase2_special_teams_leaderboard(
     side: str = Query("pp", description="pp | pk"),
     limit: int = 20,
+    context: str = Query("season", description="season | playoffs"),
 ) -> dict:
     """Power Play or Penalty Kill xGF/60 leaderboard."""
     import polars as pl
-    st_dir = _GRETZKY_DATA_DIR / "special_teams"
-    files = sorted(st_dir.glob("special_teams_*.parquet")) if st_dir.exists() else []
+    files = _context_parquets("special_teams", "special_teams_", context)
+    source = "playoffs" if context == "playoffs" and files else "season"
     if not files:
-        return {"players": [], "built": False, "side": side}
+        files = _context_parquets("special_teams", "special_teams_", "season")
+    if not files:
+        return {"players": [], "built": False, "side": side, "source": source}
     try:
         df = pl.read_parquet(files[-1])
         toi_col  = "toi_pp"  if side == "pp" else "toi_pk"
         xgf_col  = "pp_xgf60" if side == "pp" else "pk_xgf60"
         rapm_col = "rapm_pp"  if side == "pp" else "rapm_pk"
         name_lut = _build_name_lookup()
-        MIN_TOI = 50.0  # 50+ PP/PK minutes to qualify
+        # Playoff TOI is ~10% of regular season; floor 5 min is enough to weed
+        # out one-off PP/PK appearances while keeping real specialists.
+        MIN_TOI = 5.0 if source == "playoffs" else 50.0
         if toi_col not in df.columns or xgf_col not in df.columns:
             return {"players": [], "built": False, "side": side, "reason": "columns_missing"}
         df = (
@@ -3281,9 +3293,9 @@ async def phase2_special_teams_leaderboard(
                 "rapm":        round(float(r[rapm_col]), 3) if r.get(rapm_col) is not None else None,
                 "toi":         round(float(r[toi_col]), 1),
             })
-        return {"players": rows, "built": True, "side": side}
+        return {"players": rows, "built": True, "side": side, "source": source}
     except Exception:
-        return {"players": [], "built": False, "side": side}
+        return {"players": [], "built": False, "side": side, "source": source}
 
 
 @app.get("/phase2/hot-hand-leaderboard")
@@ -3399,17 +3411,22 @@ async def phase2_xg_leaderboard(
 
 
 @app.get("/phase2/cdr-leaderboard")
-async def phase2_cdr_leaderboard(limit: int = 20) -> dict:
+async def phase2_cdr_leaderboard(
+    limit: int = 20,
+    context: str = Query("season", description="season | playoffs"),
+) -> dict:
     """Composite Defensive Rating leaderboard (higher = better defender)."""
     import polars as pl
-    cdr_dir = _GRETZKY_DATA_DIR / "cdr"
-    files = sorted(cdr_dir.glob("cdr_*.parquet")) if cdr_dir.exists() else []
+    files = _context_parquets("cdr", "cdr_", context)
+    source = "playoffs" if context == "playoffs" and files else "season"
     if not files:
-        return {"players": [], "built": False}
+        files = _context_parquets("cdr", "cdr_", "season")
+    if not files:
+        return {"players": [], "built": False, "source": source}
     try:
         df = pl.read_parquet(files[-1])
         name_lut = _build_name_lookup()
-        MIN_GP = 20
+        MIN_GP = 4 if source == "playoffs" else 20
         if "gp" in df.columns:
             df = df.filter(pl.col("gp") >= MIN_GP)
         df = df.filter(pl.col("cdr").is_not_null())
@@ -3428,9 +3445,9 @@ async def phase2_cdr_leaderboard(limit: int = 20) -> dict:
                 "tk_gv_ratio": round(float(r["tk_gv_ratio"]), 2) if r.get("tk_gv_ratio") is not None else None,
                 "gp":          r.get("gp"),
             })
-        return {"players": rows, "built": True}
+        return {"players": rows, "built": True, "source": source}
     except Exception:
-        return {"players": [], "built": False}
+        return {"players": [], "built": False, "source": source}
 
 
 @app.get("/phase2/rapm-leaderboard")
@@ -3480,32 +3497,36 @@ async def phase2_rapm_leaderboard(
 
 
 @app.get("/phase2/xga-leaderboard")
-async def phase2_xga_leaderboard(limit: int = 20) -> dict:
-    """xGA/60 leaderboard — best defenders by lowest on-ice xGA/60 (DZS-adjusted from CDR model, min 20 GP)."""
+async def phase2_xga_leaderboard(
+    limit: int = 20,
+    context: str = Query("season", description="season | playoffs"),
+) -> dict:
+    """xGA/60 leaderboard — best defenders by lowest on-ice xGA/60 (DZS-adjusted from CDR model)."""
     import polars as pl
     # Use CDR parquet — it has xga_60_adj (DZS-corrected on-ice xGA/60), which is
     # the real on-ice suppression number. RAPM xga_60 is a marginal ridge-regression
     # differential and is near zero by construction; not useful as a leaderboard.
-    cdr_dir = _GRETZKY_DATA_DIR / "cdr"
-    files = sorted(cdr_dir.glob("cdr_*.parquet")) if cdr_dir.exists() else []
+    files = _context_parquets("cdr", "cdr_", context)
+    source = "playoffs" if context == "playoffs" and files else "season"
     if not files:
-        return {"players": [], "built": False}
+        files = _context_parquets("cdr", "cdr_", "season")
+    if not files:
+        return {"players": [], "built": False, "source": source}
     try:
         df = pl.read_parquet(files[-1])
         col = "xga_60_adj" if "xga_60_adj" in df.columns else "xga_60"
         if col not in df.columns:
-            return {"players": [], "built": False, "reason": "xga_60_missing"}
+            return {"players": [], "built": False, "reason": "xga_60_missing", "source": source}
         name_lut = _build_name_lookup()
-        MIN_GP = 20
+        MIN_GP = 4 if source == "playoffs" else 20
         if "gp" in df.columns:
             df = df.filter(pl.col("gp") >= MIN_GP)
         df = df.filter(pl.col(col).is_not_null()).filter(pl.col(col) > 0)
         # Lower xGA/60 = better defensive suppression; sort ascending
         ranked = df.sort(col, descending=False).head(limit)
-        # Build RAPM EV Def lookup for context column
+        # Build RAPM EV Def lookup for context column (matching context).
         rapm_lut: dict[int, float | None] = {}
-        rapm_dir = _GRETZKY_DATA_DIR / "rapm"
-        rapm_files = sorted(rapm_dir.glob("rapm_*.parquet")) if rapm_dir.exists() else []
+        rapm_files = _context_parquets("rapm", "rapm_", context) or _context_parquets("rapm", "rapm_", "season")
         if rapm_files:
             try:
                 rdf = pl.read_parquet(rapm_files[-1], columns=["player_id", "rapm_ev_def"])
@@ -3529,9 +3550,9 @@ async def phase2_xga_leaderboard(limit: int = 20) -> dict:
                 "gp":         r.get("gp"),
                 "rapm_ev_def":round(float(rapm_def), 3) if rapm_def is not None else None,
             })
-        return {"players": rows, "built": True}
+        return {"players": rows, "built": True, "source": source}
     except Exception as exc:
-        return {"players": [], "built": False, "error": str(exc)}
+        return {"players": [], "built": False, "error": str(exc), "source": source}
 
 
 # ---------------------------------------------------------------------------

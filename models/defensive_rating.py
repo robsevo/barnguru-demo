@@ -73,6 +73,7 @@ class CompositeDefensiveRating:
         rapm_df: pl.DataFrame,
         pbp_stats_df: pl.DataFrame,
         season: int,
+        min_gp: int | None = None,
     ) -> pl.DataFrame:
         """Compute CDR for all qualified players.
 
@@ -100,12 +101,13 @@ class CompositeDefensiveRating:
         df = rapm_df
         if "season" in df.columns:
             df = df.filter(pl.col("season") == season)
-        df = df.filter(pl.col("gp") >= MIN_GP)
+        threshold = min_gp if min_gp is not None else MIN_GP
+        df = df.filter(pl.col("gp") >= threshold)
 
         if df.is_empty():
             raise ValueError(
-                f"No qualified players found (season={season}, min_gp={MIN_GP}). "
-                "Ensure EH RAPM data has been synced for this season."
+                f"No qualified players found (season={season}, min_gp={threshold}). "
+                "Ensure RAPM data has been computed for this season."
             )
 
         # Normalise player_id — may be null in RAPM data
@@ -223,10 +225,13 @@ class CompositeDefensiveRating:
 # ---------------------------------------------------------------------------
 
 
-def write_cdr(df: pl.DataFrame, out_dir: Path, season: int) -> Path:
-    """Write CDR parquet to out_dir/cdr_{season}.parquet. Creates dir if needed."""
+def write_cdr(
+    df: pl.DataFrame, out_dir: Path, season: int, season_type: str = "regular"
+) -> Path:
+    """Write CDR parquet. season_type='playoffs' appends _playoffs suffix."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"cdr_{season}.parquet"
+    suffix = "_playoffs" if season_type == "playoffs" else ""
+    path = out_dir / f"cdr_{season}{suffix}.parquet"
     df.write_parquet(path)
     return path
 

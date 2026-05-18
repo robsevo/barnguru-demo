@@ -1069,16 +1069,6 @@ export default function PlayersPage() {
       .then(r => r.json()).then(d => setEdgeShotSpeed(d.players ?? [])).catch(() => setEdgeShotSpeed([]));
     fetch("/api/phase2/goalie-leaderboard?metric=gsax&limit=20")
       .then(r => r.json()).then(d => setGoalieList(d.players ?? [])).catch(() => setGoalieList([]));
-    fetch("/api/phase2/clutch-leaderboard?limit=20")
-      .then(r => r.json()).then(d => setClutchList(d.players ?? [])).catch(() => setClutchList([]));
-    fetch("/api/phase2/special-teams-leaderboard?side=pp&limit=20")
-      .then(r => r.json()).then(d => setPpList(d.players ?? [])).catch(() => setPpList([]));
-    fetch("/api/phase2/special-teams-leaderboard?side=pk&limit=20")
-      .then(r => r.json()).then(d => setPkList(d.players ?? [])).catch(() => setPkList([]));
-    fetch("/api/phase2/cdr-leaderboard?limit=20")
-      .then(r => r.json()).then(d => setCdrList(d.players ?? [])).catch(() => setCdrList([]));
-    fetch("/api/phase2/xga-leaderboard?limit=20")
-      .then(r => r.json()).then(d => setXgaList(d.players ?? [])).catch(() => setXgaList([]));
   }, []);
 
   // Scoring Leaders — context-aware. Flips between regular-season
@@ -1135,6 +1125,43 @@ export default function PlayersPage() {
     setHotHandList(null);
     fetch(`/api/phase2/hot-hand-leaderboard?limit=20&context=${seasonCtx}`)
       .then(r => r.json()).then(d => setHotHandList(d.players ?? [])).catch(() => setHotHandList([]));
+  }, [seasonCtx, ctxHydrated]);
+
+  // Clutch / CDR / xGA / Special Teams — all context-aware. Each lives in its
+  // own effect so they refetch only when relevant deps change.
+  useEffect(() => {
+    if (!ctxHydrated) return;
+    setClutchList(null);
+    fetch(`/api/phase2/clutch-leaderboard?limit=20&context=${seasonCtx}`)
+      .then(r => r.json()).then(d => setClutchList(d.players ?? [])).catch(() => setClutchList([]));
+  }, [seasonCtx, ctxHydrated]);
+
+  useEffect(() => {
+    if (!ctxHydrated) return;
+    setCdrList(null);
+    fetch(`/api/phase2/cdr-leaderboard?limit=20&context=${seasonCtx}`)
+      .then(r => r.json()).then(d => setCdrList(d.players ?? [])).catch(() => setCdrList([]));
+  }, [seasonCtx, ctxHydrated]);
+
+  useEffect(() => {
+    if (!ctxHydrated) return;
+    setXgaList(null);
+    fetch(`/api/phase2/xga-leaderboard?limit=20&context=${seasonCtx}`)
+      .then(r => r.json()).then(d => setXgaList(d.players ?? [])).catch(() => setXgaList([]));
+  }, [seasonCtx, ctxHydrated]);
+
+  useEffect(() => {
+    if (!ctxHydrated) return;
+    setPpList(null);
+    fetch(`/api/phase2/special-teams-leaderboard?side=pp&limit=20&context=${seasonCtx}`)
+      .then(r => r.json()).then(d => setPpList(d.players ?? [])).catch(() => setPpList([]));
+  }, [seasonCtx, ctxHydrated]);
+
+  useEffect(() => {
+    if (!ctxHydrated) return;
+    setPkList(null);
+    fetch(`/api/phase2/special-teams-leaderboard?side=pk&limit=20&context=${seasonCtx}`)
+      .then(r => r.json()).then(d => setPkList(d.players ?? [])).catch(() => setPkList([]));
   }, [seasonCtx, ctxHydrated]);
 
   // Goalie Leaders — context-aware NHL counting stats (W / Sv% / GAA / SO).

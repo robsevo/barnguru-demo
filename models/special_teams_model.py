@@ -399,20 +399,16 @@ def write_special_teams(
     df: pl.DataFrame,
     output_dir: Path,
     season: int,
+    season_type: str = "regular",
 ) -> Path:
     """Write special teams ratings parquet.
 
-    Args:
-        df:         DataFrame matching SPECIAL_TEAMS_SCHEMA.
-        output_dir: Directory to write into (created if absent).
-        season:     Season integer used in filename.
-
-    Returns:
-        Path to the written parquet file.
+    season_type="playoffs" appends _playoffs to the filename.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / f"special_teams_{season}.parquet"
+    suffix = "_playoffs" if season_type == "playoffs" else ""
+    path = output_dir / f"special_teams_{season}{suffix}.parquet"
     df.write_parquet(path)
     return path
 

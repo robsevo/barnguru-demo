@@ -925,8 +925,12 @@ def write_clutch_index(
     career_df: pl.DataFrame,
     output_dir: Path,
     season: int,
+    season_type: str = "regular",
 ) -> tuple[Path, Path]:
     """Write per-season and career clutch index DataFrames to parquet.
+
+    season_type="playoffs" appends _playoffs to the file names so the
+    season + playoff outputs live side-by-side.
 
     Returns:
         Tuple of (season_path, career_path).
@@ -934,8 +938,9 @@ def write_clutch_index(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    p_season = output_dir / f"clutch_index_{season}.parquet"
-    p_career = output_dir / f"clutch_index_career.parquet"
+    suffix = "_playoffs" if season_type == "playoffs" else ""
+    p_season = output_dir / f"clutch_index_{season}{suffix}.parquet"
+    p_career = output_dir / f"clutch_index_career{suffix}.parquet"
 
     season_df.write_parquet(p_season)
     career_df.write_parquet(p_career)

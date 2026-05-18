@@ -63,7 +63,7 @@ CLUTCH_SUBDIR      = "clutch_index"
 # Data loading
 # ---------------------------------------------------------------------------
 
-def _load_goals(data_dir: Path, season: int) -> pl.DataFrame:
+def _load_goals(data_dir: Path, season: int, season_type: str = "regular") -> pl.DataFrame:
     """Load goal events for a season from PBP parquets.
 
     Accepted filename patterns:
@@ -93,6 +93,14 @@ def _load_goals(data_dir: Path, season: int) -> pl.DataFrame:
 
     if df is None:
         return pl.DataFrame()
+
+    # Filter by game type (game_id encodes it: SSSS{TT}{GGGG} where TT=02|03)
+    if "game_id" in df.columns:
+        gt = (pl.col("game_id") % 1_000_000) // 10_000
+        if season_type == "playoffs":
+            df = df.filter(gt == 3)
+        elif season_type == "regular":
+            df = df.filter(gt == 2)
 
     # Filter to goal events
     if "event_type" in df.columns:
@@ -347,11 +355,21 @@ def main() -> None:
         action="store_true",
         help="Overwrite existing output parquets.",
     )
+    parser.add_argument(
+        "--season-type",
+        choices=["regular", "playoffs"],
+        default="regular",
+        help="'regular' writes clutch_index_{year}.parquet (default). "
+             "'playoffs' filters PBP to playoff games and writes "
+             "clutch_index_{year}_playoffs.parquet.",
+    )
     args = parser.parse_args()
 
     seasons: list[int] = sorted(args.seasons)
     target_season: int = max(seasons)
     data_dir: Path     = args.data_dir
+    season_type: str   = args.season_type
+    out_suffix         = "_playoffs" if season_type == "playoffs" else ""
 
     print(f"[clutch-index] Feature 2.29 — Clutch Index (Win Probability Added)")
     print(f"  Assist weight  : {ASSIST_WEIGHT}")
@@ -363,8 +381,8 @@ def main() -> None:
 
     # ── Check output ──────────────────────────────────────────────────────────
     out_dir    = data_dir / CLUTCH_SUBDIR
-    out_season = out_dir / f"clutch_index_{target_season}.parquet"
-    out_career = out_dir / "clutch_index_career.parquet"
+    out_season = out_dir / f"clutch_index_{target_season}{out_suffix}.parquet"
+    out_career = out_dir / f"clutch_index_career{out_suffix}.parquet"
 
     if out_season.exists() and out_career.exists() and not args.force:
         print(f"\n[clutch-index] Output already exists: {out_season}")
@@ -433,7 +451,7 @@ def main() -> None:
     for season in seasons:
         print(f"\n[clutch-index] Processing season {season}…")
 
-        goals_df    = _load_goals(data_dir, season)
+        goals_df    = _load_goals(data_dir, season, season_type=season_type)
         toi_df      = _load_toi(data_dir, season)
         outcomes_df = _load_game_outcomes(data_dir, season)
 
@@ -532,13 +550,13 @@ def main() -> None:
 
         if not out_season_df.is_empty():
             p_season, p_career = write_clutch_index(
-                out_season_df, career_df, out_dir, target_season
+                out_season_df, career_df, out_dir, target_season, season_type=season_type
             )
             print(f"\n[clutch-index] Season parquet written  : {p_season}")
             print(f"[clutch-index] Career parquet written  : {p_career}")
         else:
             if not career_df.is_empty():
-                p_career = out_dir / "clutch_index_career.parquet"
+                p_career = out_dir / f"clutch_index_career{out_suffix}.parquet"
                 career_df.write_parquet(p_career)
                 print(f"\n[clutch-index] Career parquet written  : {p_career}")
 
