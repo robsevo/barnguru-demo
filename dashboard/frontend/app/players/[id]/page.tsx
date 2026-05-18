@@ -2080,22 +2080,27 @@ export default function PlayerProfilePage() {
       .catch(() => {});
   }, [data?.player_id]);
 
-  // Fetch shot data for shot map visualization
+  // Fetch shot data for shot map visualization — context-aware so the heat
+  // map reflects regular-season or playoff shots when the pill flips.
   useEffect(() => {
     if (!data?.player_id) return;
-    fetch(`/api/player-shots/${data.player_id}`)
+    if (!ctxHydrated) return;
+    setShots([]);
+    fetch(`/api/player-shots/${data.player_id}?context=${seasonCtx}`)
       .then(r => r.json())
       .then(d => { if (d.shots?.length) setShots(d.shots); })
       .catch(() => {});
-  }, [data?.player_id]);
+  }, [data?.player_id, seasonCtx, ctxHydrated]);
 
   useEffect(() => {
     if (!data?.player_id || !data?.is_goalie) return;
-    fetch(`/api/goalie-shots/${data.player_id}`)
+    if (!ctxHydrated) return;
+    setGoalieShots([]);
+    fetch(`/api/goalie-shots/${data.player_id}?context=${seasonCtx}`)
       .then(r => r.json())
       .then(d => { if (d.shots?.length) setGoalieShots(d.shots); })
       .catch(() => {});
-  }, [data?.player_id, data?.is_goalie]);
+  }, [data?.player_id, data?.is_goalie, seasonCtx, ctxHydrated]);
 
   useEffect(() => {
     if (!data?.player_id || !data?.is_goalie) return;

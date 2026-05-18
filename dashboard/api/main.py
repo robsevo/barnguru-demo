@@ -8444,7 +8444,10 @@ async def stream_success(url: str) -> FastResponse:
 
 
 @app.get("/player-shots/{player_id}")
-async def player_shots(player_id: int):
+async def player_shots(
+    player_id: int,
+    context: str = Query("season", description="season | playoffs"),
+):
     """Return arena-adjusted shot coordinates for a player (last 2 seasons of MoneyPuck data)."""
     shots_dir = _GRETZKY_DATA_DIR / "shots"
     if not shots_dir.exists():
@@ -8453,7 +8456,7 @@ async def player_shots(player_id: int):
     if not files:
         return {"shots": [], "count": 0, "status": "no_data"}
     import polars as pl
-    want_cols = {"shooter_id", "arena_adj_x", "arena_adj_y", "x_goal", "is_goal", "shot_type"}
+    want_cols = {"shooter_id", "arena_adj_x", "arena_adj_y", "x_goal", "is_goal", "shot_type", "is_playoff"}
     dfs = []
     for f in files[-2:]:  # last 2 seasons
         try:
@@ -8468,6 +8471,13 @@ async def player_shots(player_id: int):
         return {"shots": [], "count": 0, "status": "no_data"}
     combined = pl.concat(dfs, how="diagonal_relaxed")
     player_df = combined.filter(pl.col("shooter_id") == player_id)
+    # Filter to the requested context so the heat map reflects regular-season
+    # or playoff shots only.
+    if "is_playoff" in player_df.columns:
+        if context == "playoffs":
+            player_df = player_df.filter(pl.col("is_playoff") == True)  # noqa: E712
+        elif context == "season":
+            player_df = player_df.filter(pl.col("is_playoff") == False)  # noqa: E712
     shots_out = []
     for r in player_df.to_dicts():
         x = r.get("arena_adj_x")
@@ -8485,7 +8495,10 @@ async def player_shots(player_id: int):
 
 
 @app.get("/goalie-shots/{player_id}")
-async def goalie_shots(player_id: int):
+async def goalie_shots(
+    player_id: int,
+    context: str = Query("season", description="season | playoffs"),
+):
     """Return arena-adjusted shot coordinates for shots AGAINST a goalie (last 2 seasons)."""
     shots_dir = _GRETZKY_DATA_DIR / "shots"
     if not shots_dir.exists():
@@ -8494,7 +8507,7 @@ async def goalie_shots(player_id: int):
     if not files:
         return {"shots": [], "count": 0, "status": "no_data"}
     import polars as pl
-    want_cols = {"goalie_id", "arena_adj_x", "arena_adj_y", "x_goal", "is_goal", "shot_type"}
+    want_cols = {"goalie_id", "arena_adj_x", "arena_adj_y", "x_goal", "is_goal", "shot_type", "is_playoff"}
     dfs = []
     for f in files[-2:]:
         try:
@@ -8509,6 +8522,11 @@ async def goalie_shots(player_id: int):
         return {"shots": [], "count": 0, "status": "no_data"}
     combined = pl.concat(dfs, how="diagonal_relaxed")
     player_df = combined.filter(pl.col("goalie_id") == player_id)
+    if "is_playoff" in player_df.columns:
+        if context == "playoffs":
+            player_df = player_df.filter(pl.col("is_playoff") == True)  # noqa: E712
+        elif context == "season":
+            player_df = player_df.filter(pl.col("is_playoff") == False)  # noqa: E712
     shots_out = []
     for r in player_df.to_dicts():
         x = r.get("arena_adj_x")
