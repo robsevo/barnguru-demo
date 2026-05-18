@@ -51,6 +51,7 @@ async def _ingest_season(
     concurrency: int,
     force: bool,
     force_all: bool = False,
+    game_types: list[int] | None = None,
 ) -> None:
     from data.historical_ingestor import HistoricalIngestor
     from data.nhl_client import NHLClient
@@ -65,27 +66,37 @@ async def _ingest_season(
         if cleared:
             print(f"  Cleared {cleared} error entries from manifest (--force)")
 
-    print(f"  Fetching game IDs for season {season}...")
-    async with NHLClient() as client:
-        summary = await ingestor.ingest_season(client, season)
+    # Default: ingest regular season + playoffs. Playoff ingestion is what
+    # unlocks the Phase 17 context=playoffs filter; without it the parquet
+    # only has game_type=2 rows and the toggle shows empty data.
+    gtypes = game_types or [2, 3]
 
-    if summary.skipped == summary.total_games and summary.total_games > 0:
-        status = "cached"
-    elif summary.successful > 0:
-        status = "ok"
-    else:
-        status = "empty"
-    icon = {"ok": "✓", "cached": "●", "empty": "○"}.get(status, "✗")
-    print(
-        f"  {icon} season {season}  [{status}]"
-        f"  games {summary.successful}/{summary.total_games} ok"
-        f"  skipped {summary.skipped}"
-        f"  failed {summary.failed}"
-        f"  shifts {summary.total_shifts:,}"
-        f"  plays {summary.total_plays:,}"
-    )
-    if summary.failed > 0:
-        print(f"    {summary.failed} games failed — re-run to retry (manifest tracks state)")
+    async with NHLClient() as client:
+        for gt in gtypes:
+            label = {2: "regular", 3: "playoffs", 1: "preseason", 4: "all-star"}.get(gt, str(gt))
+            print(f"  Fetching {label} game IDs for season {season}...")
+            try:
+                summary = await ingestor.ingest_season(client, season, game_type=gt)
+            except Exception as exc:
+                print(f"  ✗ season {season} {label}: {exc}")
+                continue
+            if summary.skipped == summary.total_games and summary.total_games > 0:
+                status = "cached"
+            elif summary.successful > 0:
+                status = "ok"
+            else:
+                status = "empty"
+            icon = {"ok": "✓", "cached": "●", "empty": "○"}.get(status, "✗")
+            print(
+                f"  {icon} season {season} {label}  [{status}]"
+                f"  games {summary.successful}/{summary.total_games} ok"
+                f"  skipped {summary.skipped}"
+                f"  failed {summary.failed}"
+                f"  shifts {summary.total_shifts:,}"
+                f"  plays {summary.total_plays:,}"
+            )
+            if summary.failed > 0:
+                print(f"    {summary.failed} games failed — re-run to retry (manifest tracks state)")
 
 
 def main() -> None:
@@ -125,6 +136,15 @@ def main() -> None:
         action="store_true",
         help="Clear ALL manifest entries (including ok) to force a full re-ingest",
     )
+    parser.add_argument(
+        "--game-types",
+        nargs="+",
+        type=int,
+        default=None,
+        metavar="N",
+        help="NHL game types to ingest (1=preseason, 2=regular, 3=playoffs, 4=all-star). "
+             "Default: 2 3 (regular season + playoffs).",
+    )
     args = parser.parse_args()
 
     base = _data_dir()
@@ -154,6 +174,7 @@ def main() -> None:
                     concurrency=args.concurrency,
                     force=args.force or args.force_all,
                     force_all=args.force_all,
+                    game_types=args.game_types,
                 )
             )
         except Exception as exc:
