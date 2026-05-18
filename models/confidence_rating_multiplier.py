@@ -12,7 +12,13 @@ Python side ships these so the dashboard can show "expected shoot bias",
 
     shoot_bias    = 1.0 + 0.06 × c     # ±6% on shoot-vs-pass probability
     risk_bias     = 1.0 + 0.05 × c     # ±5% on pinch / aggressive forecheck
-    turnover_bias = 1.0 − 0.04 × c     # low confidence → +4% turnover prob
+    turnover_bias = 1.0 + 0.04 × c     # +4% turnover prob when confident
+
+All three scale in the SAME direction with confidence. Internally consistent
+because confidence drives aggressive play: a confident player shoots more,
+pinches more, and turns the puck over more (because the aggressive plays
+they're attempting are inherently riskier). A passive/unconfident player
+dumps it in — fewer turnovers, but also fewer chances created.
 
 Inputs
 ------
@@ -76,7 +82,7 @@ def risk_bias(c: float) -> float:
 
 
 def turnover_bias(c: float) -> float:
-    return 1.0 - TURNOVER_BIAS_SLOPE * _f(c)
+    return 1.0 + TURNOVER_BIAS_SLOPE * _f(c)
 
 
 class ConfidenceRatingMultiplier:

@@ -196,6 +196,9 @@ COMMANDS: list[Cmd] = [
     Cmd("seasonal-performance", "phase3",
         "Compute seasonal motivation factor per (player, game) (Feature 3.22)",
         "scripts.compute_seasonal_performance"),
+    Cmd("team-results", "phase3",
+        "Derive per-team-game W/L/OTL results from PBP final scores (feeds Phase 17 team_streak)",
+        "scripts.compute_team_results"),
 
     # ── Phase 17 — Confidence Layer ───────────────────────────────────────
     Cmd("composite-confidence", "phase17",

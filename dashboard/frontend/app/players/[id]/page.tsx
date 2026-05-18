@@ -2980,15 +2980,20 @@ export default function PlayerProfilePage() {
               {/* Component breakdown bars */}
               {sortedComps.length > 0 && (
                 <div className="mt-4 pt-4 border-t border-white/[0.05] space-y-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/40">
-                    FI Component Breakdown
-                  </p>
+                  <div className="flex items-baseline justify-between">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/40">
+                      FI Component Breakdown
+                    </p>
+                    <p className="text-[8px] font-mono text-white/25">
+                      bar saturates at 0.30
+                    </p>
+                  </div>
                   {sortedComps.map(([k, v]) => (
                     <div key={k} className="flex items-center gap-2">
                       <span className="text-[10px] text-white/55 w-32 shrink-0 truncate">
                         {k.replace(/_/g, " ").replace(/ load$/, "")}
                       </span>
-                      <div className="flex-1 h-1.5 rounded-full bg-white/[0.04] overflow-hidden">
+                      <div className="flex-1 h-1.5 rounded-full bg-white/[0.04] overflow-hidden relative">
                         <div
                           className="h-full"
                           style={{
@@ -2997,12 +3002,24 @@ export default function PlayerProfilePage() {
                             opacity: 0.85,
                           }}
                         />
+                        {/* 50% midpoint tick */}
+                        <div className="absolute top-0 bottom-0 w-px bg-white/[0.10]" style={{ left: "50%" }} />
                       </div>
                       <span className="text-[10px] font-mono text-white/65 w-12 text-right shrink-0">
                         {v.toFixed(3)}
                       </span>
                     </div>
                   ))}
+                  {/* Scale legend */}
+                  <div className="flex items-center gap-2 pt-1">
+                    <span className="w-32 shrink-0" />
+                    <div className="flex-1 flex justify-between text-[8px] font-mono text-white/25">
+                      <span>0</span>
+                      <span>0.15</span>
+                      <span>0.30+</span>
+                    </div>
+                    <span className="w-12 shrink-0" />
+                  </div>
                 </div>
               )}
 
@@ -3047,7 +3064,7 @@ export default function PlayerProfilePage() {
                 .slice(0, 12)
             : [];
           return (
-            <Card title="Confidence (Phase 17." icon="📈" style={cardStyle}>
+            <Card title="Confidence (Phase 17)" icon="📈" style={cardStyle}>
               <div className="space-y-0">
                 <StatRow
                   label="Confidence Index"
@@ -3095,16 +3112,21 @@ export default function PlayerProfilePage() {
                     label="Turnover Bias"
                     value={phase3.conf_turnover_bias.toFixed(3)}
                     sub="Multiplier on turnover probability"
-                    tip="Phase 17.25 — when confidence is low, turnover probability rises. >1.0 = more giveaways expected."
+                    tip="Phase 17.25 — confident players take more risks (aggressive passes, holds, plays through traffic) and turn the puck over more. >1.0 = more giveaways expected from the aggressive plays they're attempting. Scales the same direction as shoot_bias and risk_bias."
                   />
                 )}
               </div>
 
               {sortedComps.length > 0 && (
                 <div className="mt-4 pt-4 border-t border-white/[0.05] space-y-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/40">
-                    Top Contributors
-                  </p>
+                  <div className="flex items-baseline justify-between">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/40">
+                      Top Contributors
+                    </p>
+                    <p className="text-[8px] font-mono text-white/25">
+                      bar saturates at ±0.15
+                    </p>
+                  </div>
                   {sortedComps.map(([k, v]) => {
                     const isTeam = k.startsWith("team:");
                     const label = k.replace(/^team:/, "").replace(/_/g, " ");
@@ -3114,7 +3136,7 @@ export default function PlayerProfilePage() {
                         <span className={`text-[10px] w-32 shrink-0 truncate ${isTeam ? "text-white/40" : "text-white/55"}`}>
                           {isTeam ? `(team) ${label}` : label}
                         </span>
-                        <div className="flex-1 h-1.5 rounded-full bg-white/[0.04] overflow-hidden">
+                        <div className="flex-1 h-1.5 rounded-full bg-white/[0.04] overflow-hidden relative">
                           <div
                             className="h-full"
                             style={{
@@ -3123,6 +3145,8 @@ export default function PlayerProfilePage() {
                               opacity: 0.85,
                             }}
                           />
+                          {/* 50% midpoint tick */}
+                          <div className="absolute top-0 bottom-0 w-px bg-white/[0.10]" style={{ left: "50%" }} />
                         </div>
                         <span className="text-[10px] font-mono text-white/65 w-14 text-right shrink-0">
                           {v >= 0 ? "+" : ""}{v.toFixed(3)}
@@ -3130,6 +3154,16 @@ export default function PlayerProfilePage() {
                       </div>
                     );
                   })}
+                  {/* Scale legend */}
+                  <div className="flex items-center gap-2 pt-1">
+                    <span className="w-32 shrink-0" />
+                    <div className="flex-1 flex justify-between text-[8px] font-mono text-white/25">
+                      <span>0</span>
+                      <span>0.075</span>
+                      <span>0.15+</span>
+                    </div>
+                    <span className="w-14 shrink-0" />
+                  </div>
                 </div>
               )}
             </Card>
