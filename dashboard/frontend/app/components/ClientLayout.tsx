@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { PiPProvider } from "@/utils/pipContext";
 import { ThemeProvider, useTheme } from "@/utils/themeContext";
+import { SeasonContextProvider } from "@/utils/contextToggle";
 import FloatingPlayer   from "./FloatingPlayer";
 import ThemeInjector    from "./ThemeInjector";
 import TeamThemeLoader  from "./TeamThemeLoader";
@@ -774,7 +775,9 @@ function lightenHex(hex: string): string {
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
   return (
     <ThemeProvider>
-      <InnerLayout>{children}</InnerLayout>
+      <SeasonContextProvider>
+        <InnerLayout>{children}</InnerLayout>
+      </SeasonContextProvider>
     </ThemeProvider>
   );
 }

@@ -134,6 +134,7 @@ COMPOSITE_FI_SCHEMA: dict[str, pl.DataType] = {
     "game_id":                pl.Int64,
     "game_date":              pl.Utf8,
     "as_of_date":             pl.Utf8,
+    "game_type":              pl.Int64,    # 2 = regular season, 3 = playoffs (nullable)
     "fatigue_index":          pl.Float64,
     "raw_load":               pl.Float64,
     "rust_load":              pl.Float64,
@@ -445,11 +446,18 @@ class CompositeFatigueIndex:
             except (TypeError, ValueError):
                 gid = 0
 
+            gt_raw = r.get("game_type")
+            try:
+                gt_v: int | None = int(gt_raw) if gt_raw is not None else None
+            except (TypeError, ValueError):
+                gt_v = None
+
             out_rows.append({
                 "player_id":              pid,
                 "game_id":                gid,
                 "game_date":              str(gd_raw),
                 "as_of_date":             as_of_date,
+                "game_type":              gt_v,
                 "fatigue_index":          float(fi),
                 "raw_load":               float(sum(comps.values())),
                 "rust_load":              float(max(0.0, 1.0 - rust_v)),

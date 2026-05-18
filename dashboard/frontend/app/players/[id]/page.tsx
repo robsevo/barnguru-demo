@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { logoUrl, TEAM_COLORS, TEAM_SECONDARY, normalizePlayerName } from "@/utils/nhl";
+import { SeasonContextPill, useSeasonContext } from "@/utils/contextToggle";
 import TeamLogoLink from "@/components/TeamLogoLink";
 import { useTheme } from "@/utils/themeContext";
 import {
@@ -1769,6 +1770,7 @@ export default function PlayerProfilePage() {
   const params = useParams();
   const router = useRouter();
   const { theme, cortexPinned, setPreviewTheme } = useTheme();
+  const { ctx: seasonCtx, hydrated: ctxHydrated } = useSeasonContext();
   // The route param is a URL-encoded player name (e.g. "Nathan%20MacKinnon").
   // Normalize accents so old bookmarks / direct URLs with ý, é, etc. still resolve.
   const playerName = normalizePlayerName(decodeURIComponent(params.id as string));
@@ -1893,8 +1895,11 @@ export default function PlayerProfilePage() {
       .catch(() => setLoading(false));
 
     // Phase 3 enrichment — fire-and-forget; missing sub-models render as null.
+    // Wait for the context toggle to hydrate so we don't fire two requests
+    // (one with the default, then a refetch on the persisted value).
+    if (!ctxHydrated) return;
     setPhase3(null);
-    fetch(`/api/phase3/player?name=${encodeURIComponent(playerName)}`)
+    fetch(`/api/phase3/player?name=${encodeURIComponent(playerName)}&context=${seasonCtx}`)
       .then(r => r.json())
       .then((p) => {
         if (p?.not_found) return;
@@ -1931,7 +1936,7 @@ export default function PlayerProfilePage() {
         });
       })
       .catch(() => {});
-  }, [playerName]);
+  }, [playerName, seasonCtx, ctxHydrated]);
 
   // Apply the player's team theme site-wide as a preview (reverts on navigate away).
   // Re-fires when liveTeam overrides a stale model team (e.g. traded player).
@@ -2370,6 +2375,11 @@ export default function PlayerProfilePage() {
               );
             })()}
           </div>
+        </div>
+
+        {/* ── Season / Playoffs context pill ── */}
+        <div className="px-3 sm:px-5 py-2 flex justify-center">
+          <SeasonContextPill />
         </div>
 
         {/* ── 2025-26 Season stats strip ── */}

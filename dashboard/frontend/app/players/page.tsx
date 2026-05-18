@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { TEAM_COLORS, TEAM_SECONDARY, normalizePlayerName } from "@/utils/nhl";
 import TeamLogoLink from "@/components/TeamLogoLink";
 import { useTheme } from "@/utils/themeContext";
+import { SeasonContextPill } from "@/utils/contextToggle";
 
 function darkBlend(hex: string, darkness = 0.88): string {
   const base = [9, 10, 12];
@@ -1179,6 +1180,11 @@ export default function PlayersPage() {
 
       {/* ── About pill ── */}
       <CortexAbout />
+
+      {/* ── Playoffs / Season context toggle ── */}
+      <div className="flex justify-center mb-4">
+        <SeasonContextPill />
+      </div>
 
       {/* Search bar */}
       <div className="relative mb-5">

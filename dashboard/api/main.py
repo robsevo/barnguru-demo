@@ -3467,6 +3467,32 @@ _PHASE3_FEATURES: list[dict] = [
 ]
 
 
+def _filter_by_context(df, context: str):
+    """Filter a per-(player, game) DataFrame by game_type.
+
+    ``context``:
+      - ``playoffs`` → game_type == 3
+      - ``season``   → game_type == 2
+      - ``auto``     → playoffs if any game_type=3 rows exist, else season
+      - ``all`` / anything else → no filter
+
+    Silently no-op if the DataFrame lacks ``game_type`` (older parquets).
+    """
+    import polars as pl
+    if df is None or len(df) == 0:
+        return df
+    if "game_type" not in df.columns:
+        return df
+    if context == "playoffs":
+        return df.filter(pl.col("game_type") == 3)
+    if context == "season":
+        return df.filter(pl.col("game_type") == 2)
+    if context == "auto":
+        has_playoffs = df.filter(pl.col("game_type") == 3).height > 0
+        return df.filter(pl.col("game_type") == 3) if has_playoffs else df.filter(pl.col("game_type") == 2)
+    return df
+
+
 def _phase3_latest(subdir: str, glob: str) -> tuple[Path | None, datetime | None]:
     """Return (path, mtime) of the most-recently modified parquet, or (None, None)."""
     d = _GRETZKY_DATA_DIR / subdir
@@ -3527,12 +3553,15 @@ async def phase3_modules() -> dict:
 
 
 @app.get("/phase3/fatigue/top")
-async def phase3_fatigue_top(limit: int = 25) -> dict:
+async def phase3_fatigue_top(limit: int = 25, context: str = "auto") -> dict:
     """Top-N players by composite FI (3.17) from the latest parquet.
 
-    Returns rows with fatigue_index, raw_load, rust_load, playoff_load_penalty,
-    and the component_breakdown JSON. ``status`` is ``not_run`` until
-    ``gretzky composite-fi`` has been executed.
+    ``context``:
+      - ``playoffs`` → only rows where ``game_type == 3``
+      - ``season`` → only rows where ``game_type == 2``
+      - ``auto``    → playoffs if any playoff rows exist in the parquet,
+                      else season (during NHL postseason this defaults to playoffs)
+      - ``all``     → no filter
     """
     import polars as pl
 
@@ -3543,6 +3572,8 @@ async def phase3_fatigue_top(limit: int = 25) -> dict:
     df = pl.read_parquet(path)
     if len(df) == 0:
         return {"status": "empty", "rows": [], "as_of": mtime.date().isoformat() if mtime else None}
+
+    df = _filter_by_context(df, context)
 
     names = _build_name_lookup()
     meta  = _build_player_meta()
@@ -3968,13 +3999,20 @@ async def phase3_trade_integration(limit: int = 25) -> dict:
 
 
 @app.get("/phase3/player")
-async def phase3_player(name: str = Query(..., description="Player name")) -> dict:
+async def phase3_player(
+    name: str = Query(..., description="Player name"),
+    context: str = Query("auto", description="playoffs | season | auto | all"),
+) -> dict:
     """Per-player Phase 3 lookup — composite FI + components + anomaly + multiplier.
 
     Returns the most-recent (player, game) row for each Phase 3 feature
     that has been computed. Fields are ``null`` when a sub-model has not
     been run yet — the page surfaces that as "not run" rather than
     inventing a default.
+
+    ``context`` controls playoff vs regular-season views for per-game
+    parquets (composite_fi, goalie_fatigue, fi_multiplier). Confidence
+    (Phase 17) is a snapshot and ignores this param.
     """
     import polars as pl
     import unicodedata, json as _json
@@ -4057,6 +4095,7 @@ async def phase3_player(name: str = Query(..., description="Player name")) -> di
     if fi_path is not None:
         try:
             fi_df = pl.read_parquet(fi_path).filter(pl.col("player_id") == pid)
+            fi_df = _filter_by_context(fi_df, context)
             if not fi_df.is_empty():
                 fi_row = fi_df.sort("game_date", descending=True).head(1).to_dicts()[0]
         except Exception:
@@ -4086,6 +4125,7 @@ async def phase3_player(name: str = Query(..., description="Player name")) -> di
     if fm_path is not None:
         try:
             fmdf = pl.read_parquet(fm_path).filter(pl.col("player_id") == pid)
+            fmdf = _filter_by_context(fmdf, context)
             if not fmdf.is_empty():
                 fm_row = fmdf.sort("game_date", descending=True).head(1).to_dicts()[0]
         except Exception:
@@ -4229,6 +4269,7 @@ async def phase3_player(name: str = Query(..., description="Player name")) -> di
     if gf_path is not None:
         try:
             gfdf = pl.read_parquet(gf_path).filter(pl.col("goalie_id") == pid)
+            gfdf = _filter_by_context(gfdf, context)
             if not gfdf.is_empty():
                 gf_row = gfdf.sort("game_date", descending=True).head(1).to_dicts()[0]
         except Exception:

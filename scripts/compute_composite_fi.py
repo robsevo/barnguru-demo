@@ -29,6 +29,7 @@ if str(_REPO) not in sys.path:
 
 import polars as pl
 
+from data.schedule_sync import latest_schedule_parquet
 from models.composite_fi import (
     CompositeFatigueIndex,
     write_composite_fi,
@@ -194,6 +195,17 @@ def _build_signals(args, as_of: str) -> pl.DataFrame:
             ]),
             on="player_id", how="left",
         )
+
+    # Join game_type from schedule (2 = regular, 3 = playoffs) so the
+    # backend can filter playoff-context views without a follow-up join.
+    sched_path = latest_schedule_parquet(d / "schedule")
+    if sched_path is not None:
+        try:
+            sched = pl.read_parquet(sched_path).select(["game_id", "game_type"])
+            base = base.join(sched.unique(subset=["game_id"]),
+                             on="game_id", how="left")
+        except Exception:
+            pass
 
     # Part 2 — Rest-day recovery patch.
     # The age-driven recovery_coefficient was static. Boost it by up to +25%
