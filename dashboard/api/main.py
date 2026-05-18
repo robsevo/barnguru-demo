@@ -1779,8 +1779,16 @@ async def phase2_models() -> dict:
 @app.get("/phase2/player")
 async def phase2_player(
     name: str = Query(..., description="Player name"),
+    context: str = Query("season", description="playoffs | season — selects per-60 aggregates"),
 ) -> dict:
-    """Player rating lookup. Returns real xG Finishing data once model is trained."""
+    """Player rating lookup. Returns real xG Finishing data once model is trained.
+
+    ``context`` is honoured for the metrics that have a per-context aggregate
+    available (playoff_delta carries playoff_* and reg_* per-60 splits). For
+    metrics that only exist as season-long aggregates (RAPM, WAR, EWMA, hot
+    hand, etc.) the season number is returned in both contexts — the field
+    ``context_applied`` lets the dashboard label them honestly.
+    """
     import polars as pl
 
     xg_dir = _GRETZKY_DATA_DIR / "xg_finishing"
@@ -2169,13 +2177,54 @@ async def phase2_player(
     except Exception:
         pass
 
+    # ── Context-aware per-60 substitution ──────────────────────────────
+    # When the caller asks for ``playoffs`` and the playoff_delta parquet
+    # has a row for this player, replace the per-60 stats that have a
+    # genuine playoff split. The remaining (RAPM, WAR, hot hand, ...)
+    # stay season-aggregate — flagged via ``context_applied`` so the
+    # dashboard knows what is or isn't context-aware.
+    context_applied = "season"
+    playoff_gp_val:       int   | None = None
+    playoff_toi_ev_min:   float | None = None
+    playoff_goals_total:  int   | None = None
+    if context == "playoffs" and player_id_val is not None:
+        try:
+            pd_dir2 = _GRETZKY_DATA_DIR / "playoff_delta"
+            pd_parquets2 = sorted(pd_dir2.glob("playoff_delta_*.parquet")) if pd_dir2.exists() else []
+            if pd_parquets2:
+                pd_df2 = pl.read_parquet(pd_parquets2[-1])
+                pd_row2 = pd_df2.filter(pl.col("player_id") == player_id_val)
+                if not pd_row2.is_empty():
+                    pr = pd_row2.to_dicts()[0]
+                    po_xgf  = pr.get("playoff_xgf_per60")
+                    po_g60  = pr.get("playoff_goals_per60")
+                    po_toi  = pr.get("playoff_toi_sec")
+                    po_gp   = pr.get("playoff_gp")
+                    if po_xgf is not None:
+                        rapm_xgf_60 = round(float(po_xgf), 2)
+                    if po_g60 is not None:
+                        rapm_goals_p60 = round(float(po_g60), 2)
+                    if po_toi is not None:
+                        rapm_toi_ev = float(po_toi)
+                    if po_gp is not None:
+                        playoff_gp_val = int(po_gp)
+                    if po_toi is not None and po_g60 is not None and float(po_toi) > 0:
+                        toi_h = float(po_toi) / 3600.0
+                        playoff_goals_total = round(float(po_g60) * toi_h)
+                    context_applied = "playoffs"
+        except Exception:
+            pass
+
     return {
         "player_name":          r["shooter_name"],
         "player_id":            player_id_val,
         "team":                 r.get("team"),
         "season":               season_val2,
+        "context":              context,
+        "context_applied":      context_applied,
         "shots":                r.get("shots"),
-        "goals":                r.get("goals"),
+        "goals":                playoff_goals_total if context_applied == "playoffs" else r.get("goals"),
+        "playoff_gp":           playoff_gp_val,
         "xg_sum":               round(r["xg_sum"], 3) if r.get("xg_sum") is not None else None,
         "finishing":            round(r["finishing"], 3) if r.get("finishing") is not None else None,
         "finishing_per60":      round(r["finishing_per60"], 3) if r.get("finishing_per60") is not None else None,
@@ -3476,20 +3525,52 @@ def _filter_by_context(df, context: str):
       - ``auto``     → playoffs if any game_type=3 rows exist, else season
       - ``all`` / anything else → no filter
 
-    Silently no-op if the DataFrame lacks ``game_type`` (older parquets).
+    Many Phase 3 parquets carry a ``game_type`` column that is null for every
+    row (the column was added recently and back-fills haven't run). In that
+    case the canonical NHL ``game_id`` still encodes the type at positions
+    4–5 (``02`` = regular, ``03`` = playoffs), so we derive it on the fly
+    rather than zapping every row.
+
+    Silently no-op if neither ``game_type`` nor ``game_id`` exists, or if
+    ``game_id`` carries no usable encoding (e.g. snapshot parquets where
+    every game_id is 0).
     """
     import polars as pl
     if df is None or len(df) == 0:
         return df
-    if "game_type" not in df.columns:
+    if context not in ("playoffs", "season", "auto"):
         return df
-    if context == "playoffs":
-        return df.filter(pl.col("game_type") == 3)
-    if context == "season":
-        return df.filter(pl.col("game_type") == 2)
-    if context == "auto":
-        has_playoffs = df.filter(pl.col("game_type") == 3).height > 0
-        return df.filter(pl.col("game_type") == 3) if has_playoffs else df.filter(pl.col("game_type") == 2)
+
+    has_gt  = "game_type" in df.columns
+    has_gid = "game_id"   in df.columns
+
+    if has_gt:
+        non_null = df.filter(pl.col("game_type").is_not_null())
+        if non_null.height > 0:
+            if context == "playoffs":
+                return df.filter(pl.col("game_type") == 3)
+            if context == "season":
+                return df.filter(pl.col("game_type") == 2)
+            if context == "auto":
+                has_playoffs = non_null.filter(pl.col("game_type") == 3).height > 0
+                if has_playoffs:
+                    return df.filter(pl.col("game_type") == 3)
+                return df.filter(pl.col("game_type") == 2)
+
+    if has_gid:
+        gt_expr = pl.col("game_id").cast(pl.Utf8).str.slice(4, 2)
+        usable  = df.filter(gt_expr.is_in(["02", "03"]))
+        if usable.height > 0:
+            if context == "playoffs":
+                return df.filter(gt_expr == "03")
+            if context == "season":
+                return df.filter(gt_expr == "02")
+            if context == "auto":
+                has_playoffs = df.filter(gt_expr == "03").height > 0
+                if has_playoffs:
+                    return df.filter(gt_expr == "03")
+                return df.filter(gt_expr == "02")
+
     return df
 
 
@@ -4092,17 +4173,25 @@ async def phase3_player(
     # Composite FI (3.17) — newest row for this player.
     fi_path, fi_mtime = _phase3_latest("composite_fi", "composite_fi_*.parquet")
     fi_row: dict | None = None
+    fi_context_fallback = False
     if fi_path is not None:
         try:
-            fi_df = pl.read_parquet(fi_path).filter(pl.col("player_id") == pid)
-            fi_df = _filter_by_context(fi_df, context)
+            fi_all = pl.read_parquet(fi_path).filter(pl.col("player_id") == pid)
+            fi_df  = _filter_by_context(fi_all, context)
             if not fi_df.is_empty():
                 fi_row = fi_df.sort("game_date", descending=True).head(1).to_dicts()[0]
+            elif context == "playoffs" and not fi_all.is_empty():
+                # No playoff fatigue computed yet (pipeline gap). Surface the
+                # latest regular-season row so the card doesn't vanish, but
+                # tag it so the dashboard can label it honestly.
+                fi_row = fi_all.sort("game_date", descending=True).head(1).to_dicts()[0]
+                fi_context_fallback = True
         except Exception:
             pass
     out["fi"] = {
         "status":                "ok" if fi_row else ("empty" if fi_path else "not_run"),
         "as_of":                 fi_mtime.date().isoformat() if fi_mtime else None,
+        "context_fallback":      fi_context_fallback,
         "fatigue_index":         (fi_row or {}).get("fatigue_index"),
         "raw_load":              (fi_row or {}).get("raw_load"),
         "rust_load":             (fi_row or {}).get("rust_load"),

@@ -43,6 +43,9 @@ interface ProfileData {
   nhl_career_points?: number;
   // xG Model
   season?: number;
+  context?: string;
+  context_applied?: string;
+  playoff_gp?: number | null;
   shots?: number;
   goals?: number;
   xg_sum?: number;
@@ -299,6 +302,32 @@ function hotHandTier(v: number): Tier {
   if (v >= 0.7)  return "Above Average";
   if (v >= -0.5) return "Average";
   if (v >= -1.0) return "Below Average";
+  return "Low";
+}
+// Multiplier-style confidence biases (1.0 = neutral). Per the Phase 17.25
+// formula `shoot_bias = 1 + 0.06 · ci`, a confidence_index = ±1 maps to
+// ±0.06 around 1.0, so the visible range is roughly 0.94–1.06.
+function biasTier(v: number): Tier {
+  if (v >= 1.030) return "Elite";
+  if (v >= 1.008) return "Above Average";
+  if (v >= 0.992) return "Average";
+  if (v >= 0.970) return "Below Average";
+  return "Low";
+}
+// Fatigue Index: 0 = rested, 1 = saturated. Lower is better, so we invert.
+function fatigueTier(v: number): Tier {
+  if (v >= 0.55) return "Low";
+  if (v >= 0.35) return "Below Average";
+  if (v >= 0.20) return "Average";
+  if (v >= 0.10) return "Above Average";
+  return "Elite";
+}
+// FI rating multiplier (Phase 3.18): 1.0 = no fatigue drag, < 1 = degraded.
+function fiMultiplierTier(v: number): Tier {
+  if (v >= 1.000) return "Elite";
+  if (v >= 0.985) return "Above Average";
+  if (v >= 0.965) return "Average";
+  if (v >= 0.940) return "Below Average";
   return "Low";
 }
 function garTier(v: number): Tier {
@@ -1788,6 +1817,11 @@ export default function PlayerProfilePage() {
     // goalie
     wins?: number; losses?: number; ot_losses?: number; gaa?: number; sv_pct?: number; shutouts?: number;
   } | null>(null);
+  // True when the team route silently fell back from the requested context
+  // (e.g. user asked for playoffs but the team was eliminated). We surface a
+  // hint in the strip instead of pretending the regular-season numbers are
+  // playoff numbers.
+  const [nhlContextFallback, setNhlContextFallback] = useState(false);
   // Injury status for this player (from team injuries endpoint)
   const [injuryBadge, setInjuryBadge] = useState<string | null>(null);
   // Bio data from NHL landing endpoint
@@ -1828,6 +1862,7 @@ export default function PlayerProfilePage() {
   interface Phase3Card {
     fatigue_index:   number | null;
     fi_game_date:    string | null;
+    fi_context_fallback: boolean;
     fi_components:   Record<string, number> | null;
     fi_multiplier:   number | null;
     anomaly_z:       number | null;
@@ -1879,9 +1914,10 @@ export default function PlayerProfilePage() {
 
   useEffect(() => {
     if (!playerName) return;
+    if (!ctxHydrated) return;
     setLoading(true);
 
-    fetch(`/api/phase2/player?name=${encodeURIComponent(playerName)}`)
+    fetch(`/api/phase2/player?name=${encodeURIComponent(playerName)}&context=${seasonCtx}`)
       .then(r => r.json())
       .then((d) => {
         if (!d.not_found) {
@@ -1906,6 +1942,7 @@ export default function PlayerProfilePage() {
         setPhase3({
           fatigue_index:   p?.fi?.fatigue_index ?? null,
           fi_game_date:    p?.fi?.game_date ?? null,
+          fi_context_fallback: Boolean(p?.fi?.context_fallback),
           fi_components:   p?.fi?.component_breakdown ?? null,
           fi_multiplier:   p?.fi_multiplier?.multiplier ?? null,
           anomaly_z:       p?.anomaly?.z_score ?? null,
@@ -1950,16 +1987,23 @@ export default function PlayerProfilePage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.team, liveTeam]);
 
-  // Once we know the team, fetch current-season stats and injury status
+  // Once we know the team, fetch current-season stats and injury status.
+  // Re-fetches when the season/playoffs toggle flips so the stat strip
+  // updates in lockstep with the cards below.
   useEffect(() => {
     if (!data?.team) return;
+    if (!ctxHydrated) return;
     const team = data.team;
     const fullName = normalizePlayerName(data.player_name ?? "").toLowerCase();
 
-    // Current-season stats + jersey from nhl-team route
-    fetch(`/api/nhl-team/${team}`)
+    setNhlStats(null);
+    setNhlContextFallback(false);
+
+    // Current-season or playoff stats + jersey from nhl-team route
+    fetch(`/api/nhl-team/${team}?context=${seasonCtx}`)
       .then(r => r.json())
       .then(d => {
+        setNhlContextFallback(Boolean(d.used_fallback));
         const all = [...(d.skaters ?? []), ...(d.goalies ?? [])] as Record<string, unknown>[];
         const match = all.find(p => {
           const fn = normalizePlayerName(String(p.first_name ?? "")).toLowerCase();
@@ -2017,7 +2061,7 @@ export default function PlayerProfilePage() {
         if (found) setInjuryBadge(found.status);
       })
       .catch(() => {});
-  }, [data?.team, data?.player_name]);
+  }, [data?.team, data?.player_name, seasonCtx, ctxHydrated]);
 
   // Fetch bio from NHL landing endpoint once we have a player ID
   useEffect(() => {
@@ -2382,10 +2426,17 @@ export default function PlayerProfilePage() {
           <SeasonContextPill />
         </div>
 
-        {/* ── 2025-26 Season stats strip ── */}
+        {/* ── 2025-26 stats strip — flips between season + playoffs ── */}
         {nhlStats && (
           <div className="border-t px-3 sm:px-5 py-3 flex items-center justify-center gap-2.5 sm:gap-4" style={{ borderColor: `${teamColor}20` }}>
-            <span className="text-[8px] sm:text-[9px] text-white/25 uppercase tracking-widest font-semibold">2025-26</span>
+            <span className="text-[8px] sm:text-[9px] uppercase tracking-widest font-semibold"
+                  style={{ color: nhlContextFallback ? "rgba(251,191,36,0.55)" : "rgba(255,255,255,0.28)" }}
+                  title={nhlContextFallback
+                    ? "No data for the selected context — falling back to the other endpoint."
+                    : undefined}>
+              {seasonCtx === "playoffs" ? "2025-26 PO" : "2025-26"}
+              {nhlContextFallback && " · regular-season fallback"}
+            </span>
             {isGoalie ? (
               <>
                 {[
@@ -2441,7 +2492,7 @@ export default function PlayerProfilePage() {
                 </div>
                 {phase3?.fatigue_index != null && (() => {
                   const v = phase3.fatigue_index;
-                  const col = v >= 0.45 ? "#f87171" : v >= 0.25 ? "#fb923c" : v >= 0.12 ? "#fbbf24" : "#4ade80";
+                  const col = TIER_COLOR[fatigueTier(v)];
                   return (
                     <div className="flex flex-col items-center min-w-[36px]"
                          title={`Fatigue Index — composite Phase 3 score for ${phase3.fi_game_date ?? "latest game"}`}>
@@ -2931,10 +2982,8 @@ export default function PlayerProfilePage() {
         {/* Phase 3 — Fatigue & Schedule */}
         {!isGoalie && phase3 && phase3.fatigue_index != null && (() => {
           const fi    = phase3.fatigue_index ?? 0;
-          const tier  = fi >= 0.70 ? "Above Average" : fi >= 0.45 ? "Above Average"
-                      : fi >= 0.25 ? "Average"       : "Below Average";
-          const colorHex = fi >= 0.70 ? "#f87171" : fi >= 0.45 ? "#fb923c"
-                         : fi >= 0.25 ? "#fbbf24" : "#4ade80";
+          const fiTier   = fatigueTier(fi);
+          const colorHex = TIER_COLOR[fiTier];
           const sortedComps = phase3.fi_components
             ? Object.entries(phase3.fi_components).sort(([,a],[,b]) => b - a).filter(([,v]) => v > 0)
             : [];
@@ -2946,17 +2995,22 @@ export default function PlayerProfilePage() {
                 <StatRow
                   label="Fatigue Index"
                   value={fi.toFixed(3)}
-                  tier={tier as Tier}
-                  sub={phase3.fi_game_date
-                    ? `Latest: ${phase3.fi_game_date} · 0 = rested, 1 = severely fatigued`
-                    : "0 = rested, 1 = severely fatigued"}
-                  tip="Composite Fatigue Index (Feature 3.17): weighted sum of schedule density, travel, special-teams load, contact load, OT/fight load, recovery and roster strain — all in [0, 1]. The Rust engine uses this to scale player ratings game-by-game."
+                  tier={fiTier}
+                  sub={phase3.fi_context_fallback
+                    ? `Latest: ${phase3.fi_game_date} · regular-season fallback · no playoff FI computed yet`
+                    : phase3.fi_game_date
+                      ? `Latest: ${phase3.fi_game_date} · 0 = rested, 1 = severely fatigued`
+                      : "0 = rested, 1 = severely fatigued"}
+                  tip={phase3.fi_context_fallback
+                    ? "Composite Fatigue Index (Feature 3.17). The playoff fatigue parquet hasn't been ingested for this run yet, so we surface the most recent regular-season row instead of going blank. The nightly Phase 3 build will replace this with a true playoff number once it lands."
+                    : "Composite Fatigue Index (Feature 3.17): weighted sum of schedule density, travel, special-teams load, contact load, OT/fight load, recovery and roster strain — all in [0, 1]. Lower is better — the tier color is inverted so green = rested. The Rust engine uses this to scale player ratings game-by-game."}
                 />
                 {phase3.fi_multiplier != null && (
                   <StatRow
                     label="Rating Multiplier"
                     value={phase3.fi_multiplier.toFixed(3)}
-                    sub="Scaling factor applied to ratings before Rust sim"
+                    tier={fiMultiplierTier(phase3.fi_multiplier)}
+                    sub="Scaling factor applied to ratings before Rust sim · 1.000 = no drag"
                     tip="Feature 3.18 — FI → rating multiplier. ≈1.0 means no fatigue effect. Below 1.0 means we expect this player to underperform their rested baseline tonight."
                   />
                 )}
@@ -3062,11 +3116,21 @@ export default function PlayerProfilePage() {
         {/* Confidence (Phase 17) — all players */}
         {phase3?.confidence_index != null && (() => {
           const ci = phase3.confidence_index;
-          const tier = ci >= 0.30 ? "Above Average"
-                     : ci >= 0.10 ? "Average"
-                     : ci >= -0.10 ? "Average"
-                     : ci >= -0.30 ? "Below Average"
-                     : "Below Average";
+          // Observed confidence_index values are concentrated in ±0.10 today
+          // (the team-side signals are wired but not yet emitting), so the
+          // tier breakpoints sit there rather than the documented ±1 scale.
+          // Doumont's rule: thresholds should match the data we actually see.
+          const tier: Tier =
+              ci >=  0.05 ? "Above Average"
+            : ci >=  0.02 ? "Average"
+            : ci >= -0.02 ? "Average"
+            : ci >= -0.05 ? "Below Average"
+                          : "Low";
+          const teamLive  = phase3.confidence_team != null && Math.abs(phase3.confidence_team) > 0.0005;
+          const playerVal = phase3.confidence_player ?? 0;
+          const shootTier = phase3.conf_shoot_bias    != null ? biasTier(phase3.conf_shoot_bias)    : undefined;
+          const riskTier  = phase3.conf_risk_bias     != null ? biasTier(phase3.conf_risk_bias)     : undefined;
+          const turnTier  = phase3.conf_turnover_bias != null ? biasTier(phase3.conf_turnover_bias) : undefined;
           const sortedComps = phase3.confidence_components
             ? Object.entries(phase3.confidence_components)
                 .sort(([,a],[,b]) => Math.abs(b) - Math.abs(a))
@@ -3079,39 +3143,47 @@ export default function PlayerProfilePage() {
                 <StatRow
                   label="Confidence Index"
                   value={`${ci >= 0 ? "+" : ""}${ci.toFixed(3)}`}
-                  tier={tier as Tier}
+                  tier={tier}
                   sub={phase3.confidence_date
-                    ? `Latest: ${phase3.confidence_date} · −1 = cold/passive, +1 = hot/aggressive`
-                    : "−1 = cold/passive, +1 = hot/aggressive"}
-                  tip="Composite Confidence Index (Phase 17.24): signed [-1, +1] weighted sum of hot-hand, EWMA form, TOI trust, role usage, injury drag, targeting, media, home/away, contract pressure, ref bias, and team-side streak/Corsi/special teams/goalie/injury context. The Rust engine will use this to bias decision-making (shoot-vs-pass, pinch-vs-retreat)."
+                    ? `Latest: ${phase3.confidence_date} · negative = passive · positive = aggressive`
+                    : "negative = passive · positive = aggressive"}
+                  tip="Composite Confidence Index (Phase 17.24): signed weighted sum of hot-hand, EWMA form, TOI trust, role usage, injury drag, targeting, media, home/away, contract pressure, ref bias, and team-side context. The scale is documented as [-1, +1] but the in-flight pipeline emits ±0.10 today — tier breakpoints reflect that. The Rust engine will use this to bias decision-making (shoot-vs-pass, pinch-vs-retreat)."
                 />
-                {phase3.confidence_player != null && (() => {
-                  const blended = phase3.confidence_player * 0.7;
-                  return (
-                    <StatRow
-                      label="Player Component"
-                      value={`${phase3.confidence_player >= 0 ? "+" : ""}${phase3.confidence_player.toFixed(3)}`}
-                      sub={`Sum of player signals (17.1–17.15) · × 0.70 weight = ${blended >= 0 ? "+" : ""}${blended.toFixed(3)} of CI`}
-                      tip="Pre-blend sum of the 15 player-side signals. The 0.70 weight is the player/team blend ratio — multiply this value by 0.7 to see how much it actually moves the final Confidence Index."
-                    />
-                  );
-                })()}
-                {phase3.confidence_team != null && (() => {
-                  const blended = phase3.confidence_team * 0.3;
-                  return (
-                    <StatRow
-                      label="Team Component"
-                      value={`${phase3.confidence_team >= 0 ? "+" : ""}${phase3.confidence_team.toFixed(3)}`}
-                      sub={`Sum of team signals (17.16–17.22) · × 0.30 weight = ${blended >= 0 ? "+" : ""}${blended.toFixed(3)} of CI`}
-                      tip="Pre-blend sum of the 7 team-side signals (streak, Corsi, special teams, coach challenges, comeback quality, goalie confidence, injury context). Multiplied by 0.30 before being added to the Confidence Index."
-                    />
-                  );
-                })()}
+                {phase3.confidence_player != null && (
+                  <StatRow
+                    label="Player Component"
+                    value={`${playerVal >= 0 ? "+" : ""}${playerVal.toFixed(3)}`}
+                    tier={tier}
+                    sub={`Sum of player signals (17.1–17.15) · contributes ${(playerVal * 0.7) >= 0 ? "+" : ""}${(playerVal * 0.7).toFixed(3)} after the 0.70 weight`}
+                    tip="Pre-blend sum of the 15 player-side signals. The Confidence Index is 0.70 × this value + 0.30 × the team component."
+                  />
+                )}
+                {teamLive ? (
+                  (() => {
+                    const tv = phase3.confidence_team!;
+                    return (
+                      <StatRow
+                        label="Team Component"
+                        value={`${tv >= 0 ? "+" : ""}${tv.toFixed(3)}`}
+                        sub={`Sum of team signals (17.16–17.22) · contributes ${(tv * 0.3) >= 0 ? "+" : ""}${(tv * 0.3).toFixed(3)} after the 0.30 weight`}
+                        tip="Pre-blend sum of the 7 team-side signals (streak, Corsi, special teams, coach challenges, comeback quality, goalie confidence, injury context). Multiplied by 0.30 before being added to the Confidence Index."
+                      />
+                    );
+                  })()
+                ) : (
+                  <StatRow
+                    label="Team Component"
+                    value="not run"
+                    sub="Team-side signals (17.16–17.22) emitting 0 — pipeline placeholder until they go live"
+                    tip="Phase 17 team-side signals (streak, Corsi trend, ST trend, coach challenges, comeback quality, goalie confidence, roster disruption) are wired but their feature module hasn't shipped — every player currently reads 0 for this component. The Confidence Index above is effectively 0.70 × the player component until then."
+                  />
+                )}
                 {phase3.conf_shoot_bias != null && (
                   <StatRow
                     label="Shoot Bias"
                     value={phase3.conf_shoot_bias.toFixed(3)}
-                    sub="Multiplier on shoot-vs-pass probability"
+                    tier={shootTier}
+                    sub="Multiplier on shoot-vs-pass probability · 1.000 = neutral"
                     tip="Phase 17.25 — confidence rating multiplier on shooting decisions. ≈1.0 = no effect. >1.0 = more likely to shoot in a contested moment."
                   />
                 )}
@@ -3119,7 +3191,8 @@ export default function PlayerProfilePage() {
                   <StatRow
                     label="Risk Bias"
                     value={phase3.conf_risk_bias.toFixed(3)}
-                    sub="Multiplier on aggressive plays (pinch, forecheck)"
+                    tier={riskTier}
+                    sub="Multiplier on aggressive plays (pinch, forecheck) · 1.000 = neutral"
                     tip="Phase 17.25 — risk-taking knob. >1.0 = D-men more likely to pinch, forwards more aggressive on the forecheck."
                   />
                 )}
@@ -3127,7 +3200,8 @@ export default function PlayerProfilePage() {
                   <StatRow
                     label="Turnover Bias"
                     value={phase3.conf_turnover_bias.toFixed(3)}
-                    sub="Multiplier on turnover probability"
+                    tier={turnTier}
+                    sub="Multiplier on turnover probability · 1.000 = neutral"
                     tip="Phase 17.25 — confident players take more risks (aggressive passes, holds, plays through traffic) and turn the puck over more. >1.0 = more giveaways expected from the aggressive plays they're attempting. Scales the same direction as shoot_bias and risk_bias."
                   />
                 )}
@@ -3188,26 +3262,29 @@ export default function PlayerProfilePage() {
 
         {/* Goalie Fatigue (3.24) — goalies only */}
         {isGoalie && phase3?.goalie_fi != null && (() => {
-          const gfi  = phase3.goalie_fi ?? 0;
-          const tier = gfi >= 0.70 ? "Above Average" : gfi >= 0.45 ? "Above Average"
-                     : gfi >= 0.25 ? "Average"       : "Below Average";
-          const svDelta = phase3.goalie_sv_delta ?? 0;
-          const svPct   = (svDelta * 100).toFixed(2);
+          const gfi      = phase3.goalie_fi ?? 0;
+          const gfiTier  = fatigueTier(gfi);
+          const svDelta  = phase3.goalie_sv_delta ?? 0;
+          const svDeltaT: Tier = svDelta >= 0 ? "Average"
+                              : svDelta >= -0.005 ? "Below Average"
+                              : "Low";
+          const svPct    = (svDelta * 100).toFixed(2);
           return (
             <Card title="Fatigue & Schedule" icon="🥅" style={cardStyle}>
               <div className="space-y-0">
                 <StatRow
                   label="Goalie Fatigue Index"
                   value={gfi.toFixed(3)}
-                  tier={tier as Tier}
+                  tier={gfiTier}
                   sub={phase3.goalie_fi_date
                     ? `Latest start: ${phase3.goalie_fi_date} · 0 = rested, 1 = saturated`
                     : "0 = rested, 1 = saturated"}
-                  tip="Feature 3.24 — daily goalie FI snapshot. Built from B2B starts, rest days, games in last 7 days, shots faced. Negative save% delta is rescaled into the same [0, 1] frame as skater FI."
+                  tip="Feature 3.24 — daily goalie FI snapshot. Built from B2B starts, rest days, games in last 7 days, shots faced. Lower is better — tier color is inverted so green = rested."
                 />
                 <StatRow
                   label="Expected Save% Δ"
                   value={`${svDelta >= 0 ? "+" : ""}${svPct}%`}
+                  tier={svDeltaT}
                   sub="Predicted save% drift from fatigue (negative = degraded)"
                   tip="GoalieFatigueModel (2.6) coefficient sum on the goalie's current workload window. Negative = expected save% drop tonight."
                 />
@@ -3215,7 +3292,7 @@ export default function PlayerProfilePage() {
                   <StatRow
                     label="Back-to-Back"
                     value="Yes"
-                    tier="Below Average"
+                    tier="Low"
                     sub="Starting on 0-1 days rest"
                     tip="B2B starts carry the largest single fatigue penalty in the goalie model."
                   />
