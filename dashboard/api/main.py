@@ -1994,8 +1994,8 @@ async def phase2_player(
     gar_val: float | None = None
     contract_efficiency_val: float | None = None
     try:
-        war_dir = _GRETZKY_DATA_DIR / "war"
-        war_parquets = sorted(war_dir.glob("war_*.parquet")) if war_dir.exists() else []
+        war_parquets = _context_parquets("war", "war_", context) \
+                       or _context_parquets("war", "war_", "season")
         if war_parquets and player_id_val is not None:
             war_df = pl.read_parquet(war_parquets[-1])
             war_row = war_df.filter(pl.col("player_id") == player_id_val)
@@ -2513,21 +2513,27 @@ def _abbr(val) -> str | None:
 
 
 @app.get("/phase2/war-leaderboard")
-async def phase2_war_leaderboard(limit: int = 10, player_id: int | None = None) -> dict:
-    """Top WAR players (min 200 min EV TOI). Optionally includes selected player rank."""
+async def phase2_war_leaderboard(
+    limit: int = 10,
+    player_id: int | None = None,
+    context: str = Query("season", description="season | playoffs"),
+) -> dict:
+    """Top WAR players (min EV TOI threshold flexes with context)."""
     import polars as pl
-    war_dir = _GRETZKY_DATA_DIR / "war"
-    parquets = sorted(war_dir.glob("war_*.parquet")) if war_dir.exists() else []
+    parquets = _context_parquets("war", "war_", context)
+    source = "playoffs" if context == "playoffs" and parquets else "season"
     if not parquets:
-        return {"players": [], "built": False}
+        parquets = _context_parquets("war", "war_", "season")
+    if not parquets:
+        return {"players": [], "built": False, "source": source}
     try:
         df = pl.read_parquet(parquets[-1])
         if "war" not in df.columns:
-            return {"players": [], "built": False}
+            return {"players": [], "built": False, "source": source}
         name_lut = _build_name_lookup()
 
-        # Filter to qualified players: non-null WAR + minimum EV TOI
-        MIN_TOI = 200.0
+        # Playoff TOI caps at ~10% of regular season — drop the floor.
+        MIN_TOI = 20.0 if source == "playoffs" else 200.0
         ranked = (
             df.filter(pl.col("war").is_not_null())
             .pipe(lambda d: d.filter(pl.col("toi_ev") >= MIN_TOI) if "toi_ev" in d.columns else d)
@@ -2563,7 +2569,7 @@ async def phase2_war_leaderboard(limit: int = 10, player_id: int | None = None) 
                 if not already_shown:
                     selected = _make_row(sel)
 
-        return {"players": players, "selected": selected, "built": True, "min_toi": MIN_TOI}
+        return {"players": players, "selected": selected, "built": True, "min_toi": MIN_TOI, "source": source}
     except Exception:
         return {"players": [], "selected": None, "built": False}
 

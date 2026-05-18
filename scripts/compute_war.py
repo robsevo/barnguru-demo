@@ -44,26 +44,45 @@ def _latest_parquet(directory: Path, glob_pattern: str) -> Path | None:
     return files[-1] if files else None
 
 
-def _load_rapm(rapm_dir: Path, seasons: list[int]) -> pl.DataFrame:
+def _pick_for_context(directory: Path, season: int, base: str, season_type: str) -> Path | None:
+    """Pick exact playoff/regular parquet for a season.
+
+    Playoff: prefer ``{base}{season}_playoffs.parquet``, fall back to season.
+    Regular: prefer ``{base}{season}.parquet`` (without _playoffs suffix).
+    """
+    if season_type == "playoffs":
+        po = directory / f"{base}{season}_playoffs.parquet"
+        if po.exists():
+            return po
+        # Don't silently load season parquet here — caller handles the warning.
+    rg = directory / f"{base}{season}.parquet"
+    return rg if rg.exists() else None
+
+
+def _load_rapm(
+    rapm_dir: Path, seasons: list[int], season_type: str = "regular"
+) -> pl.DataFrame:
     frames: list[pl.DataFrame] = []
     for season in seasons:
-        f = _latest_parquet(rapm_dir, f"rapm_{season}*.parquet")
+        f = _pick_for_context(rapm_dir, season, "rapm_", season_type)
         if f:
             frames.append(pl.read_parquet(f))
             print(f"  Loaded RAPM: {f.name}")
         else:
-            print(f"  No RAPM file found for season {season}")
+            print(f"  No RAPM file found for season {season} ({season_type})")
     if not frames:
         return pl.DataFrame()
     return pl.concat(frames, how="diagonal")
 
 
-def _load_finishing(finishing_dir: Path, seasons: list[int]) -> pl.DataFrame | None:
+def _load_finishing(
+    finishing_dir: Path, seasons: list[int], season_type: str = "regular"
+) -> pl.DataFrame | None:
     frames: list[pl.DataFrame] = []
     for season in seasons:
-        f = _latest_parquet(finishing_dir, f"xg_finishing_{season}*.parquet")
+        f = _pick_for_context(finishing_dir, season, "xg_finishing_", season_type)
         if not f:
-            f = _latest_parquet(finishing_dir, f"finishing_{season}*.parquet")
+            f = _pick_for_context(finishing_dir, season, "finishing_", season_type)
         if f:
             frames.append(pl.read_parquet(f))
             print(f"  Loaded finishing: {f.name}")
@@ -72,7 +91,9 @@ def _load_finishing(finishing_dir: Path, seasons: list[int]) -> pl.DataFrame | N
     return pl.concat(frames, how="diagonal")
 
 
-def _load_penalties_from_pbp(pbp_dir: Path, seasons: list[int]) -> pl.DataFrame | None:
+def _load_penalties_from_pbp(
+    pbp_dir: Path, seasons: list[int], season_type: str = "regular"
+) -> pl.DataFrame | None:
     """Aggregate per-player penalty minutes taken and drawn from our PBP parquets.
 
     Returns a DataFrame with: player_id, season, pim_taken, pim_drawn.
@@ -97,16 +118,26 @@ def _load_penalties_from_pbp(pbp_dir: Path, seasons: list[int]) -> pl.DataFrame 
         if not has_event or not (has_committed or has_drawn):
             continue
 
+        # Include game_id so we can filter by playoff/regular game type.
         want = [c for c in (
             "event_type", "event",
             "committed_by_id", "drawn_by_id",
             "duration_minutes",
+            "game_id",
         ) if c in schema]
 
         try:
             df = pl.read_parquet(path, columns=want)
         except Exception:
             continue
+
+        # Filter by game type (game_id encodes it as the TT digits).
+        if "game_id" in df.columns:
+            gt = (pl.col("game_id") % 1_000_000) // 10_000
+            if season_type == "playoffs":
+                df = df.filter(gt == 3)
+            elif season_type == "regular":
+                df = df.filter(gt == 2)
 
         event_col = next((c for c in ("event_type", "event") if c in df.columns), None)
         if not event_col:
@@ -205,15 +236,25 @@ def main() -> None:
         action="store_true",
         help="Overwrite existing output parquet.",
     )
+    parser.add_argument(
+        "--season-type",
+        choices=["regular", "playoffs"],
+        default="regular",
+        help="'regular' writes war_{year}.parquet (default). "
+             "'playoffs' reads playoff RAPM/xG/penalties and writes "
+             "war_{year}_playoffs.parquet.",
+    )
     args = parser.parse_args()
 
     seasons: list[int] = sorted(args.seasons)
     data_dir: Path = args.data_dir
     target_season = max(seasons)
+    season_type: str = args.season_type
+    out_suffix       = "_playoffs" if season_type == "playoffs" else ""
 
     # ── Check output ──────────────────────────────────────────────────────
     war_dir  = data_dir / WAR_SUBDIR
-    out_path = war_dir / f"war_{target_season}.parquet"
+    out_path = war_dir / f"war_{target_season}{out_suffix}.parquet"
     if out_path.exists() and not args.force:
         print(f"[war] Output already exists: {out_path}")
         print("  Use --force to overwrite.")
@@ -226,8 +267,8 @@ def main() -> None:
         print("  Run 'uv run python scripts/gretzky.py train-rapm' first.")
         sys.exit(1)
 
-    print(f"[war] Loading RAPM data for seasons: {seasons}")
-    rapm_df = _load_rapm(rapm_dir, seasons)
+    print(f"[war] Loading RAPM data for seasons: {seasons} ({season_type})")
+    rapm_df = _load_rapm(rapm_dir, seasons, season_type=season_type)
 
     if len(rapm_df) == 0:
         print("[war] No RAPM data found.")
@@ -260,7 +301,7 @@ def main() -> None:
     finishing_df  = None
     if finishing_dir.exists():
         print(f"[war] Loading xG finishing data…")
-        finishing_df = _load_finishing(finishing_dir, seasons)
+        finishing_df = _load_finishing(finishing_dir, seasons, season_type=season_type)
         if finishing_df is None:
             print("  No finishing data found — finishing GAR will be 0.")
     else:
@@ -271,7 +312,7 @@ def main() -> None:
     penalty_df = None
     if pbp_dir.exists():
         print(f"[war] Loading penalty data from PBP parquets…")
-        penalty_df = _load_penalties_from_pbp(pbp_dir, seasons)
+        penalty_df = _load_penalties_from_pbp(pbp_dir, seasons, season_type=season_type)
         if penalty_df is None:
             print("  No PBP penalty data found — penalty GAR will be 0.")
     else:
@@ -296,11 +337,15 @@ def main() -> None:
         if "season" in rapm_df.columns
         else rapm_df
     )
+    # Playoffs have ~10% of the regular-season TOI; drop the floor accordingly
+    # so the leaderboard isn't empty.
+    war_min_toi = 20.0 if season_type == "playoffs" else None
     war_df = model.fit(
         target_rapm_df,
         finishing_df=finishing_df,
         penalty_df=penalty_df,
         cap_df=cap_df,
+        min_toi_ev_output=war_min_toi,
     )
 
     n_players = len(war_df)
@@ -341,7 +386,7 @@ def main() -> None:
             print(f"\n  Value contracts (efficiency > 1.5×, WAR > 1.0): {len(value_contracts)}")
 
     # ── Save ──────────────────────────────────────────────────────────────
-    path = write_war(war_df, war_dir, target_season)
+    path = write_war(war_df, war_dir, target_season, season_type=season_type)
     print(f"\n[war] WAR written: {path}")
 
     model_path = war_dir / "war_model.pkl"

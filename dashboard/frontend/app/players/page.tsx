@@ -1032,10 +1032,6 @@ export default function PlayersPage() {
       .catch(() => {});
 
 
-    fetch("/api/phase2/war-leaderboard?limit=20")
-      .then(r => r.json())
-      .then(d => setWarList(d.players ?? []))
-      .catch(() => setWarList([]));
 
     fetch("/api/phase2/top-pairs?limit=6")
       .then(r => r.json())
@@ -1162,6 +1158,16 @@ export default function PlayersPage() {
     setPkList(null);
     fetch(`/api/phase2/special-teams-leaderboard?side=pk&limit=20&context=${seasonCtx}`)
       .then(r => r.json()).then(d => setPkList(d.players ?? [])).catch(() => setPkList([]));
+  }, [seasonCtx, ctxHydrated]);
+
+  // WAR — context-aware composite (RAPM + xG finishing + penalties).
+  useEffect(() => {
+    if (!ctxHydrated) return;
+    setWarList(null);
+    fetch(`/api/phase2/war-leaderboard?limit=20&context=${seasonCtx}`)
+      .then(r => r.json())
+      .then(d => setWarList(d.players ?? []))
+      .catch(() => setWarList([]));
   }, [seasonCtx, ctxHydrated]);
 
   // Goalie Leaders — context-aware NHL counting stats (W / Sv% / GAA / SO).

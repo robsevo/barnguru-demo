@@ -407,6 +407,7 @@ class WARModel:
         finishing_df: pl.DataFrame | None = None,
         penalty_df:   pl.DataFrame | None = None,
         cap_df:       pl.DataFrame | None = None,
+        min_toi_ev_output: float | None = None,
     ) -> pl.DataFrame:
         """Compute WAR and contract efficiency for all players in rapm_df.
 
@@ -434,6 +435,12 @@ class WARModel:
             return pl.DataFrame(
                 {col: pl.Series([], dtype=dt) for col, dt in WAR_SCHEMA.items()}
             )
+
+        # Effective TOI threshold for inclusion in the output. Callers can
+        # drop this for playoff variants where the postseason caps at ~28 GP.
+        output_floor = (
+            MIN_TOI_EV_MINUTES_OUTPUT if min_toi_ev_output is None else min_toi_ev_output
+        )
 
         # Compute data-driven replacement level from actual player pool
         repl_ev, repl_pp, repl_pk = _compute_replacement_level(rapm_df)
@@ -500,7 +507,7 @@ class WARModel:
 
             # Skip micro-sample players — RAPM is too noisy below the TOI threshold.
             # These players are by definition replacement-level or worse.
-            if toi_ev < MIN_TOI_EV_MINUTES_OUTPUT:
+            if toi_ev < output_floor:
                 continue
 
             rapm_ev_off = row.get("rapm_ev_off")
@@ -641,11 +648,14 @@ class WARModel:
 # I/O
 # ---------------------------------------------------------------------------
 
-def write_war(df: pl.DataFrame, output_dir: Path, season: int) -> Path:
-    """Write WAR scores to parquet."""
+def write_war(
+    df: pl.DataFrame, output_dir: Path, season: int, season_type: str = "regular"
+) -> Path:
+    """Write WAR scores to parquet. season_type='playoffs' appends _playoffs suffix."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / f"war_{season}.parquet"
+    suffix = "_playoffs" if season_type == "playoffs" else ""
+    path = output_dir / f"war_{season}{suffix}.parquet"
     for col, dtype in WAR_SCHEMA.items():
         if col not in df.columns:
             df = df.with_columns(pl.lit(None).cast(dtype).alias(col))
