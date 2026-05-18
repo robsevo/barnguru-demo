@@ -1920,7 +1920,18 @@ async def phase2_player(
     try:
         rapm_dir = _GRETZKY_DATA_DIR / "rapm"
         season_val = r.get("season")
-        rapm_path = rapm_dir / f"rapm_{season_val}.parquet" if season_val else None
+        # Pick playoff RAPM parquet first when context=playoffs, fall back to
+        # season variant if no playoff data exists for this season yet.
+        rapm_path = None
+        if season_val:
+            if context == "playoffs":
+                _po = rapm_dir / f"rapm_{season_val}_playoffs.parquet"
+                if _po.exists():
+                    rapm_path = _po
+            if rapm_path is None:
+                _rg = rapm_dir / f"rapm_{season_val}.parquet"
+                if _rg.exists():
+                    rapm_path = _rg
         if rapm_path and rapm_path.exists():
             rapm_df = pl.read_parquet(rapm_path)
             shooter_id = r.get("shooter_id")
@@ -2017,8 +2028,9 @@ async def phase2_player(
     ewma_form_flag: str | None = None
     ewma_games:     int | None = None
     try:
-        ewma_dir = _GRETZKY_DATA_DIR / "ewma"
-        ewma_parquets = sorted(ewma_dir.glob("ewma_form_*.parquet")) if ewma_dir.exists() else []
+        ewma_parquets = _context_parquets("ewma", "ewma_form_", context)
+        if not ewma_parquets:
+            ewma_parquets = _context_parquets("ewma", "ewma_form_", "season")
         if ewma_parquets and player_id_val is not None:
             ewma_df = pl.read_parquet(ewma_parquets[-1])
             ewma_row = ewma_df.filter(pl.col("player_id") == player_id_val)
@@ -2036,8 +2048,9 @@ async def phase2_player(
     hot_hand_goals5: float | None = None
     hot_hand_xg5:    float | None = None
     try:
-        hh_dir = _GRETZKY_DATA_DIR / "hot_hand"
-        hh_parquets = sorted(hh_dir.glob("hot_hand_summary_*.parquet")) if hh_dir.exists() else []
+        hh_parquets = _context_parquets("hot_hand", "hot_hand_summary_", context)
+        if not hh_parquets:
+            hh_parquets = _context_parquets("hot_hand", "hot_hand_summary_", "season")
         if hh_parquets and player_id_val is not None:
             hh_df = pl.read_parquet(hh_parquets[-1])
             hh_row = hh_df.filter(pl.col("player_id") == player_id_val)
@@ -2555,21 +2568,27 @@ async def phase2_war_leaderboard(limit: int = 10, player_id: int | None = None) 
 
 
 @app.get("/phase2/ewma-movers")
-async def phase2_ewma_movers(limit: int = 6, player_id: int | None = None) -> dict:
+async def phase2_ewma_movers(
+    limit: int = 6,
+    player_id: int | None = None,
+    context: str = Query("season", description="season | playoffs"),
+) -> dict:
     """Top EWMA form movers ranked by delta vs league mean. Includes team from RAPM."""
     import polars as pl
-    ewma_dir = _GRETZKY_DATA_DIR / "ewma"
-    parquets = sorted(ewma_dir.glob("ewma_form_*.parquet")) if ewma_dir.exists() else []
+    parquets = _context_parquets("ewma", "ewma_form_", context)
+    source = "playoffs" if context == "playoffs" and parquets else "season"
     if not parquets:
-        return {"rising": [], "falling": [], "built": False}
+        parquets = _context_parquets("ewma", "ewma_form_", "season")
+    if not parquets:
+        return {"rising": [], "falling": [], "built": False, "source": source}
     try:
         df = pl.read_parquet(parquets[-1])
         ewma_col = "ewma_xgf60" if "ewma_xgf60" in df.columns else "current_ewma"
         if ewma_col not in df.columns:
-            return {"rising": [], "falling": [], "built": False}
+            return {"rising": [], "falling": [], "built": False, "source": source}
 
-        # Collapse per-game rows → one row per player (latest game), min 20 games
-        MIN_GAMES = 20
+        # Playoffs cap at ~28 GP per team — drop the floor accordingly.
+        MIN_GAMES = 4 if source == "playoffs" else 20
         if "games_played" in df.columns:
             # ewma_form parquets already have one row per player with games_played
             df = (
@@ -2695,9 +2714,10 @@ async def phase2_ewma_movers(limit: int = 6, player_id: int | None = None) -> di
             "league_mean":  round(league_mean, 2),
             "built":        True,
             "selected":     selected,
+            "source":       source,
         }
     except Exception:
-        return {"rising": [], "falling": [], "built": False, "selected": None}
+        return {"rising": [], "falling": [], "built": False, "selected": None, "source": source}
 
 
 @app.get("/phase2/matchup-explorer")
@@ -3267,39 +3287,45 @@ async def phase2_special_teams_leaderboard(
 
 
 @app.get("/phase2/hot-hand-leaderboard")
-async def phase2_hot_hand_leaderboard(limit: int = 20) -> dict:
+async def phase2_hot_hand_leaderboard(
+    limit: int = 20,
+    context: str = Query("season", description="season | playoffs"),
+) -> dict:
     """Hot Hand Signal leaderboard — 5-game burst goals-vs-xG z-score."""
     import polars as pl
-    hh_dir = _GRETZKY_DATA_DIR / "hot_hand"
-    files = sorted(hh_dir.glob("hot_hand_summary_*.parquet")) if hh_dir.exists() else []
+    files = _context_parquets("hot_hand", "hot_hand_summary_", context)
+    source = "playoffs" if context == "playoffs" and files else "season"
     if not files:
-        return {"players": [], "built": False}
+        files = _context_parquets("hot_hand", "hot_hand_summary_", "season")
+    if not files:
+        return {"players": [], "built": False, "source": source}
     try:
         df = pl.read_parquet(files[-1])
         name_lut = _build_name_lookup()
-        MIN_GP = 5
+        # Playoff burst signal works on a tiny sample (5 games == half a series).
+        # Drop the floor so the leaderboard isn't empty.
+        MIN_GP = 3 if source == "playoffs" else 5
         if "games_played" in df.columns:
             df = df.filter(pl.col("games_played") >= MIN_GP)
         df = df.filter(pl.col("hot_hand_score").is_not_null())
         ranked = df.sort("hot_hand_score", descending=True).head(limit)
         rows = []
+        # Team lookup — use the matching-context RAPM parquet first so the team
+        # reflects the playoff roster, not stale regular-season assignments.
+        team_lut: dict[int, str | None] = {}
+        rapm_files = _context_parquets("rapm", "rapm_", context) or _context_parquets("rapm", "rapm_", "season")
+        if rapm_files:
+            try:
+                rdf = pl.read_parquet(rapm_files[-1], columns=["player_id", "team"])
+                for tr in rdf.to_dicts():
+                    if tr.get("player_id") is not None:
+                        team_lut[int(tr["player_id"])] = _abbr(tr.get("team"))
+            except Exception:
+                pass
         for i, r in enumerate(ranked.to_dicts()):
             pid  = r.get("player_id")
             name = r.get("player_name") or (name_lut.get(int(pid)) if pid else None) or f"id_{pid}"
-
-            # Try to get team from RAPM parquet (hot_hand doesn't carry team)
-            team = None
-            rapm_dir = _GRETZKY_DATA_DIR / "rapm"
-            rapm_files = sorted(rapm_dir.glob("rapm_*.parquet")) if rapm_dir.exists() else []
-            if rapm_files and pid:
-                try:
-                    rdf = pl.read_parquet(rapm_files[-1], columns=["player_id", "team"])
-                    t_rows = rdf.filter(pl.col("player_id") == pid).to_dicts()
-                    if t_rows:
-                        team = _abbr(t_rows[0].get("team"))
-                except Exception:
-                    pass
-
+            team = team_lut.get(int(pid)) if pid else None
             rows.append({
                 "rank":        i + 1,
                 "player_id":   pid,
@@ -3309,27 +3335,32 @@ async def phase2_hot_hand_leaderboard(limit: int = 20) -> dict:
                 "goals_5g":    r.get("goals_5g"),
                 "xg_5g":       round(float(r["xg_5g"]), 2) if r.get("xg_5g") is not None else None,
             })
-        return {"players": rows, "built": True}
+        return {"players": rows, "built": True, "source": source}
     except Exception:
-        return {"players": [], "built": False}
+        return {"players": [], "built": False, "source": source}
 
 
 @app.get("/phase2/xg-leaderboard")
-async def phase2_xg_leaderboard(limit: int = 20) -> dict:
-    """xGF/60 leaderboard from EWMA form model (min 20 games)."""
+async def phase2_xg_leaderboard(
+    limit: int = 20,
+    context: str = Query("season", description="season | playoffs"),
+) -> dict:
+    """xGF/60 leaderboard from EWMA form model (min 20 GP regular / 4 GP playoffs)."""
     import polars as pl
-    ewma_dir = _GRETZKY_DATA_DIR / "ewma"
-    files = sorted(ewma_dir.glob("ewma_form_*.parquet")) if ewma_dir.exists() else []
+    files = _context_parquets("ewma", "ewma_form_", context)
+    source = "playoffs" if context == "playoffs" and files else "season"
     if not files:
-        return {"players": [], "built": False}
+        files = _context_parquets("ewma", "ewma_form_", "season")
+    if not files:
+        return {"players": [], "built": False, "source": source}
     try:
         df = pl.read_parquet(files[-1])
         ewma_col = "ewma_xgf60" if "ewma_xgf60" in df.columns else "current_ewma"
         if ewma_col not in df.columns:
-            return {"players": [], "built": False}
+            return {"players": [], "built": False, "source": source}
         name_lut = _build_name_lookup()
 
-        MIN_GP = 20
+        MIN_GP = 4 if source == "playoffs" else 20
         if "games_played" in df.columns:
             df = df.filter(pl.col("games_played") >= MIN_GP)
         df = df.filter(pl.col(ewma_col).is_not_null())
@@ -3362,9 +3393,9 @@ async def phase2_xg_leaderboard(limit: int = 20) -> dict:
                 "value":       round(float(r[ewma_col]), 2),
                 "games_played":r.get("games_played"),
             })
-        return {"players": rows, "built": True}
+        return {"players": rows, "built": True, "source": source}
     except Exception:
-        return {"players": [], "built": False}
+        return {"players": [], "built": False, "source": source}
 
 
 @app.get("/phase2/cdr-leaderboard")
@@ -3406,11 +3437,14 @@ async def phase2_cdr_leaderboard(limit: int = 20) -> dict:
 async def phase2_rapm_leaderboard(
     category: str = Query("ev_off", description="ev_off | ev_def | pp | pk"),
     limit: int = 20,
+    context: str = Query("season", description="season | playoffs"),
 ) -> dict:
     """RAPM leaderboard by category (EV Off, EV Def, PP, PK)."""
     import polars as pl
-    rapm_dir = _GRETZKY_DATA_DIR / "rapm"
-    files = sorted(rapm_dir.glob("rapm_*.parquet")) if rapm_dir.exists() else []
+    files = _context_parquets("rapm", "rapm_", context)
+    source = "playoffs" if context == "playoffs" and files else "season"
+    if not files:
+        files = _context_parquets("rapm", "rapm_", "season")
     if not files:
         return {"players": [], "built": False, "category": category}
     _COL = {"ev_off": "rapm_ev_off", "ev_def": "rapm_ev_def", "pp": "rapm_pp", "pk": "rapm_pk"}
@@ -3420,7 +3454,9 @@ async def phase2_rapm_leaderboard(
         if col not in df.columns:
             return {"players": [], "built": False, "category": category, "reason": "column_missing"}
         name_lut = _build_name_lookup()
-        MIN_GP = 20
+        # Playoffs cap at ~28 GP per team; drop the floor accordingly so the
+        # leaderboard isn't empty in May/June.
+        MIN_GP = 4 if source == "playoffs" else 20
         if "gp" in df.columns:
             df = df.filter(pl.col("gp") >= MIN_GP)
         df = df.filter(pl.col(col).is_not_null())
@@ -3438,9 +3474,9 @@ async def phase2_rapm_leaderboard(
                 "gp":          r.get("gp"),
                 "toi_ev":      round(float(r["toi_ev"]), 1) if r.get("toi_ev") is not None else None,
             })
-        return {"players": rows, "built": True, "category": category}
+        return {"players": rows, "built": True, "category": category, "source": source}
     except Exception:
-        return {"players": [], "built": False, "category": category}
+        return {"players": [], "built": False, "category": category, "source": source}
 
 
 @app.get("/phase2/xga-leaderboard")

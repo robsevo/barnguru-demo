@@ -50,8 +50,25 @@ def _default_seasons() -> list[int]:
 # ---------------------------------------------------------------------------
 
 
-def _load_season(data_dir: Path, season: int) -> tuple[pl.DataFrame, pl.DataFrame]:
+def _game_type_from_id(col: str = "game_id") -> pl.Expr:
+    """NHL game_id encodes game type as the 5th-6th digits.
+
+    {YYYY}0{TT}{GGGG}  where TT = 02 (regular) or 03 (playoffs).
+    Returns the integer game type (2 or 3).
+    """
+    return (pl.col(col) % 1_000_000) // 10_000
+
+
+def _load_season(
+    data_dir: Path,
+    season: int,
+    season_type: str = "regular",
+) -> tuple[pl.DataFrame, pl.DataFrame]:
     """Load shifts + shots for a season. Returns (shifts_df, shots_df).
+
+    season_type filters both DataFrames to the matching game type:
+      "regular"  → shifts.game_type == 2, shots.is_playoff == False (default)
+      "playoffs" → shifts.game_type == 3, shots.is_playoff == True
 
     Raises DataMissingWarning (returns empty DFs) if files are absent.
     """
@@ -78,9 +95,21 @@ def _load_season(data_dir: Path, season: int) -> tuple[pl.DataFrame, pl.DataFram
         )
         return pl.DataFrame(), pl.DataFrame()
 
-    print(f"  Loading season {season}: {shifts_path.name}, {shots_path.name}")
+    print(f"  Loading season {season} ({season_type}): {shifts_path.name}, {shots_path.name}")
     shifts_df = pl.read_parquet(shifts_path)
     shots_df  = pl.read_parquet(shots_path)
+
+    if season_type == "playoffs":
+        if "game_id" in shifts_df.columns:
+            shifts_df = shifts_df.filter(_game_type_from_id() == 3)
+        if "is_playoff" in shots_df.columns:
+            shots_df = shots_df.filter(pl.col("is_playoff") == True)  # noqa: E712
+    elif season_type == "regular":
+        if "game_id" in shifts_df.columns:
+            shifts_df = shifts_df.filter(_game_type_from_id() == 2)
+        if "is_playoff" in shots_df.columns:
+            shots_df = shots_df.filter(pl.col("is_playoff") == False)  # noqa: E712
+
     return shifts_df, shots_df
 
 
@@ -151,22 +180,32 @@ def main() -> None:
         metavar="PATH",
         help="Root data directory.",
     )
+    parser.add_argument(
+        "--season-type",
+        choices=["regular", "playoffs"],
+        default="regular",
+        help="'regular' writes rapm_{season}.parquet (default). "
+             "'playoffs' filters shifts+shots to playoff games and writes "
+             "rapm_{season}_playoffs.parquet.",
+    )
     args = parser.parse_args()
 
     data_dir: Path = args.data_dir
     output_dir = data_dir / "rapm"
     output_dir.mkdir(parents=True, exist_ok=True)
+    season_type = args.season_type
+    out_suffix = "_playoffs" if season_type == "playoffs" else ""
 
     # Check if all outputs already exist
     target_seasons: list[int] = sorted(args.seasons)
     if not args.force:
         all_exist = all(
-            (output_dir / f"rapm_{s}.parquet").exists()
+            (output_dir / f"rapm_{s}{out_suffix}.parquet").exists()
             for s in target_seasons
         )
         if all_exist:
             print(
-                f"All RAPM parquets already exist for {target_seasons}. "
+                f"All RAPM parquets already exist for {target_seasons}{out_suffix}. "
                 "Use --force to retrain."
             )
             return
@@ -291,7 +330,7 @@ def main() -> None:
     model.name_fallback = name_fallback
 
     def loader(season: int) -> tuple[pl.DataFrame, pl.DataFrame]:
-        return _load_season(data_dir, season)
+        return _load_season(data_dir, season, season_type=season_type)
 
     print("Training RAPM daisy chain...\n")
 
@@ -313,7 +352,7 @@ def main() -> None:
             continue
 
         result = results[season]
-        out_path = output_dir / f"rapm_{season}.parquet"
+        out_path = output_dir / f"rapm_{season}{out_suffix}.parquet"
 
         if out_path.exists() and not args.force:
             print(f"  Season {season}: already exists, skipping (use --force)")

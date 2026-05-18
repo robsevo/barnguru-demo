@@ -441,14 +441,12 @@ def write_hot_hand(
     summary_df: pl.DataFrame,
     output_dir: Path,
     season: int,
+    season_type: str = "regular",
 ) -> tuple[Path, Path]:
     """Write per-game and summary DataFrames to parquet.
 
-    Args:
-        game_df:    Output of ``HotHandModel.compute()``.
-        summary_df: Output of ``HotHandModel.summary()``.
-        output_dir: Directory to write into (created if absent).
-        season:     Season year used in filenames.
+    season_type="playoffs" appends _playoffs to the file names so the
+    season + playoff outputs live side-by-side.
 
     Returns:
         Tuple of (game_path, summary_path).
@@ -456,8 +454,9 @@ def write_hot_hand(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    p_game    = output_dir / f"hot_hand_{season}.parquet"
-    p_summary = output_dir / f"hot_hand_summary_{season}.parquet"
+    suffix = "_playoffs" if season_type == "playoffs" else ""
+    p_game    = output_dir / f"hot_hand_{season}{suffix}.parquet"
+    p_summary = output_dir / f"hot_hand_summary_{season}{suffix}.parquet"
 
     game_df.write_parquet(p_game)
     summary_df.write_parquet(p_summary)

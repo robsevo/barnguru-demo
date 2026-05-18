@@ -54,7 +54,9 @@ RAW_SUBDIR         = "raw"
 # Data loading
 # ---------------------------------------------------------------------------
 
-def _load_player_game_stats(data_dir: Path, seasons: list[int]) -> pl.DataFrame:
+def _load_player_game_stats(
+    data_dir: Path, seasons: list[int], season_type: str = "regular"
+) -> pl.DataFrame:
     """Load per-player per-game stats from MoneyPuck or NHL PBP parquets.
 
     Accepted filename patterns (checked in order):
@@ -99,6 +101,12 @@ def _load_player_game_stats(data_dir: Path, seasons: list[int]) -> pl.DataFrame:
                 continue
             try:
                 pbp = pl.read_parquet(pbp_path)
+                if "game_id" in pbp.columns:
+                    gt = (pl.col("game_id") % 1_000_000) // 10_000
+                    if season_type == "playoffs":
+                        pbp = pbp.filter(gt == 3)
+                    elif season_type == "regular":
+                        pbp = pbp.filter(gt == 2)
                 goals = pbp.filter(pl.col("event_type") == "goal")
                 if "scorer_id" not in goals.columns:
                     continue
@@ -278,11 +286,21 @@ def main() -> None:
         action="store_true",
         help="Overwrite existing output parquets.",
     )
+    parser.add_argument(
+        "--season-type",
+        choices=["regular", "playoffs"],
+        default="regular",
+        help="'regular' writes hot_hand_{season}.parquet (default). "
+             "'playoffs' filters PBP to playoff games and writes "
+             "hot_hand_{season}_playoffs.parquet.",
+    )
     args = parser.parse_args()
 
     seasons: list[int] = sorted(args.seasons)
     target_season: int = args.season if args.season is not None else max(seasons)
     data_dir: Path     = args.data_dir
+    season_type: str   = args.season_type
+    out_suffix         = "_playoffs" if season_type == "playoffs" else ""
 
     print(f"[hot-hand] Feature 2.28 — Short-Burst Hot Hand Signal")
     print(f"  Burst window : {BURST_WINDOW} games")
@@ -294,8 +312,8 @@ def main() -> None:
 
     # ── Check output ─────────────────────────────────────────────────────────
     out_dir      = data_dir / HOT_HAND_SUBDIR
-    out_game     = out_dir / f"hot_hand_{target_season}.parquet"
-    out_summary  = out_dir / f"hot_hand_summary_{target_season}.parquet"
+    out_game     = out_dir / f"hot_hand_{target_season}{out_suffix}.parquet"
+    out_summary  = out_dir / f"hot_hand_summary_{target_season}{out_suffix}.parquet"
 
     if out_game.exists() and out_summary.exists() and not args.force:
         print(f"\n[hot-hand] Output already exists: {out_game}")
@@ -309,8 +327,8 @@ def main() -> None:
         print("  Run 'uv run python scripts/gretzky.py sync' or 'ingest' first.")
         sys.exit(1)
 
-    print(f"\n[hot-hand] Loading player-game stats for seasons: {seasons}")
-    df = _load_player_game_stats(data_dir, seasons)
+    print(f"\n[hot-hand] Loading player-game stats for seasons: {seasons} ({season_type})")
+    df = _load_player_game_stats(data_dir, seasons, season_type=season_type)
 
     if df.is_empty():
         print("[hot-hand] No player-game data loaded.")
@@ -368,7 +386,9 @@ def main() -> None:
     _print_leaderboard(summ_df)
 
     # ── Save ──────────────────────────────────────────────────────────────────
-    p_game, p_summary = write_hot_hand(game_df, summ_df, out_dir, target_season)
+    p_game, p_summary = write_hot_hand(
+        game_df, summ_df, out_dir, target_season, season_type=season_type
+    )
     print(f"\n[hot-hand] Per-game detail written : {p_game}")
     print(f"[hot-hand] Player summary written  : {p_summary}")
     print(f"\n[hot-hand] Done.")

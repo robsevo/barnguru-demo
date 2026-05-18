@@ -43,7 +43,7 @@ def _default_seasons() -> list[int]:
     return list(range(2023, cur + 1))
 
 
-def _load_shots(data_dir: Path, season: int) -> pl.DataFrame:
+def _load_shots(data_dir: Path, season: int, season_type: str = "regular") -> pl.DataFrame:
     from models.rapm_model import DataMissingWarning
 
     path = data_dir / "shots" / f"shots_{season}.parquet"
@@ -54,7 +54,13 @@ def _load_shots(data_dir: Path, season: int) -> pl.DataFrame:
             stacklevel=2,
         )
         return pl.DataFrame()
-    return pl.read_parquet(path)
+    df = pl.read_parquet(path)
+    if "is_playoff" in df.columns:
+        if season_type == "playoffs":
+            df = df.filter(pl.col("is_playoff") == True)  # noqa: E712
+        elif season_type == "regular":
+            df = df.filter(pl.col("is_playoff") == False)  # noqa: E712
+    return df
 
 
 def _build_player_game_df(shots_df: pl.DataFrame, season: int) -> pl.DataFrame:
@@ -131,11 +137,21 @@ def main() -> None:
         default=_DEFAULT_DATA_DIR,
         metavar="PATH",
     )
+    parser.add_argument(
+        "--season-type",
+        choices=["regular", "playoffs"],
+        default="regular",
+        help="'regular' writes ewma_form_{season}.parquet (default). "
+             "'playoffs' filters to playoff games and writes "
+             "ewma_form_{season}_playoffs.parquet.",
+    )
     args = parser.parse_args()
 
     data_dir: Path = args.data_dir
     output_dir = data_dir / "ewma"
     output_dir.mkdir(parents=True, exist_ok=True)
+    season_type = args.season_type
+    out_suffix = "_playoffs" if season_type == "playoffs" else ""
 
     from models.ewma_model import EWMAFormModel
 
@@ -144,18 +160,18 @@ def main() -> None:
     processed = 0
 
     for season in seasons:
-        summary_path = output_dir / f"ewma_form_{season}.parquet"
-        games_path   = output_dir / f"ewma_games_{season}.parquet"
+        summary_path = output_dir / f"ewma_form_{season}{out_suffix}.parquet"
+        games_path   = output_dir / f"ewma_games_{season}{out_suffix}.parquet"
 
         if summary_path.exists() and not args.force:
             print(f"  Season {season}: already exists, skipping (use --force)")
             continue
 
-        print(f"\n  Season {season}:")
+        print(f"\n  Season {season} ({season_type}):")
 
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            shots_df = _load_shots(data_dir, season)
+            shots_df = _load_shots(data_dir, season, season_type=season_type)
 
         for w in caught:
             print(f"    [WARN] {w.message}", file=sys.stderr)

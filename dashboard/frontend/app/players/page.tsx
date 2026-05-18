@@ -1031,10 +1031,6 @@ export default function PlayersPage() {
       .then(d => setAllPlayers(d.players ?? []))
       .catch(() => {});
 
-    fetch("/api/phase2/ewma-movers?limit=8")
-      .then(r => r.json())
-      .then(d => { setRising(d.rising ?? []); setFalling(d.falling ?? []); })
-      .catch(() => { setRising([]); setFalling([]); });
 
     fetch("/api/phase2/war-leaderboard?limit=20")
       .then(r => r.json())
@@ -1079,14 +1075,8 @@ export default function PlayersPage() {
       .then(r => r.json()).then(d => setPpList(d.players ?? [])).catch(() => setPpList([]));
     fetch("/api/phase2/special-teams-leaderboard?side=pk&limit=20")
       .then(r => r.json()).then(d => setPkList(d.players ?? [])).catch(() => setPkList([]));
-    fetch("/api/phase2/hot-hand-leaderboard?limit=20")
-      .then(r => r.json()).then(d => setHotHandList(d.players ?? [])).catch(() => setHotHandList([]));
-    fetch("/api/phase2/xg-leaderboard?limit=20")
-      .then(r => r.json()).then(d => setXgList(d.players ?? [])).catch(() => setXgList([]));
     fetch("/api/phase2/cdr-leaderboard?limit=20")
       .then(r => r.json()).then(d => setCdrList(d.players ?? [])).catch(() => setCdrList([]));
-    fetch("/api/phase2/rapm-leaderboard?category=ev_off&limit=20")
-      .then(r => r.json()).then(d => setRapmList(d.players ?? [])).catch(() => setRapmList([]));
     fetch("/api/phase2/xga-leaderboard?limit=20")
       .then(r => r.json()).then(d => setXgaList(d.players ?? [])).catch(() => setXgaList([]));
   }, []);
@@ -1106,6 +1096,45 @@ export default function PlayersPage() {
         assists: d.categories?.assists ?? [],
       }))
       .catch(() => setScoringCategories({ points: [], goals: [], assists: [] }));
+  }, [seasonCtx, ctxHydrated]);
+
+  // RAPM leaderboard — context-aware. Re-fetches the *current* selected
+  // category whenever the Season/Playoffs pill flips or the category changes.
+  useEffect(() => {
+    if (!ctxHydrated) return;
+    setRapmList(null);
+    fetch(`/api/phase2/rapm-leaderboard?category=${rapmCategory}&limit=20&context=${seasonCtx}`)
+      .then(r => r.json())
+      .then(d => setRapmList(d.players ?? []))
+      .catch(() => setRapmList([]));
+  }, [seasonCtx, ctxHydrated, rapmCategory]);
+
+  // EWMA movers — context-aware. Re-fetches rising/falling lists when the
+  // pill flips so playoffs mode shows playoff EWMA momentum.
+  useEffect(() => {
+    if (!ctxHydrated) return;
+    setRising(null);
+    setFalling(null);
+    fetch(`/api/phase2/ewma-movers?limit=8&context=${seasonCtx}`)
+      .then(r => r.json())
+      .then(d => { setRising(d.rising ?? []); setFalling(d.falling ?? []); })
+      .catch(() => { setRising([]); setFalling([]); });
+  }, [seasonCtx, ctxHydrated]);
+
+  // xG (xGF/60) leaderboard — same EWMA source, context-aware.
+  useEffect(() => {
+    if (!ctxHydrated) return;
+    setXgList(null);
+    fetch(`/api/phase2/xg-leaderboard?limit=20&context=${seasonCtx}`)
+      .then(r => r.json()).then(d => setXgList(d.players ?? [])).catch(() => setXgList([]));
+  }, [seasonCtx, ctxHydrated]);
+
+  // Hot Hand burst signal — context-aware.
+  useEffect(() => {
+    if (!ctxHydrated) return;
+    setHotHandList(null);
+    fetch(`/api/phase2/hot-hand-leaderboard?limit=20&context=${seasonCtx}`)
+      .then(r => r.json()).then(d => setHotHandList(d.players ?? [])).catch(() => setHotHandList([]));
   }, [seasonCtx, ctxHydrated]);
 
   // Goalie Leaders — context-aware NHL counting stats (W / Sv% / GAA / SO).
@@ -1160,12 +1189,8 @@ export default function PlayersPage() {
     fetch(`/api/phase2/goalie-leaderboard?metric=${m}&limit=20`)
       .then(r => r.json()).then(d => setGoalieList(d.players ?? [])).catch(() => setGoalieList([]));
   };
-  const switchRapmCategory = (c: typeof rapmCategory) => {
-    setRapmCategory(c);
-    setRapmList(null);
-    fetch(`/api/phase2/rapm-leaderboard?category=${c}&limit=20`)
-      .then(r => r.json()).then(d => setRapmList(d.players ?? [])).catch(() => setRapmList([]));
-  };
+  // Setter is enough — the useEffect above re-fetches when rapmCategory changes.
+  const switchRapmCategory = setRapmCategory;
 
   return (
     <main
