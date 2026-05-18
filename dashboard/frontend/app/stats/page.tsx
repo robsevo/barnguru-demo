@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { TEAM_COLORS, TEAM_SECONDARY, fmtPos, normalizePlayerName } from "@/utils/nhl";
 import TeamLogoLink from "@/components/TeamLogoLink";
+import { HudGrid } from "@/components/hud";
 
 interface Leader {
   rank: number;
@@ -341,9 +342,24 @@ export default function StatsPage() {
   const maxVal = displayedLeaders.length > 0 ? Math.max(...displayedLeaders.map(l => numericValue(l.value))) : 1;
 
   return (
-    <main className="min-h-screen flex flex-col px-3 sm:px-8 pt-6 pb-12 max-w-[700px] sm:max-w-[1100px] mx-auto w-full overflow-x-hidden">
+    <main className="relative min-h-screen flex flex-col px-3 sm:px-8 pt-6 pb-12 max-w-[700px] sm:max-w-[1100px] mx-auto w-full overflow-x-hidden">
+      <HudGrid />
+
+      {/* HUD dossier strip */}
+      <div className="relative z-10 mb-3 flex items-center gap-2 flex-wrap">
+        <span className="hud-mono text-[10px] uppercase tracking-[0.20em] text-[var(--brand-hex)]" aria-hidden>◢</span>
+        <span className="hud-mono text-[10px] uppercase tracking-[0.20em] text-[var(--brand-hex)]">
+          STATS LEADERS · LEAGUE WIDE
+        </span>
+        <span className="hud-mono text-[9px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">· official feed</span>
+        <span className="ml-auto flex items-center gap-1">
+          <span className="hud-pulse-dot" style={{ background: "#4ade80" }} />
+          <span className="hud-mono jarvis-flicker text-[9px] uppercase tracking-[0.18em] text-[#4ade80]">LIVE</span>
+        </span>
+      </div>
+
       {/* Header */}
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex items-center justify-between mb-5 relative z-10">
         <div>
           <Link href="/" className="text-[9px] font-black uppercase tracking-[0.3em] text-white/20 hover:text-white/40 transition-colors mb-1.5 block">
             ← GRTZKY

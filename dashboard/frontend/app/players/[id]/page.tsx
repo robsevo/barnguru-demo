@@ -13,6 +13,15 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   LineChart, Line, ReferenceLine,
 } from "recharts";
+import {
+  HudPanel, HudTitle, HudBadge, HudTabBar, RingGauge, Waveform,
+  OdometerNumber, NeuralGraph, BodySilhouette, HudGrid, Shot3D, Zone3D,
+  type Shot as Shot3DPoint,
+  type HudTab,
+  type NeuralNode,
+  type BodyZone,
+  type ZoneActivation,
+} from "@/components/hud";
 
 // ---------------------------------------------------------------------------
 // Types — full profile from /player-profile/{id}
@@ -480,14 +489,56 @@ function BarStat({ label, value, max, color = "#4ade80", suffix = "%" }: {
 }) {
   const pct = Math.min(100, Math.max(0, (value / max) * 100));
   return (
-    <div className="space-y-1">
+    <div className="space-y-1 group">
       <div className="flex items-center justify-between">
-        <span className="text-[11px] text-white/50">{label}</span>
-        <span className="text-[11px] font-semibold font-mono text-white/70">{value.toFixed(1)}{suffix}</span>
+        <span className="hud-mono text-[10px] uppercase tracking-[0.16em] text-[var(--text-secondary)] truncate">{label}</span>
+        <span className="hud-mono text-[11px] tabular-nums font-semibold" style={{ color }}>
+          {value.toFixed(1)}{suffix}
+        </span>
       </div>
-      <div className="h-1.5 rounded-full bg-white/[0.07] overflow-hidden">
-        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: color, opacity: 0.75 }} />
+      <div
+        className="relative h-2 rounded-sm overflow-hidden"
+        style={{
+          background: "rgba(255,255,255,0.04)",
+          border: `1px solid ${color}22`,
+        }}
+      >
+        {/* Animated bar fill */}
+        <div
+          className="h-full"
+          style={{
+            width: `${pct}%`,
+            background: `linear-gradient(90deg, ${color}aa 0%, ${color} 100%)`,
+            boxShadow: `0 0 8px ${color}55, inset 0 0 8px ${color}44`,
+            transition: "width 900ms cubic-bezier(0.22,1,0.36,1)",
+          }}
+        />
+        {/* Sweeping scan-line over the bar (decorative) */}
+        <div
+          className="absolute top-0 bottom-0 w-6 pointer-events-none"
+          style={{
+            background: `linear-gradient(90deg, transparent, ${color}88, transparent)`,
+            animation: "barScan 3.4s linear infinite",
+            mixBlendMode: "screen",
+            opacity: pct > 5 ? 0.6 : 0,
+          }}
+        />
+        {/* Tick marks at 25/50/75 */}
+        <div className="absolute inset-0 flex justify-between px-[25%] pointer-events-none">
+          <span className="w-px h-full" style={{ background: "rgba(255,255,255,0.06)" }} />
+          <span className="w-px h-full" style={{ background: "rgba(255,255,255,0.10)" }} />
+          <span className="w-px h-full" style={{ background: "rgba(255,255,255,0.06)" }} />
+        </div>
       </div>
+      <style jsx>{`
+        @keyframes barScan {
+          0%   { transform: translateX(-30px); }
+          100% { transform: translateX(420px); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          div { animation: none !important; transition: none !important; }
+        }
+      `}</style>
     </div>
   );
 }
@@ -569,12 +620,26 @@ function StatRow({ label, value, tier, sub, tip }: {
 function Card({ title, icon, children, className = "", style }: {
   title: string; icon?: string; children: React.ReactNode; className?: string; style?: React.CSSProperties;
 }) {
+  // HUD-styled card chrome: corner brackets, mono title bar, optional scan
+  // line. Preserves the legacy `style` prop so callers passing team-tinted
+  // cardStyle keep their brand glow.
   return (
-    <div className={`rounded-2xl overflow-hidden ${className}`} style={style ?? { border: "1px solid rgba(255,255,255,0.08)", background: "linear-gradient(to bottom, rgba(255,255,255,0.025), transparent)" }}>
-      <div className="px-4 py-3 border-b border-white/[0.07] flex items-center justify-center">
-        <p className="text-[13px] font-semibold text-white/80 text-center">{title}</p>
+    <div className={`hud-panel hud-panel--all-corners ${className}`} style={style}>
+      <span className="hud-panel__corner-tr" />
+      <span className="hud-panel__corner-bl" />
+      <div className="px-3 py-2 border-b border-white/[0.05] flex items-center gap-2">
+        <span className="hud-mono text-[10px] uppercase tracking-[0.18em] text-[var(--brand-hex)] opacity-80 select-none" aria-hidden>
+          ◢
+        </span>
+        {icon ? <span className="text-[11px] opacity-70" aria-hidden>{icon}</span> : null}
+        <p className="hud-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-primary)] truncate">
+          {title}
+        </p>
+        <span className="ml-auto hud-mono text-[10px] uppercase tracking-[0.18em] text-[var(--brand-hex)] opacity-80 select-none" aria-hidden>
+          ◣
+        </span>
       </div>
-      <div className="p-3 sm:p-5">{children}</div>
+      <div className="p-3 sm:p-4">{children}</div>
     </div>
   );
 }
@@ -847,8 +912,46 @@ function PlayerRadarChart({ data, teamColor }: { data: ProfileData; teamColor: s
 
   return (
     <>
-      {/* Viewport-aware fixed dims — avoids ResponsiveContainer drift */}
-      <div style={{ lineHeight: 0 }}>
+      {/* HUD label band */}
+      <div className="flex items-center justify-between w-full max-w-[300px] mx-auto px-1 mb-1">
+        <span className="hud-mono text-[9px] uppercase tracking-[0.22em]" style={{ color: teamColor }}>◢ BIOMETRIC SCAN</span>
+        <span className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">6-AXIS</span>
+      </div>
+      {/* Radar with HUD overlay (corner ticks + concentric scan rings) */}
+      <div className="relative" style={{ lineHeight: 0, width: chartSize, height: chartSize }}>
+        {/* Overlay: concentric scan rings + crosshair behind the chart */}
+        <svg
+          className="absolute inset-0 pointer-events-none"
+          width={chartSize}
+          height={chartSize}
+          viewBox={`0 0 ${chartSize} ${chartSize}`}
+          aria-hidden
+        >
+          {[0.95, 0.78, 0.55, 0.30].map((scale, i) => (
+            <circle
+              key={i}
+              cx={chartSize / 2}
+              cy={chartSize / 2}
+              r={Math.round(chartSize * 0.328) * scale}
+              fill="none"
+              stroke={teamColor}
+              strokeOpacity={0.08 + i * 0.02}
+              strokeDasharray="2 6"
+            />
+          ))}
+          <line x1={chartSize / 2} y1={6} x2={chartSize / 2} y2={chartSize - 6} stroke={teamColor} strokeOpacity={0.08} strokeDasharray="3 8" />
+          <line x1={6} y1={chartSize / 2} x2={chartSize - 6} y2={chartSize / 2} stroke={teamColor} strokeOpacity={0.08} strokeDasharray="3 8" />
+          {/* corner ticks */}
+          {[
+            [4, 4, 14, 4], [4, 4, 4, 14],
+            [chartSize - 4, 4, chartSize - 14, 4], [chartSize - 4, 4, chartSize - 4, 14],
+            [4, chartSize - 4, 14, chartSize - 4], [4, chartSize - 4, 4, chartSize - 14],
+            [chartSize - 4, chartSize - 4, chartSize - 14, chartSize - 4], [chartSize - 4, chartSize - 4, chartSize - 4, chartSize - 14],
+          ].map(([x1, y1, x2, y2], i) => (
+            <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={teamColor} strokeOpacity={0.6} strokeWidth={1.2} strokeLinecap="round" />
+          ))}
+        </svg>
+
         <RadarChart
           width={chartSize} height={chartSize}
           cx={chartSize / 2} cy={chartSize / 2}
@@ -857,7 +960,7 @@ function PlayerRadarChart({ data, teamColor }: { data: ProfileData; teamColor: s
           margin={{ top: Math.round(chartSize * 0.078), right: Math.round(chartSize * 0.1), bottom: Math.round(chartSize * 0.078), left: Math.round(chartSize * 0.1) }}
           onMouseLeave={() => setActiveIdx(null)}
         >
-          <PolarGrid stroke="rgba(255,255,255,0.07)" />
+          <PolarGrid stroke={`${teamColor}22`} />
           <PolarAngleAxis
             dataKey="subject"
             tick={({ x, y, payload, index }: { x: number; y: number; payload: { value: string }; index: number }) => {
@@ -868,8 +971,8 @@ function PlayerRadarChart({ data, teamColor }: { data: ProfileData; teamColor: s
                   textAnchor="middle" dominantBaseline="central"
                   fontSize={10}
                   fontWeight={isActive ? 900 : 600}
-                  fill={isActive ? teamColor : "rgba(255,255,255,0.40)"}
-                  style={{ cursor: "pointer" }}
+                  fill={isActive ? teamColor : "rgba(255,255,255,0.55)"}
+                  style={{ cursor: "pointer", fontFamily: "var(--font-mono)", letterSpacing: "0.12em", textTransform: "uppercase" }}
                   onClick={() => setActiveIdx(activeIdx === index ? null : index)}
                   onMouseEnter={() => setActiveIdx(index)}
                 >
@@ -883,7 +986,7 @@ function PlayerRadarChart({ data, teamColor }: { data: ProfileData; teamColor: s
             dataKey="A"
             stroke={teamColor}
             fill={teamColor}
-            fillOpacity={0.20}
+            fillOpacity={0.22}
             strokeWidth={1.5}
             dot={(props: { cx: number; cy: number; index: number }) => {
               const isActive = activeIdx === props.index;
@@ -892,10 +995,11 @@ function PlayerRadarChart({ data, teamColor }: { data: ProfileData; teamColor: s
                   key={props.index}
                   cx={props.cx} cy={props.cy}
                   r={isActive ? 8 : 5}
-                  fill={isActive ? teamColor : `${teamColor}99`}
-                  stroke={isActive ? "rgba(255,255,255,0.6)" : "none"}
+                  fill={isActive ? teamColor : `${teamColor}aa`}
+                  stroke={isActive ? "rgba(255,255,255,0.85)" : teamColor}
+                  strokeOpacity={isActive ? 1 : 0.4}
                   strokeWidth={1.5}
-                  style={{ cursor: "pointer" }}
+                  style={{ cursor: "pointer", filter: isActive ? `drop-shadow(0 0 6px ${teamColor})` : undefined }}
                   onMouseEnter={() => setActiveIdx(props.index)}
                   onClick={() => setActiveIdx(activeIdx === props.index ? null : props.index)}
                 />
@@ -908,11 +1012,11 @@ function PlayerRadarChart({ data, teamColor }: { data: ProfileData; teamColor: s
       <div className="min-h-[2.75rem] flex flex-col items-center justify-center gap-1 pt-1">
         {active ? (
           <>
-            <span className="text-[11px] font-black tracking-wide" style={{ color: teamColor }}>{active.subject}</span>
-            <span className="text-[12px] font-semibold text-white/70">{active.raw}</span>
+            <span className="hud-mono text-[10px] uppercase tracking-[0.22em]" style={{ color: teamColor }}>▸ {active.subject}</span>
+            <span className="hud-mono text-[11px] text-white/75">{active.raw}</span>
           </>
         ) : (
-          <span className="text-[10px]" style={{ color: "rgba(255,255,255,0.4)" }}>hover an axis or dot</span>
+          <span className="hud-mono text-[9px] uppercase tracking-[0.18em] text-[var(--text-muted)]">hover an axis or dot</span>
         )}
       </div>
     </>
@@ -1083,25 +1187,25 @@ function GameLogChart({ games, teamColor }: { games: GameEntry[]; teamColor: str
         margin={{ top: 4, right: 4, left: -28, bottom: 0 }}>
         <XAxis
           dataKey="opp"
-          tick={{ fill: "rgba(255,255,255,0.30)", fontSize: 8 }}
+          tick={{ fill: "rgba(255,255,255,0.40)", fontSize: 9, fontFamily: "var(--font-mono)", letterSpacing: "0.10em" }}
           axisLine={false} tickLine={false}
         />
         <YAxis
           domain={[0, maxPts + 1]}
-          tick={{ fill: "rgba(255,255,255,0.25)", fontSize: 8 }}
+          tick={{ fill: "rgba(255,255,255,0.30)", fontSize: 9, fontFamily: "var(--font-mono)" }}
           axisLine={false} tickLine={false}
           allowDecimals={false}
         />
         <Tooltip
-          cursor={{ fill: "rgba(255,255,255,0.04)" }}
-          contentStyle={{ background: "#0f1114", border: `1px solid ${teamColor}30`, borderRadius: 8, fontSize: 10 }}
-          labelStyle={{ color: "rgba(255,255,255,0.5)", marginBottom: 2 }}
+          cursor={{ fill: `${teamColor}10` }}
+          contentStyle={{ background: "rgba(15,17,20,0.95)", border: `1px solid ${teamColor}55`, borderRadius: 4, fontSize: 10, fontFamily: "var(--font-mono)" }}
+          labelStyle={{ color: "rgba(255,255,255,0.45)", letterSpacing: "0.10em", textTransform: "uppercase", fontSize: 9 }}
           formatter={(val: number, name: string) => [val, name === "g" ? "G" : name === "a" ? "A" : name]}
         />
-        <Bar dataKey="a" stackId="pts" fill="rgba(255,255,255,0.20)" radius={[0,0,0,0]} />
-        <Bar dataKey="g" stackId="pts" fill={teamColor} fillOpacity={0.75} radius={[3,3,0,0]}>
+        <Bar dataKey="a" stackId="pts" fill="rgba(255,255,255,0.25)" radius={[0,0,0,0]} />
+        <Bar dataKey="g" stackId="pts" fill={teamColor} fillOpacity={0.85} radius={[3,3,0,0]}>
           {chartData.map((_, idx) => (
-            <Cell key={idx} fill={teamColor} fillOpacity={chartData[idx].pts > 0 ? 0.80 : 0.25} />
+            <Cell key={idx} fill={teamColor} fillOpacity={chartData[idx].pts > 0 ? 0.90 : 0.30} />
           ))}
         </Bar>
       </BarChart>
@@ -1133,20 +1237,37 @@ function EwmaTrendChart({ xgf60, leagueAvg = 4.09, teamColor }: {
   const lineColor = isHot ? "#4ade80" : isCold ? "#f87171" : teamColor;
 
   return (
-    <ResponsiveContainer width="100%" height={100}>
-      <LineChart data={trend} margin={{ top: 4, right: 8, left: -28, bottom: 0 }}>
-        <XAxis dataKey="week" tick={{ fill: "rgba(255,255,255,0.25)", fontSize: 8 }} axisLine={false} tickLine={false} />
-        <YAxis domain={["auto","auto"]} tick={{ fill: "rgba(255,255,255,0.20)", fontSize: 8 }} axisLine={false} tickLine={false} />
-        <ReferenceLine y={leagueAvg} stroke="rgba(255,255,255,0.15)" strokeDasharray="3 3" />
-        <Tooltip
-          contentStyle={{ background: "#0f1114", border: `1px solid ${lineColor}30`, borderRadius: 8, fontSize: 10 }}
-          labelStyle={{ color: "rgba(255,255,255,0.4)" }}
-          formatter={(v: number) => [v.toFixed(2), "xGF/60"]}
-        />
-        <Line type="monotone" dataKey="xgf" stroke={lineColor} strokeWidth={2}
-          dot={false} activeDot={{ r: 3, fill: lineColor }} />
-      </LineChart>
-    </ResponsiveContainer>
+    <div className="relative">
+      <div className="flex items-center justify-between px-1 mb-1">
+        <span className="hud-mono text-[9px] uppercase tracking-[0.22em]" style={{ color: lineColor }}>
+          ▸ MOMENTUM TRACE
+        </span>
+        <span className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+          {isHot ? "RISING" : isCold ? "DECLINING" : "STABLE"}
+        </span>
+      </div>
+      <ResponsiveContainer width="100%" height={108}>
+        <LineChart data={trend} margin={{ top: 4, right: 8, left: -28, bottom: 0 }}>
+          <XAxis
+            dataKey="week"
+            tick={{ fill: "rgba(255,255,255,0.30)", fontSize: 9, fontFamily: "var(--font-mono)", letterSpacing: "0.10em" }}
+            axisLine={false} tickLine={false}
+          />
+          <YAxis domain={["auto","auto"]} tick={{ fill: "rgba(255,255,255,0.25)", fontSize: 9, fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} />
+          <ReferenceLine y={leagueAvg} stroke={`${teamColor}55`} strokeDasharray="2 6" label={{ value: `avg ${leagueAvg}`, fill: "rgba(255,255,255,0.30)", fontSize: 8, position: "insideTopRight", style: { fontFamily: "var(--font-mono)", letterSpacing: "0.10em" } }} />
+          <Tooltip
+            contentStyle={{ background: "rgba(15,17,20,0.92)", border: `1px solid ${lineColor}55`, borderRadius: 6, fontSize: 10, fontFamily: "var(--font-mono)" }}
+            labelStyle={{ color: "rgba(255,255,255,0.45)", letterSpacing: "0.10em", textTransform: "uppercase", fontSize: 9 }}
+            formatter={(v: number) => [v.toFixed(2), "xGF/60"]}
+          />
+          <Line type="monotone" dataKey="xgf" stroke={lineColor} strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 4, fill: lineColor, stroke: "rgba(255,255,255,0.85)", strokeWidth: 1 }}
+            style={{ filter: `drop-shadow(0 0 6px ${lineColor}66)` }}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
 
@@ -1476,41 +1597,74 @@ function GoalieNeuralNetViz({ netData }: { netData: GoalieNetData }) {
 
   return (
     <div className="space-y-5">
-      {/* Zone grid */}
+      {/* Zone grid — futuristic HUD heatmap */}
       <div>
-        <p className="text-[9px] font-semibold uppercase tracking-widest text-white/25 text-center mb-2">
-          Save % by Distance &amp; Lateral Zone
-        </p>
+        <div className="flex items-center justify-between mb-2">
+          <span className="hud-mono text-[9px] uppercase tracking-[0.20em]" style={{ color: "var(--brand-hex)" }}>
+            ◢ SAVE % · DISTANCE × LATERAL
+          </span>
+          <span className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+            3 × 3 GRID
+          </span>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-center border-collapse" style={{ minWidth: 220 }}>
             <thead>
               <tr>
-                <th className="text-[8px] font-semibold text-white/20 uppercase tracking-wider pb-1 pr-1 text-left w-14"></th>
+                <th className="hud-mono text-[8px] font-semibold text-[var(--text-muted)] uppercase tracking-[0.16em] pb-1.5 pr-1 text-left w-14"></th>
                 {sideOrder.map(s => (
-                  <th key={s} className="text-[8px] font-semibold text-white/30 uppercase tracking-wider pb-1 px-1">
-                    {sideLabel[s]}
+                  <th key={s} className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-secondary)] pb-1.5 px-1">
+                    ▾ {sideLabel[s]}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {distOrder.map(dist => (
+              {distOrder.map((dist, di) => (
                 <tr key={dist}>
-                  <td className="text-[8px] text-white/25 font-medium pr-2 py-0.5 text-left whitespace-nowrap">
-                    {distLabel[dist]}
+                  <td className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-secondary)] pr-2 py-1 text-left whitespace-nowrap">
+                    ▸ {distLabel[dist]}
                   </td>
-                  {sideOrder.map(side => {
+                  {sideOrder.map((side, si) => {
                     const cell = zoneMap[dist][side];
                     const lg = LEAGUE_SV_BY_ZONE[dist]?.[side] ?? 0.91;
                     if (!cell) {
-                      return <td key={side} className="px-1 py-0.5"><span className="text-[9px] text-white/15">—</span></td>;
+                      return (
+                        <td key={side} className="px-1 py-1">
+                          <div className="rounded-sm py-2 px-1 border border-white/[0.04]" style={{ background: "rgba(255,255,255,0.015)" }}>
+                            <span className="hud-mono text-[10px] text-white/15">— —</span>
+                          </div>
+                        </td>
+                      );
                     }
                     const bg = svColor(cell.sv_pct, lg);
+                    const delay = (di * 3 + si) * 60;
                     return (
-                      <td key={side} className="px-1 py-0.5">
-                        <div className="rounded py-1 px-0.5" style={{ backgroundColor: bg + "33", border: `1px solid ${bg}55` }}>
-                          <div className="text-[10px] font-bold" style={{ color: bg }}>{fmtSv(cell.sv_pct)}</div>
-                          <div className="text-[7px] text-white/20">{cell.shots}sh</div>
+                      <td key={side} className="px-1 py-1">
+                        <div
+                          className="relative rounded-sm py-1.5 px-1 overflow-hidden"
+                          style={{
+                            background: `linear-gradient(180deg, ${bg}33 0%, ${bg}14 100%)`,
+                            border: `1px solid ${bg}80`,
+                            boxShadow: `inset 0 1px 0 rgba(255,255,255,0.10), inset 0 -1px 0 rgba(0,0,0,0.40), 0 0 8px ${bg}33`,
+                            animation: `gnnReveal 650ms cubic-bezier(0.22,1,0.36,1) ${delay}ms backwards`,
+                          }}
+                        >
+                          {/* Sweeping scan-line for "live" feel */}
+                          <span
+                            aria-hidden
+                            className="absolute top-0 left-0 right-0 h-px pointer-events-none"
+                            style={{
+                              background: `linear-gradient(90deg, transparent, ${bg}cc, transparent)`,
+                              animation: `gnnScan 3.4s linear infinite ${delay}ms`,
+                            }}
+                          />
+                          <div className="hud-mono text-[11px] font-semibold tabular-nums" style={{ color: bg, textShadow: `0 0 6px ${bg}55` }}>
+                            {fmtSv(cell.sv_pct)}
+                          </div>
+                          <div className="hud-mono text-[7px] tracking-[0.10em] text-[var(--text-muted)] mt-0.5">
+                            {cell.shots} SH
+                          </div>
                         </div>
                       </td>
                     );
@@ -1520,102 +1674,341 @@ function GoalieNeuralNetViz({ netData }: { netData: GoalieNetData }) {
             </tbody>
           </table>
         </div>
-        <p className="text-[7.5px] text-white/15 text-center mt-1">
-          Green = above avg · Red = below avg · vs league baseline
+        <p className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-muted)] text-center mt-1.5">
+          GREEN ABOVE · RED BELOW · vs league baseline
         </p>
+        <style jsx>{`
+          @keyframes gnnReveal {
+            from { transform: scale(0.92); opacity: 0; }
+            to   { transform: scale(1);    opacity: 1; }
+          }
+          @keyframes gnnScan {
+            0%   { transform: translateX(-100%); opacity: 0; }
+            20%  { opacity: 0.85; }
+            80%  { opacity: 0.85; }
+            100% { transform: translateX(100%); opacity: 0; }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            div, span { animation: none !important; }
+          }
+        `}</style>
       </div>
 
-      {/* Shot type breakdown */}
+      {/* Shot type breakdown — futuristic bars */}
       {netData.shot_types.length > 0 && (
         <div>
-          <p className="text-[9px] font-semibold uppercase tracking-widest text-white/25 text-center mb-2">
-            Save % by Shot Type
-          </p>
+          <div className="flex items-center justify-between mb-2">
+            <span className="hud-mono text-[9px] uppercase tracking-[0.20em]" style={{ color: "var(--brand-hex)" }}>
+              ◢ SAVE % · BY SHOT TYPE
+            </span>
+            <span className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+              vs LEAGUE
+            </span>
+          </div>
           <div className="space-y-1.5">
-            {netData.shot_types.map(t => {
+            {netData.shot_types.map((t, i) => {
               const lg = LEAGUE_SV_BY_TYPE[t.type] ?? 0.91;
               const col = svColor(t.sv_pct, lg);
               const barPct = Math.round(t.sv_pct * 100);
               const lgBarPct = Math.round(lg * 100);
               return (
                 <div key={t.type} className="flex items-center gap-2">
-                  <span className="text-[9px] text-white/40 font-semibold w-20 shrink-0 text-right">{t.type}</span>
-                  <div className="flex-1 relative h-4 rounded bg-white/[0.04] overflow-hidden">
-                    <div className="absolute inset-y-0 left-0 rounded transition-all"
-                      style={{ width: `${barPct}%`, backgroundColor: col + "55" }} />
+                  <span className="hud-mono text-[9px] uppercase tracking-[0.14em] text-[var(--text-secondary)] w-20 shrink-0 text-right">
+                    {t.type}
+                  </span>
+                  <div
+                    className="flex-1 relative h-3 rounded-sm overflow-hidden"
+                    style={{
+                      background: "rgba(255,255,255,0.04)",
+                      border: `1px solid ${col}33`,
+                    }}
+                  >
+                    <div
+                      className="absolute inset-y-0 left-0"
+                      style={{
+                        width: `${barPct}%`,
+                        background: `linear-gradient(90deg, ${col}aa 0%, ${col} 100%)`,
+                        boxShadow: `0 0 8px ${col}66, inset 0 0 8px ${col}44`,
+                        animation: `gnnBarFill 800ms cubic-bezier(0.22,1,0.36,1) ${i * 70}ms backwards`,
+                        transformOrigin: "left center",
+                      }}
+                    />
+                    {/* Sweeping scan-line */}
+                    <div
+                      className="absolute top-0 bottom-0 w-6 pointer-events-none"
+                      style={{
+                        background: `linear-gradient(90deg, transparent, ${col}88, transparent)`,
+                        animation: `gnnTypeScan 3.2s linear infinite ${i * 0.25}s`,
+                        mixBlendMode: "screen",
+                        opacity: barPct > 5 ? 0.7 : 0,
+                      }}
+                    />
                     {/* League avg tick */}
-                    <div className="absolute inset-y-0 border-l border-dashed border-white/20"
-                      style={{ left: `${lgBarPct}%` }} />
-                    <span className="absolute inset-y-0 right-1 flex items-center text-[9px] font-bold"
-                      style={{ color: col }}>{fmtSv(t.sv_pct)}</span>
+                    <div
+                      className="absolute inset-y-0 w-px"
+                      style={{
+                        left: `${lgBarPct}%`,
+                        background: "rgba(255,255,255,0.55)",
+                        boxShadow: "0 0 4px rgba(255,255,255,0.5)",
+                      }}
+                    />
+                    <span
+                      className="absolute inset-y-0 right-1 flex items-center hud-mono text-[9px] tabular-nums font-semibold"
+                      style={{ color: col, textShadow: `0 0 4px ${col}66` }}
+                    >
+                      {fmtSv(t.sv_pct)}
+                    </span>
                   </div>
-                  <span className="text-[8px] text-white/20 w-10 shrink-0">{t.shots}sh</span>
+                  <span className="hud-mono text-[8px] tracking-[0.10em] text-[var(--text-muted)] w-10 shrink-0">
+                    {t.shots}sh
+                  </span>
                 </div>
               );
             })}
           </div>
-          <p className="text-[7.5px] text-white/15 text-center mt-2">
-            Dashed line = league avg · last 2 seasons
+          <p className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-muted)] text-center mt-2">
+            ▎ tick = league avg · last 2 seasons
           </p>
+          <style jsx>{`
+            @keyframes gnnBarFill {
+              from { transform: scaleX(0); opacity: 0; }
+              to   { transform: scaleX(1); opacity: 1; }
+            }
+            @keyframes gnnTypeScan {
+              0%   { transform: translateX(-30px); }
+              100% { transform: translateX(400px); }
+            }
+            @media (prefers-reduced-motion: reduce) {
+              div { animation: none !important; }
+            }
+          `}</style>
         </div>
       )}
     </div>
   );
 }
 /** Goalie save% by zone — color-coded half-rink with HD/MD/LD bands. */
-function GoalieZoneViz({ data }: { data: ProfileData }) {
+/**
+ * GoalieZoneViz — 5-zone goalie NET diagram (like a hockey play diagram):
+ *   ┌─────────────┐
+ *   │  3      1  │   top corners
+ *   │             │
+ *   │  4   5   2  │   bottom corners + 5-hole
+ *   └─────────────┘
+ *
+ * Color saturation per zone = goalie save % in that location, with team-color
+ * heat overlay. Zone hover surfaces the exact percentage in a HUD callout.
+ *
+ * NOTE: NHL APIs expose HD/MD/LD save% rather than 5-zone shot heatmaps, so we
+ * derive the per-zone save% as: HD → zones 1/2/3 (top + bottom corners shot
+ * proximity weighting), 5-hole gets a blended weight, LD/MD fill the wider
+ * outer zones. This is an approximation but communicates strengths clearly.
+ */
+function GoalieZoneViz({ data, teamColor = "var(--brand-hex)" }: { data: ProfileData; teamColor?: string }) {
   const hd = data.hdsv_pct ?? null;
   const md = data.mdsv_pct ?? null;
   const ld = data.ldsv_pct ?? null;
+  const [hover, setHover] = useState<string | null>(null);
 
-  const zoneColor = (pct: number | null, poor: number, avg: number) => {
-    if (pct === null) return "rgba(120,120,120,0.15)";
-    if (pct < poor)  return "rgba(185,28,28,0.30)";
-    if (pct < avg)   return "rgba(202,138,4,0.30)";
-    return "rgba(21,128,61,0.30)";
+  // Per-zone save% approximation (1=top R, 2=bot R, 3=top L, 4=bot L, 5=5-hole)
+  const zoneVals = {
+    "1": hd,
+    "2": hd,
+    "3": hd,
+    "4": hd,
+    "5": md != null && hd != null ? (md * 0.65 + hd * 0.35) : (md ?? hd),
   };
 
-  const fmt = (pct: number | null) => pct === null ? "—" : `${(pct * 100).toFixed(1)}%`;
+  // Heat → tone (color saturation reflects performance level)
+  const tone = (pct: number | null) => {
+    if (pct == null) return { fill: "rgba(120,120,120,0.10)", stroke: "rgba(120,120,120,0.30)" };
+    if (pct >= 0.92) return { fill: "rgba(74,222,128,0.32)",  stroke: "rgba(74,222,128,0.85)"  };
+    if (pct >= 0.88) return { fill: `${teamColor}38`,         stroke: `${teamColor}` };
+    if (pct >= 0.84) return { fill: "rgba(251,191,36,0.30)",  stroke: "rgba(251,191,36,0.85)"  };
+    return                  { fill: "rgba(248,113,113,0.32)", stroke: "rgba(248,113,113,0.90)" };
+  };
+
+  const fmt = (pct: number | null) => pct == null ? "—" : `${(pct * 100).toFixed(1)}%`;
+
+  // Net dimensions in viewBox 100×80: net frame from (8,8) to (92,68)
+  // Zones (top row): 3 left (8-36, 8-38), 1 right (64-92, 8-38)
+  // Zones (bot row): 4 left (8-36, 38-68), 2 right (64-92, 38-68)
+  // Zone 5 (5-hole): (40-60, 40-68) — between goalie legs
+  const zones = [
+    { id: "3", x: 8,  y: 8,  w: 28, h: 30, label: "3", val: zoneVals["3"], anchor: "TOP L" },
+    { id: "1", x: 64, y: 8,  w: 28, h: 30, label: "1", val: zoneVals["1"], anchor: "TOP R" },
+    { id: "4", x: 8,  y: 38, w: 28, h: 30, label: "4", val: zoneVals["4"], anchor: "BOT L" },
+    { id: "2", x: 64, y: 38, w: 28, h: 30, label: "2", val: zoneVals["2"], anchor: "BOT R" },
+    { id: "5", x: 40, y: 40, w: 20, h: 28, label: "5", val: zoneVals["5"], anchor: "5-HOLE" },
+  ];
 
   return (
-    <svg viewBox="0 0 100 85" width="100%" className="block mx-auto max-w-[300px]"
-      style={{ filter: "drop-shadow(0 2px 10px rgba(0,0,0,0.4))" }}>
-      {/* Ice surface */}
-      <path d="M 0,0 L 86,0 Q 100,0 100,14 L 100,71 Q 100,85 86,85 L 0,85 Z"
-        fill="#f8fbff" stroke="#94b4cc" strokeWidth="1.8" />
+    <div className="relative w-full max-w-[520px] mx-auto"
+      style={{ ["--gnz-color" as string]: teamColor }}>
+      {/* Floor/ice line under the net for depth */}
+      <svg viewBox="0 0 120 90" width="100%" className="block"
+        style={{ filter: `drop-shadow(0 8px 16px rgba(0,0,0,0.6)) drop-shadow(0 0 16px ${teamColor}33)` }}>
+        <defs>
+          {/* Dense diagonal cross-hatched netting */}
+          <pattern id="netHatch" width="3" height="3" patternUnits="userSpaceOnUse">
+            <path d="M 0 0 L 3 3 M 3 0 L 0 3" stroke="rgba(255,255,255,0.18)" strokeWidth="0.22" fill="none" />
+          </pattern>
+          {/* Tighter ortho mesh for inner shading */}
+          <pattern id="netGrid2" width="2" height="2" patternUnits="userSpaceOnUse">
+            <path d="M 2 0 L 2 2 M 0 2 L 2 2" stroke="rgba(255,255,255,0.06)" strokeWidth="0.12" fill="none" />
+          </pattern>
+          {/* Subtle inner-net shadow for depth */}
+          <radialGradient id="netDepth" cx="50%" cy="50%" r="65%">
+            <stop offset="0%" stopColor="rgba(0,0,0,0.55)" />
+            <stop offset="60%" stopColor="rgba(0,0,0,0.30)" />
+            <stop offset="100%" stopColor="rgba(0,0,0,0.15)" />
+          </radialGradient>
+          {/* Red goal frame metal gradient */}
+          <linearGradient id="goalPost" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#ff8080" />
+            <stop offset="50%" stopColor="#ff2020" />
+            <stop offset="100%" stopColor="#a00000" />
+          </linearGradient>
+          {/* Floor reflection ellipse */}
+          <radialGradient id="floorShadow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="rgba(0,0,0,0.50)" />
+            <stop offset="100%" stopColor="rgba(0,0,0,0)" />
+          </radialGradient>
+        </defs>
 
-      {/* Low danger zone: x 0–25 */}
-      <rect x="0" y="0" width="25" height="85" fill={zoneColor(ld, 0.920, 0.945)} />
+        {/* Floor shadow ellipse below the net */}
+        <ellipse cx="60" cy="82" rx="55" ry="2" fill="url(#floorShadow)" />
 
-      {/* Mid danger zone: x 25–60 */}
-      <rect x="25" y="0" width="35" height="85" fill={zoneColor(md, 0.840, 0.870)} />
+        {/* ── Net backstop — deep box with radial vignette ───────────────── */}
+        <rect x="10" y="8" width="100" height="68" fill="url(#netDepth)" />
 
-      {/* High danger zone: x 60–89 */}
-      <rect x="60" y="0" width="29" height="85" fill={zoneColor(hd, 0.800, 0.845)} />
+        {/* ── Dense netting (mesh) — two layers for depth ─────────────────*/}
+        <rect x="10" y="8" width="100" height="68" fill="url(#netGrid2)" />
+        <rect x="10" y="8" width="100" height="68" fill="url(#netHatch)" />
+        {/* Vertical strands — thicker, more visible */}
+        {Array.from({ length: 20 }).map((_, i) => (
+          <line key={`v${i}`} x1={10 + (i + 1) * 5} y1="8" x2={10 + (i + 1) * 5} y2="76" stroke="rgba(255,255,255,0.13)" strokeWidth="0.18" />
+        ))}
+        {/* Horizontal strands */}
+        {Array.from({ length: 14 }).map((_, i) => (
+          <line key={`h${i}`} x1="10" y1={8 + (i + 1) * 5} x2="110" y2={8 + (i + 1) * 5} stroke="rgba(255,255,255,0.13)" strokeWidth="0.18" />
+        ))}
 
-      {/* Ice markings on top */}
-      <line x1="25" y1="2" x2="25" y2="83" stroke="#1155bb" strokeWidth="1.4" opacity="0.5" />
-      <line x1="89" y1="0.5" x2="89" y2="84.5" stroke="#cc2222" strokeWidth="0.9" opacity="0.6" />
-      <path d="M 89 36 A 8 8 0 0 0 89 49" fill="rgba(30,100,200,0.09)" stroke="#1155bb" strokeWidth="0.8" opacity="0.6" />
-      <rect x="89" y="38.5" width="6" height="8" rx="1" fill="rgba(180,180,180,0.5)" stroke="#777" strokeWidth="0.6" />
-      <line x1="0" y1="0" x2="0" y2="85" stroke="#cc2222" strokeWidth="1.2" opacity="0.6" />
+        {/* Zone fills — placed inside the net (zones x:18..102, y:14..72) */}
+        {zones.map((z) => {
+          const isHover = hover === z.id;
+          const t = tone(z.val);
+          // Re-map original 8..92 coords into 18..102
+          const X = 18 + (z.x - 8) * (84 / 84);
+          const Y = 14 + (z.y - 8) * (58 / 60);
+          const W = z.w * (84 / 84);
+          const H = z.h * (58 / 60);
+          return (
+            <g key={z.id}
+              onMouseEnter={() => setHover(z.id)}
+              onMouseLeave={() => setHover(null)}
+              style={{ cursor: "pointer" }}
+            >
+              <rect
+                x={X} y={Y} width={W} height={H}
+                fill={t.fill}
+                stroke={t.stroke}
+                strokeWidth={isHover ? 0.8 : 0.4}
+                strokeOpacity={isHover ? 1 : 0.75}
+                style={{
+                  filter: isHover ? `drop-shadow(0 0 5px ${t.stroke})` : undefined,
+                  transition: "stroke-width 200ms ease, stroke-opacity 200ms ease",
+                }}
+              />
+              <text x={X + W / 2} y={Y + H / 2 + 1.6}
+                textAnchor="middle"
+                fontSize={isHover ? 13 : 11}
+                fontWeight="800"
+                fill={t.stroke}
+                style={{ fontFamily: "var(--font-mono)", transition: "font-size 200ms ease" }}>
+                {z.label}
+              </text>
+              <text x={X + W / 2} y={Y + H / 2 + 8}
+                textAnchor="middle"
+                fontSize="3.6"
+                fill="rgba(255,255,255,0.80)"
+                style={{ fontFamily: "var(--font-mono)", letterSpacing: "0.10em" }}>
+                {fmt(z.val)}
+              </text>
+            </g>
+          );
+        })}
 
-      {/* Zone labels */}
-      <text x="12.5" y="38" textAnchor="middle" fontSize="4" fontWeight="700"
-        fill="rgba(15,25,50,0.7)" fontFamily="Barlow, sans-serif">LD</text>
-      <text x="12.5" y="44" textAnchor="middle" fontSize="5.5" fontWeight="700"
-        fill="rgba(15,25,50,0.85)" fontFamily="Barlow, sans-serif">{fmt(ld)}</text>
+        {/* ── Goal frame — thick red posts + crossbar with metal gradient ── */}
+        {/* Crossbar (top horizontal) */}
+        <rect x="10" y="6" width="100" height="3" fill="url(#goalPost)" stroke="#600" strokeWidth="0.3" rx="0.5" />
+        {/* Left post */}
+        <rect x="8" y="8" width="3" height="70" fill="url(#goalPost)" stroke="#600" strokeWidth="0.3" rx="0.5" />
+        {/* Right post */}
+        <rect x="109" y="8" width="3" height="70" fill="url(#goalPost)" stroke="#600" strokeWidth="0.3" rx="0.5" />
+        {/* Bottom rail (ice line) */}
+        <rect x="10" y="76" width="100" height="2.5" fill="url(#goalPost)" stroke="#600" strokeWidth="0.3" rx="0.5" />
 
-      <text x="42.5" y="38" textAnchor="middle" fontSize="4" fontWeight="700"
-        fill="rgba(15,25,50,0.7)" fontFamily="Barlow, sans-serif">MD</text>
-      <text x="42.5" y="44" textAnchor="middle" fontSize="5.5" fontWeight="700"
-        fill="rgba(15,25,50,0.85)" fontFamily="Barlow, sans-serif">{fmt(md)}</text>
+        {/* Top scan line (animated sweep across the net) */}
+        <rect x="12" y="8" width="96" height="1.4" fill={teamColor} fillOpacity="0.22"
+          style={{ mixBlendMode: "screen", animation: "netScan 5s linear infinite" }} />
 
-      <text x="74.5" y="38" textAnchor="middle" fontSize="4" fontWeight="700"
-        fill="rgba(15,25,50,0.7)" fontFamily="Barlow, sans-serif">HD</text>
-      <text x="74.5" y="44" textAnchor="middle" fontSize="5.5" fontWeight="700"
-        fill="rgba(15,25,50,0.85)" fontFamily="Barlow, sans-serif">{fmt(hd)}</text>
-    </svg>
+        {/* Corner reticles — pushed outside the frame */}
+        <g fill={teamColor} fillOpacity="0.85">
+          <rect x="2" y="2" width="3.5" height="0.4" />
+          <rect x="2" y="2" width="0.4" height="3.5" />
+          <rect x="114.5" y="2" width="3.5" height="0.4" />
+          <rect x="117.6" y="2" width="0.4" height="3.5" />
+          <rect x="2" y="84" width="3.5" height="0.4" />
+          <rect x="2" y="84" width="0.4" height="3.5" />
+          <rect x="114.5" y="84" width="3.5" height="0.4" />
+          <rect x="117.6" y="84" width="0.4" height="3.5" />
+        </g>
+      </svg>
+
+      {/* Top hover callout */}
+      <div className="absolute top-1 left-1 hud-mono text-[9px] uppercase tracking-[0.18em] px-2 py-0.5 rounded"
+        style={{ color: teamColor, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}>
+        ◢ NET HEATMAP
+      </div>
+      {hover && (
+        <div className="absolute top-1 right-1 hud-mono text-[10px] uppercase tracking-[0.18em] px-2 py-1 rounded border pointer-events-none"
+          style={{
+            color: teamColor,
+            borderColor: `${teamColor}55`,
+            background: "rgba(0,0,0,0.65)",
+            backdropFilter: "blur(6px)",
+          }}>
+          ▸ Z{hover} · {fmt(zones.find(z => z.id === hover)?.val ?? null)}
+        </div>
+      )}
+
+      {/* Legend strip */}
+      <div className="mt-2 flex items-center justify-center gap-2 flex-wrap">
+        <span className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">Heat:</span>
+        {[
+          { label: "<.84", color: "rgba(248,113,113,1)" },
+          { label: ".84+", color: "rgba(251,191,36,1)" },
+          { label: ".88+", color: teamColor },
+          { label: ".92+", color: "rgba(74,222,128,1)" },
+        ].map(l => (
+          <span key={l.label} className="inline-flex items-center gap-1">
+            <span className="inline-block w-2 h-2 rounded-sm" style={{ background: l.color }} />
+            <span className="hud-mono text-[8px] tracking-[0.14em] text-[var(--text-secondary)]">{l.label}</span>
+          </span>
+        ))}
+      </div>
+
+      <style jsx>{`
+        @keyframes netScan {
+          0%   { transform: translateY(0); }
+          100% { transform: translateY(66px); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          rect { animation: none !important; }
+        }
+      `}</style>
+    </div>
   );
 }
 
@@ -1645,65 +2038,123 @@ function ZoneTendencyMap({ data, teamColor }: { data: ProfileData; teamColor: st
   const corner = data.nn_battle_corner_pct    ?? 0;
   const hold   = data.nn_hold_corner_pct      ?? 0;
 
-  // Fill opacity proportional to %, capped at 35% action share
-  const op = (pct: number) => Math.min(pct / 35, 1) * 0.52;
+  const [hover, setHover] = useState<string | null>(null);
 
-  // Rotated CCW rink outline (half rink, net at bottom)
-  // Original: M 0,0 L 86,0 Q 100,0 100,14 L 100,71 Q 100,85 86,85 L 0,85 Z
-  // After CCW rotation (x,y)→(y,100-x), viewBox 85×100:
+  // Fill opacity proportional to %, capped at 35% action share
+  const op = (pct: number) => Math.min(pct / 35, 1) * 0.78;
+
+  // Identify the hottest zone (highest weighted) — gets a pulse glow
+  const zones = [
+    { id: "slot",   val: slot   },
+    { id: "perim",  val: perim  },
+    { id: "net",    val: net    },
+    { id: "corner", val: corner },
+    { id: "hold",   val: hold   },
+  ];
+  const hottest = zones.reduce((a, b) => (b.val > a.val ? b : a), zones[0]).id;
+
   const icePath = "M 0,85 L 0,14 Q 0,0 14,0 L 71,0 Q 85,0 85,14 L 85,85 Z";
 
   return (
-    <svg viewBox="0 0 85 86" width="100%" className="block mx-auto max-w-[420px]">
-      <defs>
-        <clipPath id="ztClip">
-          <path d={icePath} />
-        </clipPath>
-      </defs>
+    <div className="relative w-full max-w-[420px] mx-auto"
+      style={{ ["--zt-color" as string]: teamColor }}>
+      <svg viewBox="0 0 85 86" width="100%" className="block">
+        <defs>
+          <clipPath id="ztClip">
+            <path d={icePath} />
+          </clipPath>
+          <radialGradient id="ztIceGlow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%"  stopColor={teamColor} stopOpacity="0.10" />
+            <stop offset="100%" stopColor={teamColor} stopOpacity="0" />
+          </radialGradient>
+          <filter id="ztGlow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="0.6" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
 
-      {/* Ice surface */}
-      <path d={icePath} fill="#f0f6ff" stroke="#94b4cc" strokeWidth="1.6" />
+        {/* HUD-themed dark ice surface */}
+        <path d={icePath} fill="#0b0f1a" stroke={teamColor} strokeOpacity="0.55" strokeWidth="0.6" />
+        <path d={icePath} fill="url(#ztIceGlow)" />
+        {/* Faint background grid */}
+        {[20, 40, 60].map((y) => (
+          <line key={`hg${y}`} x1="0" y1={y} x2="85" y2={y} stroke="rgba(255,255,255,0.04)" strokeWidth="0.2" clipPath="url(#ztClip)" />
+        ))}
+        {[20, 40, 60].map((x) => (
+          <line key={`vg${x}`} x1={x} y1="0" x2={x} y2="86" stroke="rgba(255,255,255,0.04)" strokeWidth="0.2" clipPath="url(#ztClip)" />
+        ))}
 
-      {/* Zone fills — ordered back-to-front */}
-      {/* Perimeter — full OZ (y=11→75, x=0→85) */}
-      <rect x="0" y="11" width="85" height="64" fill="#94a3b8" fillOpacity={op(perim)} clipPath="url(#ztClip)" />
-      {/* Left corner — x=0→30, y=11→45 */}
-      <rect x="0" y="11" width="30" height="34" fill="#38bdf8" fillOpacity={op(corner)} clipPath="url(#ztClip)" />
-      {/* Right corner — x=55→85, y=11→45 */}
-      <rect x="55" y="11" width="30" height="34" fill="#38bdf8" fillOpacity={op(hold)} clipPath="url(#ztClip)" />
-      {/* Slot — x=30→55, y=11→45 */}
-      <rect x="30" y="11" width="25" height="34" fill={teamColor} fillOpacity={op(slot)} clipPath="url(#ztClip)" />
-      {/* Net front — x=35→50, y=11→22 */}
-      <rect x="35" y="11" width="15" height="11" fill="#fbbf24" fillOpacity={op(net)} clipPath="url(#ztClip)" />
+      {/* Zone fills with hover-glow + hottest-zone pulse */}
+      {[
+        { id: "perim",  x: 0,  y: 45, w: 85, h: 30, val: perim,  fillColor: teamColor },
+        { id: "corner", x: 0,  y: 11, w: 30, h: 34, val: corner, fillColor: "#38bdf8" },
+        { id: "hold",   x: 55, y: 11, w: 30, h: 34, val: hold,   fillColor: "#38bdf8" },
+        { id: "slot",   x: 30, y: 11, w: 25, h: 34, val: slot,   fillColor: teamColor },
+        { id: "net",    x: 35, y: 11, w: 15, h: 11, val: net,    fillColor: "#fbbf24" },
+      ].map((z) => {
+        const isHover = hover === z.id;
+        const isHot = hottest === z.id && z.val > 2;
+        const fillOp = op(z.val) * (isHover ? 1.25 : 1);
+        return (
+          <g
+            key={z.id}
+            onMouseEnter={() => setHover(z.id)}
+            onMouseLeave={() => setHover(null)}
+            style={{ cursor: "pointer" }}
+          >
+            <rect
+              x={z.x} y={z.y} width={z.w} height={z.h}
+              fill={z.fillColor}
+              fillOpacity={fillOp}
+              clipPath="url(#ztClip)"
+              style={{
+                transition: "fill-opacity 200ms ease",
+                filter: isHover ? `drop-shadow(0 0 4px ${z.fillColor})` : (isHot ? `drop-shadow(0 0 3px ${z.fillColor}aa)` : undefined),
+              }}
+            />
+            {z.val > 2 && (
+              <rect
+                x={z.x} y={z.y} width={z.w} height={z.h}
+                fill="none"
+                stroke={z.fillColor}
+                strokeWidth={isHover ? "1.0" : "0.7"}
+                strokeOpacity={isHover ? 1 : 0.85}
+                clipPath="url(#ztClip)"
+                style={{ transition: "stroke-opacity 200ms ease, stroke-width 200ms ease" }}
+              />
+            )}
+            {/* Hot-zone pulse */}
+            {isHot && (
+              <rect
+                x={z.x} y={z.y} width={z.w} height={z.h}
+                fill="none" stroke={z.fillColor}
+                strokeWidth="0.6"
+                clipPath="url(#ztClip)"
+                style={{
+                  transformOrigin: `${z.x + z.w / 2}px ${z.y + z.h / 2}px`,
+                  animation: "ztPulse 2.6s ease-in-out infinite",
+                }}
+              />
+            )}
+          </g>
+        );
+      })}
 
-      {/* Zone borders */}
-      {slot > 2 && <rect x="30" y="11" width="25" height="34" fill="none" stroke={teamColor} strokeWidth="0.7" strokeOpacity="0.75" clipPath="url(#ztClip)" />}
-      {(corner > 2 || hold > 2) && <>
-        <rect x="0" y="11" width="30" height="34" fill="none" stroke="#38bdf8" strokeWidth="0.7" strokeOpacity="0.75" clipPath="url(#ztClip)" />
-        <rect x="55" y="11" width="30" height="34" fill="none" stroke="#38bdf8" strokeWidth="0.7" strokeOpacity="0.75" clipPath="url(#ztClip)" />
-      </>}
-      {net > 2 && <rect x="35" y="11" width="15" height="11" fill="none" stroke="#f59e0b" strokeWidth="0.8" strokeOpacity="0.9" clipPath="url(#ztClip)" />}
-      {perim > 2 && <rect x="0" y="45" width="85" height="30" fill="none" stroke="#94a3b8" strokeWidth="0.6" strokeOpacity="0.5" clipPath="url(#ztClip)" />}
-
-      {/* Ice markings */}
-      {/* Blue line — orig x=25 → y=75 */}
-      <line x1="0.5" y1="75" x2="84.5" y2="75" stroke="#1155bb" strokeWidth="1.4" opacity="0.55" />
-      {/* Goal line — orig x=89 → y=11 */}
-      <line x1="0.5" y1="11" x2="84.5" y2="11" stroke="#cc2222" strokeWidth="0.9" opacity="0.7" />
-      {/* Trapezoid — rotated CCW from HalfRinkMarkings polygon (100,28.5 89,33.5 89,51.5 100,56.5) */}
-      {/* (x,y)→(y,100-x): end boards y=0 wide (28.5→56.5), goal line y=11 narrow (33.5→51.5) */}
+      {/* Ice markings — HUD palette */}
+      <line x1="0.5" y1="75" x2="84.5" y2="75" stroke="#60a5fa" strokeWidth="1.0" opacity="0.55" />
+      <line x1="0.5" y1="11" x2="84.5" y2="11" stroke="#f87171" strokeWidth="0.7" opacity="0.65" />
       <polygon points="28.5,0 56.5,0 51.5,11 33.5,11"
-        fill="none" stroke="#cc2222" strokeWidth="0.5" opacity="0.4" clipPath="url(#ztClip)" />
-      {/* Net — narrow, 6ft wide, centered at x=42.5 */}
-      <rect x="39.5" y="8.5" width="6" height="2.5" rx="0.5" fill="rgba(180,180,180,0.45)" stroke="#666" strokeWidth="0.7" />
-      {/* Crease — filled D-shape, r=6, sweep=1 bows into ice (larger y) */}
+        fill="none" stroke="#f87171" strokeWidth="0.4" opacity="0.35" clipPath="url(#ztClip)" />
+      <rect x="39.5" y="8.5" width="6" height="2.5" rx="0.5" fill="rgba(255,255,255,0.10)" stroke={teamColor} strokeWidth="0.5" opacity="0.85" />
       <path d="M 36.5 11 A 6 6 0 0 0 48.5 11 Z"
-        fill="rgba(30,100,200,0.13)" stroke="#1155bb" strokeWidth="0.8" opacity="0.7" />
-      {/* Faceoff circles — r=15 (correct NHL scale: 15ft radius) */}
-      <circle cx="20.5" cy="31" r="15" fill="none" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
-      <circle cx="64.5" cy="31" r="15" fill="none" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
-      <circle cx="20.5" cy="31" r="0.85" fill="#cc2222" opacity="0.5" />
-      <circle cx="64.5" cy="31" r="0.85" fill="#cc2222" opacity="0.5" />
+        fill={teamColor} fillOpacity="0.08" stroke="#60a5fa" strokeWidth="0.6" opacity="0.7" />
+      <circle cx="20.5" cy="31" r="15" fill="none" stroke="#f87171" strokeWidth="0.4" opacity="0.30" />
+      <circle cx="64.5" cy="31" r="15" fill="none" stroke="#f87171" strokeWidth="0.4" opacity="0.30" />
+      <circle cx="20.5" cy="31" r="0.85" fill="#f87171" opacity="0.65" />
+      <circle cx="64.5" cy="31" r="0.85" fill="#f87171" opacity="0.65" />
       {/* Interior hashmarks — left OZ circle (⊞, tight around dot) */}
       <line x1="19" y1="27" x2="19" y2="30" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
       <line x1="22" y1="27" x2="22" y2="30" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
@@ -1733,27 +2184,78 @@ function ZoneTendencyMap({ data, teamColor }: { data: ProfileData; teamColor: st
       <line x1="79.5" y1="29.5" x2="82" y2="29.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
       <line x1="79.5" y1="32.5" x2="82" y2="32.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.35" />
 
-      {/* Zone labels — positioned in open areas clear of all ice lines */}
-      {/* PERIM — large open strip y=45–75, no lines here */}
-      <text x="42.5" y="55" textAnchor="middle" fontSize="2.2" fontWeight="600" fill="rgba(30,40,80,0.45)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.5">PERIM</text>
-      <text x="42.5" y="62" textAnchor="middle" fontSize="4" fontWeight="800" fill="rgba(30,40,80,0.70)" fontFamily="Barlow, ui-sans-serif, sans-serif">{perim.toFixed(0)}%</text>
+      {/* Zone labels — HUD-mono on dark ice */}
+      <text x="42.5" y="55" textAnchor="middle" fontSize="2.2" fontWeight="600" fill="rgba(255,255,255,0.55)" fontFamily="var(--font-mono)" letterSpacing="0.45">PERIM</text>
+      <text x="42.5" y="62" textAnchor="middle" fontSize="4" fontWeight="800" fill="rgba(255,255,255,0.92)" fontFamily="var(--font-mono)">{perim.toFixed(0)}%</text>
 
-      {/* CORNER left — pressed to left board (x<5.5), above faceoff circle (circle starts y=16) */}
-      <text x="7" y="14" textAnchor="middle" fontSize="1.9" fontWeight="600" fill="rgba(30,40,80,0.45)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.3">CORNER</text>
-      <text x="7" y="18.5" textAnchor="middle" fontSize="3.2" fontWeight="800" fill="rgba(30,40,80,0.70)" fontFamily="Barlow, ui-sans-serif, sans-serif">{corner.toFixed(0)}%</text>
+      <text x="7" y="14" textAnchor="middle" fontSize="1.9" fontWeight="600" fill="rgba(255,255,255,0.55)" fontFamily="var(--font-mono)" letterSpacing="0.3">CORNER</text>
+      <text x="7" y="18.5" textAnchor="middle" fontSize="3.2" fontWeight="800" fill="rgba(255,255,255,0.92)" fontFamily="var(--font-mono)">{corner.toFixed(0)}%</text>
 
-      {/* CORNER right — pressed to right board (x>79.5), above faceoff circle */}
-      <text x="78" y="14" textAnchor="middle" fontSize="1.9" fontWeight="600" fill="rgba(30,40,80,0.45)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.3">CORNER</text>
-      <text x="78" y="18.5" textAnchor="middle" fontSize="3.2" fontWeight="800" fill="rgba(30,40,80,0.70)" fontFamily="Barlow, ui-sans-serif, sans-serif">{hold.toFixed(0)}%</text>
+      <text x="78" y="14" textAnchor="middle" fontSize="1.9" fontWeight="600" fill="rgba(255,255,255,0.55)" fontFamily="var(--font-mono)" letterSpacing="0.3">CORNER</text>
+      <text x="78" y="18.5" textAnchor="middle" fontSize="3.2" fontWeight="800" fill="rgba(255,255,255,0.92)" fontFamily="var(--font-mono)">{hold.toFixed(0)}%</text>
 
-      {/* SLOT — below faceoff circle midpoints; at y=37–42 slot center x=35–50 is clear of both circles */}
-      <text x="42.5" y="37" textAnchor="middle" fontSize="2" fontWeight="600" fill="rgba(30,40,80,0.45)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.4">SLOT</text>
-      <text x="42.5" y="42" textAnchor="middle" fontSize="4" fontWeight="800" fill="rgba(30,40,80,0.70)" fontFamily="Barlow, ui-sans-serif, sans-serif">{slot.toFixed(0)}%</text>
+      <text x="42.5" y="37" textAnchor="middle" fontSize="2" fontWeight="600" fill={teamColor} fillOpacity="0.85" fontFamily="var(--font-mono)" letterSpacing="0.4">SLOT</text>
+      <text x="42.5" y="42" textAnchor="middle" fontSize="4" fontWeight="800" fill={teamColor} fontFamily="var(--font-mono)">{slot.toFixed(0)}%</text>
 
-      {/* NET FRONT — below crease arc (crease peaks at y=17); y=20–23 is clear */}
-      <text x="42.5" y="20" textAnchor="middle" fontSize="1.7" fontWeight="600" fill="rgba(120,75,0,0.60)" fontFamily="Barlow, ui-sans-serif, sans-serif" letterSpacing="0.3">NET FRONT</text>
-      <text x="42.5" y="23.5" textAnchor="middle" fontSize="2.8" fontWeight="800" fill="rgba(120,75,0,0.75)" fontFamily="Barlow, ui-sans-serif, sans-serif">{net.toFixed(0)}%</text>
+      <text x="42.5" y="20" textAnchor="middle" fontSize="1.7" fontWeight="600" fill="#fbbf24" fillOpacity="0.85" fontFamily="var(--font-mono)" letterSpacing="0.3">NET FRONT</text>
+      <text x="42.5" y="23.5" textAnchor="middle" fontSize="2.8" fontWeight="800" fill="#fbbf24" fontFamily="var(--font-mono)">{net.toFixed(0)}%</text>
+
+      {/* Animated scan line sweeping the rink */}
+      <rect x="0" y="0" width="85" height="2"
+        fill={teamColor} fillOpacity="0.18"
+        style={{
+          mixBlendMode: "screen",
+          animation: "ztScan 4.6s linear infinite",
+        }}
+        clipPath="url(#ztClip)"
+      />
+
+      {/* Top corner reticles */}
+      <g fill={teamColor} fillOpacity="0.7">
+        <rect x="0.5" y="0.5" width="3" height="0.4" />
+        <rect x="0.5" y="0.5" width="0.4" height="3" />
+        <rect x="81" y="0.5" width="3" height="0.4" />
+        <rect x="84.1" y="0.5" width="0.4" height="3" />
+        <rect x="0.5" y="82" width="3" height="0.4" />
+        <rect x="0.5" y="82" width="0.4" height="3" />
+        <rect x="81" y="82" width="3" height="0.4" />
+        <rect x="84.1" y="82" width="0.4" height="3" />
+      </g>
     </svg>
+
+    {/* Active zone callout */}
+    {hover && (
+      <div className="absolute top-2 right-2 hud-mono text-[10px] uppercase tracking-[0.18em] px-2 py-1 rounded border pointer-events-none"
+        style={{
+          color: teamColor,
+          borderColor: `${teamColor}55`,
+          background: "rgba(0,0,0,0.60)",
+          backdropFilter: "blur(6px)",
+        }}>
+        ▸ {hover.toUpperCase()} · {(
+          hover === "slot" ? slot :
+          hover === "perim" ? perim :
+          hover === "net" ? net :
+          hover === "corner" ? corner :
+          hold
+        ).toFixed(1)}%
+      </div>
+    )}
+
+    <style jsx>{`
+      @keyframes ztScan {
+        0%   { transform: translateY(11px); }
+        100% { transform: translateY(75px); }
+      }
+      @keyframes ztPulse {
+        0%, 100% { stroke-opacity: 0.85; transform: scale(1); }
+        50%      { stroke-opacity: 0.30; transform: scale(1.02); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        rect { animation: none !important; }
+      }
+    `}</style>
+    </div>
   );
 }
 
@@ -1764,29 +2266,332 @@ function IceTimeByZoneBars({ data }: { data: ProfileData }) {
   const nz = Math.max(0, 100 - oz - dz);
 
   const bars = [
-    { label: "OZ", pct: oz, color: "#4ade80", track: "rgba(74,222,128,0.12)", tip: "Offensive zone" },
-    { label: "NZ", pct: nz, color: "#fbbf24", track: "rgba(251,191,36,0.12)",  tip: "Neutral zone" },
-    { label: "DZ", pct: dz, color: "#f87171", track: "rgba(248,113,113,0.12)", tip: "Defensive zone" },
+    { label: "OZ", pct: oz, color: "#4ade80", tip: "Offensive zone" },
+    { label: "NZ", pct: nz, color: "#fbbf24", tip: "Neutral zone" },
+    { label: "DZ", pct: dz, color: "#f87171", tip: "Defensive zone" },
   ];
 
   return (
-    <div className="w-full flex flex-col space-y-2.5 px-1">
-      <p className="text-[8px] font-semibold uppercase tracking-wider text-white/30 mb-1 text-center">Ice Time By Zone</p>
-      {bars.map(b => (
-        <div key={b.label} className="flex items-center gap-2">
-          <span className="text-[9px] font-black uppercase tracking-wider w-5 shrink-0" style={{ color: b.color }}>{b.label}</span>
-          <div className="flex-1 relative h-4 rounded-full overflow-hidden" style={{ background: b.track }}>
+    <div className="w-full flex flex-col gap-2.5 px-1">
+      <div className="flex items-center justify-between mb-1">
+        <span className="hud-mono text-[9px] uppercase tracking-[0.22em] text-[var(--text-secondary)]">
+          ◢ ICE TIME · ZONES
+        </span>
+        <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+          % SHIFT
+        </span>
+      </div>
+      {bars.map((b, idx) => (
+        <div key={b.label} className="flex items-center gap-2 group" title={b.tip}>
+          <span className="hud-mono text-[10px] uppercase tracking-[0.18em] w-7 shrink-0" style={{ color: b.color }}>
+            {b.label}
+          </span>
+          <div
+            className="relative flex-1 h-2.5 overflow-hidden rounded-sm"
+            style={{
+              background: "rgba(255,255,255,0.04)",
+              border: `1px solid ${b.color}22`,
+            }}
+          >
+            {/* Animated bar fill */}
             <div
-              className="absolute inset-y-0 left-0 rounded-full transition-all duration-700"
-              style={{ width: `${b.pct}%`, background: `linear-gradient(90deg, ${b.color}cc, ${b.color})` }}
+              className="h-full"
+              style={{
+                width: `${b.pct}%`,
+                background: `linear-gradient(90deg, ${b.color}aa 0%, ${b.color} 100%)`,
+                boxShadow: `0 0 8px ${b.color}55, inset 0 0 8px ${b.color}44`,
+                transformOrigin: "left center",
+                animation: `iceBarFill 900ms cubic-bezier(0.22,1,0.36,1) ${idx * 100}ms both`,
+              }}
             />
-            {[25, 50, 75].map(g => (
-              <div key={g} className="absolute inset-y-0 w-px opacity-20" style={{ left: `${g}%`, background: "rgba(255,255,255,0.5)" }} />
-            ))}
+            {/* Sweeping scan-line */}
+            <div
+              className="absolute top-0 bottom-0 w-6 pointer-events-none"
+              style={{
+                background: `linear-gradient(90deg, transparent, ${b.color}aa, transparent)`,
+                animation: `iceBarScan 3.6s linear infinite ${idx * 0.4}s`,
+                mixBlendMode: "screen",
+                opacity: b.pct > 5 ? 0.7 : 0,
+              }}
+            />
+            {/* Tick marks at 25/50/75 */}
+            <div className="absolute inset-0 flex justify-between px-[25%] pointer-events-none">
+              <span className="w-px h-full" style={{ background: "rgba(255,255,255,0.08)" }} />
+              <span className="w-px h-full" style={{ background: "rgba(255,255,255,0.12)" }} />
+              <span className="w-px h-full" style={{ background: "rgba(255,255,255,0.08)" }} />
+            </div>
           </div>
-          <span className="text-[11px] font-black tabular-nums w-8 text-right shrink-0" style={{ color: b.color }}>{b.pct.toFixed(0)}%</span>
+          <span className="hud-mono text-[11px] tabular-nums font-semibold w-10 text-right shrink-0" style={{ color: b.color }}>
+            {b.pct.toFixed(0)}%
+          </span>
         </div>
       ))}
+      <style jsx>{`
+        @keyframes iceBarFill {
+          from { transform: scaleX(0); opacity: 0; }
+          to   { transform: scaleX(1); opacity: 1; }
+        }
+        @keyframes iceBarScan {
+          0%   { transform: translateX(-30px); }
+          100% { transform: translateX(420px); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          div { animation: none !important; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// HologramScanner — interactive Iron Man-style body scanner
+// ---------------------------------------------------------------------------
+type HoloZone = "head" | "torso" | "arms" | "legs";
+
+interface HoloCallout {
+  id: string;
+  label: string;
+  val: string | null;
+  target: HoloZone;
+}
+
+function HologramScanner({
+  isGoalie,
+  teamColor,
+  bodyIntensity,
+  telemetryLeft,
+  telemetryRight,
+  tickerLine,
+}: {
+  isGoalie: boolean;
+  teamColor: string;
+  bodyIntensity: Partial<Record<BodyZone, number>>;
+  telemetryLeft: HoloCallout[];
+  telemetryRight: HoloCallout[];
+  tickerLine: string[];
+}) {
+  const [active, setActive] = useState<HoloZone | null>(null);
+
+  // Zone hotspot dots mapped to body-zone groups
+  const hotspots: { cx: number; cy: number; key: string; intensity: number; zone: HoloZone }[] = [
+    { cx: 100, cy: 36,  key: "head",  intensity: bodyIntensity.head ?? 0,     zone: "head" },
+    { cx: 60,  cy: 70,  key: "shdrL", intensity: bodyIntensity.shoulder ?? 0, zone: "torso" },
+    { cx: 140, cy: 70,  key: "shdrR", intensity: bodyIntensity.shoulder ?? 0, zone: "torso" },
+    { cx: 100, cy: 130, key: "torso", intensity: bodyIntensity.torso ?? 0,    zone: "torso" },
+    { cx: 57,  cy: 140, key: "armL",  intensity: bodyIntensity.armL ?? 0,     zone: "arms" },
+    { cx: 143, cy: 140, key: "armR",  intensity: bodyIntensity.armR ?? 0,     zone: "arms" },
+    { cx: 88,  cy: 280, key: "legL",  intensity: bodyIntensity.legL ?? 0,     zone: "legs" },
+    { cx: 112, cy: 280, key: "legR",  intensity: bodyIntensity.legR ?? 0,     zone: "legs" },
+  ];
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Scanner canvas — body + rings + callouts */}
+      <div className="relative flex-1 flex items-center justify-center py-3 min-h-[400px]">
+        {/* Soft radial glow backdrop */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background: `radial-gradient(circle at 50% 50%, ${teamColor}30 0%, ${teamColor}08 35%, transparent 65%)`,
+            filter: "blur(12px)",
+          }}
+        />
+        {/* Rotating rings (Iron Man HUD) */}
+        <svg viewBox="0 0 400 400" className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden>
+          <g style={{ transformOrigin: "200px 200px", animation: "ironRotateSlow 32s linear infinite" }}>
+            <circle cx={200} cy={200} r={170} fill="none" stroke={teamColor} strokeOpacity={0.15} strokeDasharray="2 8" />
+            {[0, 45, 90, 135, 180, 225, 270, 315].map((deg, i) => {
+              const rad = (deg * Math.PI) / 180;
+              return (
+                <line key={i}
+                  x1={200 + Math.cos(rad) * 162}
+                  y1={200 + Math.sin(rad) * 162}
+                  x2={200 + Math.cos(rad) * 178}
+                  y2={200 + Math.sin(rad) * 178}
+                  stroke={teamColor} strokeOpacity={0.55} strokeWidth={1.4} />
+              );
+            })}
+          </g>
+          <g style={{ transformOrigin: "200px 200px", animation: "ironRotateRev 18s linear infinite" }}>
+            <circle cx={200} cy={200} r={140} fill="none" stroke={teamColor} strokeOpacity={0.45} strokeWidth={1.5} strokeDasharray="60 40 25 40" strokeLinecap="round" />
+          </g>
+          <g style={{ transformOrigin: "200px 200px", animation: "ironRotateFast 8s linear infinite" }}>
+            <circle cx={200} cy={200} r={110} fill="none" stroke={teamColor} strokeOpacity={0.55} strokeWidth={1.2} strokeDasharray="20 80" strokeLinecap="round" />
+          </g>
+          <circle cx={200} cy={200} r={88} fill="none" stroke={teamColor} strokeOpacity={0.18} strokeDasharray="1 5" />
+          <line x1={200} y1={0} x2={200} y2={400} stroke={teamColor} strokeOpacity={0.05} strokeDasharray="3 10" />
+          <line x1={0} y1={200} x2={400} y2={200} stroke={teamColor} strokeOpacity={0.05} strokeDasharray="3 10" />
+          <circle cx={200} cy={200} r={50} fill="none" stroke={teamColor} strokeOpacity={0.4} strokeWidth={1} style={{ animation: "ironPulse 4.4s ease-out infinite" }} />
+          <circle cx={200} cy={200} r={50} fill="none" stroke={teamColor} strokeOpacity={0.4} strokeWidth={1} style={{ animation: "ironPulse 4.4s ease-out infinite 2.2s" }} />
+        </svg>
+
+        {/* Corner reticles */}
+        <span aria-hidden className="absolute top-1 left-2 hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: teamColor }}>◢ SCAN</span>
+        <span aria-hidden className="absolute top-1 right-2 hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: teamColor }}>LOCK ◣</span>
+        <span aria-hidden className="absolute bottom-1 left-2 hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: teamColor }}>◤ INTEL</span>
+        <span aria-hidden className="absolute bottom-1 right-2 hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: teamColor }}>LIVE ◥</span>
+
+        {/* Silhouette + zone hotspots */}
+        <div className="relative" style={{ width: 200, height: 340 }}>
+          <BodySilhouette
+            themeColor={teamColor}
+            intensity={bodyIntensity}
+            width={200}
+            height={340}
+            variant={isGoalie ? "goalie" : "skater"}
+          />
+          {/* Vertical scan-line — subtle, fades softly across the figure only */}
+          <div
+            aria-hidden
+            className="absolute pointer-events-none"
+            style={{
+              left: "20%",
+              right: "20%",
+              top: 0,
+              height: "1px",
+              background: `linear-gradient(90deg, transparent, ${teamColor}66, transparent)`,
+              boxShadow: `0 0 4px ${teamColor}44`,
+              mixBlendMode: "screen",
+              opacity: 0.55,
+              animation: "holoVScan 6s ease-in-out infinite",
+            }}
+          />
+          {/* Zone hotspot dots — clickable */}
+          {hotspots.map((h) => {
+            const isActive = active === h.zone;
+            const hotColor = h.intensity >= 0.5 ? "#f87171" : h.intensity >= 0.25 ? "#fbbf24" : teamColor;
+            return (
+              <button
+                key={h.key}
+                type="button"
+                aria-label={`Focus ${h.zone}`}
+                onMouseEnter={() => setActive(h.zone)}
+                onMouseLeave={() => setActive(null)}
+                onClick={() => setActive(a => a === h.zone ? null : h.zone)}
+                className="absolute rounded-full cursor-pointer"
+                style={{
+                  left: h.cx - 6,
+                  top:  h.cy - 6,
+                  width: 12,
+                  height: 12,
+                  background: hotColor,
+                  border: `1px solid ${hotColor}`,
+                  boxShadow: `0 0 ${isActive ? 16 : 8}px ${hotColor}`,
+                  transform: isActive ? "scale(1.6)" : undefined,
+                  transition: "transform 200ms ease, box-shadow 200ms ease",
+                  animation: `holoNode ${1.8 + (h.key.length % 3) * 0.4}s ease-in-out infinite`,
+                  zIndex: 5,
+                }}
+              />
+            );
+          })}
+        </div>
+
+        {/* LEFT telemetry callouts — 3 only, hoverable, highlights target zone */}
+        {telemetryLeft.length > 0 && (
+          <div className="absolute left-2 top-12 bottom-10 flex flex-col justify-around items-end gap-2 z-10">
+            {telemetryLeft.map((c) => {
+              const isActive = active === c.target;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onMouseEnter={() => setActive(c.target)}
+                  onMouseLeave={() => setActive(null)}
+                  className="flex flex-col items-end gap-0.5 px-2 py-1 rounded backdrop-blur transition-all duration-200 group cursor-pointer"
+                  style={{
+                    background: isActive ? `${teamColor}1a` : "rgba(0,0,0,0.40)",
+                    border: `1px solid ${isActive ? teamColor : `${teamColor}28`}`,
+                    boxShadow: isActive ? `0 0 14px ${teamColor}55` : "none",
+                  }}
+                >
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em]"
+                    style={{ color: isActive ? teamColor : "var(--text-secondary)" }}>
+                    ▸ {c.label}
+                  </span>
+                  <span className="hud-mono text-[11px] tabular-nums font-semibold" style={{ color: teamColor }}>
+                    {c.val}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* RIGHT telemetry callouts */}
+        {telemetryRight.length > 0 && (
+          <div className="absolute right-2 top-12 bottom-10 flex flex-col justify-around items-start gap-2 z-10">
+            {telemetryRight.map((c) => {
+              const isActive = active === c.target;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onMouseEnter={() => setActive(c.target)}
+                  onMouseLeave={() => setActive(null)}
+                  className="flex flex-col items-start gap-0.5 px-2 py-1 rounded backdrop-blur transition-all duration-200 cursor-pointer"
+                  style={{
+                    background: isActive ? `${teamColor}1a` : "rgba(0,0,0,0.40)",
+                    border: `1px solid ${isActive ? teamColor : `${teamColor}28`}`,
+                    boxShadow: isActive ? `0 0 14px ${teamColor}55` : "none",
+                  }}
+                >
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em]"
+                    style={{ color: isActive ? teamColor : "var(--text-secondary)" }}>
+                    {c.label} ◂
+                  </span>
+                  <span className="hud-mono text-[11px] tabular-nums font-semibold" style={{ color: teamColor }}>
+                    {c.val}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Bottom ticker — separate row, outside the canvas, no overlap */}
+      {tickerLine.length > 0 && (
+        <div className="mt-2 h-6 overflow-hidden rounded relative"
+          style={{ background: "rgba(0,0,0,0.45)", border: `1px solid ${teamColor}33` }}>
+          <div className="absolute inset-y-0 flex items-center gap-6 whitespace-nowrap hud-mono text-[9px] uppercase tracking-[0.18em] px-3"
+            style={{ color: `${teamColor}cc`, animation: "holoTicker 28s linear infinite" }}>
+            {[...tickerLine, ...tickerLine].map((t, i) => (
+              <span key={i} className="inline-flex items-center gap-1">
+                <span className="inline-block w-1 h-1 rounded-full" style={{ background: teamColor }} />
+                {t}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <style jsx>{`
+        @keyframes ironRotateSlow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes ironRotateRev  { from { transform: rotate(360deg); } to { transform: rotate(0deg); } }
+        @keyframes ironRotateFast { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes ironPulse {
+          0%   { r: 50; stroke-opacity: 0.55; }
+          100% { r: 165; stroke-opacity: 0; }
+        }
+        @keyframes holoVScan {
+          0%   { transform: translateY(0);   opacity: 0; }
+          10%  { opacity: 1; }
+          90%  { opacity: 1; }
+          100% { transform: translateY(340px); opacity: 0; }
+        }
+        @keyframes holoNode {
+          0%, 100% { opacity: 0.65; }
+          50%      { opacity: 1; }
+        }
+        @keyframes holoTicker {
+          from { transform: translateX(0); }
+          to   { transform: translateX(-50%); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          svg g, circle, div, button { animation: none !important; }
+        }
+      `}</style>
     </div>
   );
 }
@@ -1894,6 +2699,12 @@ export default function PlayerProfilePage() {
     conf_turnover_bias:   number | null;
   }
   const [phase3, setPhase3] = useState<Phase3Card | null>(null);
+
+  // Tab state for the bottom telemetry strip — MUST be declared before any
+  // early returns (loading / not-found) so it runs in the same hook order
+  // on every render. Rules of Hooks.
+  type TelemetryTab = "shot-map" | "zones" | "games" | "special-teams" | "fatigue" | "advanced" | "neural";
+  const [telemetryTab, setTelemetryTab] = useState<TelemetryTab>("neural");
 
   useEffect(() => {
     fetch("/api/phase2/players")
@@ -2216,11 +3027,145 @@ export default function PlayerProfilePage() {
     if (parts.length > 0) playStyle = parts.join(" · ");
   }
 
+  // ── HUD command-deck derivations ─────────────────────────────────────────
+  const fi = phase3?.fatigue_index ?? null;
+  const ci = phase3?.confidence_index ?? null;
+  const hhs = data.hot_hand_score ?? null;
+  const warVal = data.war ?? null;
+  const warRankPct = data.war_rank && data.war_total_qualified
+    ? 1 - (data.war_rank / data.war_total_qualified)
+    : null;
+
+  // Neural graph nodes — render NN activations as radial node weights
+  const neuralNodes: NeuralNode[] = isGoalie ? [] : (() => {
+    const nodes: NeuralNode[] = [];
+    if (data.nn_carry_in_pct != null)        nodes.push({ id: "carry",   label: "Carry-in",    weight: Math.min(1, data.nn_carry_in_pct / 60) });
+    if (data.nn_shoot_slot_pct != null)      nodes.push({ id: "slot",    label: "Slot shot",   weight: Math.min(1, data.nn_shoot_slot_pct / 50) });
+    if (data.nn_drive_net_pct != null)       nodes.push({ id: "drive",   label: "Net drive",   weight: Math.min(1, data.nn_drive_net_pct / 40) });
+    if (data.nn_dump_pct != null)            nodes.push({ id: "dump",    label: "Dump",        weight: Math.min(1, data.nn_dump_pct / 60) });
+    if (data.nn_battle_corner_pct != null)   nodes.push({ id: "battle",  label: "Battle",      weight: Math.min(1, data.nn_battle_corner_pct / 40) });
+    if (data.nn_shoot_perimeter_pct != null) nodes.push({ id: "perim",   label: "Perimeter",   weight: Math.min(1, data.nn_shoot_perimeter_pct / 50) });
+    return nodes;
+  })();
+
+  // Hologram body zone tinting from FI components + EDGE degradation
+  const bodyIntensity: Partial<Record<BodyZone, number>> = isGoalie ? {} : (() => {
+    const out: Partial<Record<BodyZone, number>> = {};
+    const comp = phase3?.fi_components ?? {};
+    const total = (fi ?? 0);
+    const legHit = Math.min(1, (total + Math.abs(phase3?.edge_speed ?? 0) + Math.abs(phase3?.edge_distance ?? 0)) / 1.2);
+    const armHit = Math.min(1, (total + Math.abs(phase3?.edge_burst ?? 0)) / 1.0);
+    const torsoHit = Math.min(1, (total + ((comp.contact_load ?? 0) + (comp.overtime_load ?? 0))) / 1.0);
+    const headHit = Math.min(1, (total + (comp.travel_load ?? 0) + (comp.circadian_load ?? 0)) / 1.2);
+    out.legL = legHit;
+    out.legR = legHit;
+    out.armL = armHit;
+    out.armR = armHit;
+    out.torso = torsoHit;
+    out.head = headHit;
+    out.shoulder = armHit * 0.8;
+    return out;
+  })();
+
+  // EWMA waveform — synthesize a smooth trail toward the current value so
+  // the heart-rate-style sparkline always has something meaningful to draw.
+  const ewmaWave = (() => {
+    const cur = data.ewma_xgf60 ?? null;
+    if (cur == null) return [] as number[];
+    const len = 20;
+    const drift = (Math.random() - 0.5) * 0.4;
+    const pts: number[] = [];
+    for (let i = 0; i < len; i++) {
+      const t = i / (len - 1);
+      const base = 4.09 + (cur - 4.09) * t;
+      const wobble = Math.sin(t * Math.PI * 3 + drift) * 0.18;
+      pts.push(base + wobble);
+    }
+    return pts;
+  })();
+
+  // telemetryTab state is declared above (before the early-return guards).
+  const telemetryTabs: HudTab[] = isGoalie
+    ? [
+        { id: "neural",   label: "Neural" },
+        { id: "shot-map", label: "Shots Against" },
+        { id: "zones",    label: "Zones" },
+        { id: "games",    label: "Recent" },
+        { id: "fatigue",  label: "Fatigue" },
+      ]
+    : [
+        { id: "neural",        label: "Neural" },
+        { id: "shot-map",      label: "Shot Map" },
+        { id: "zones",         label: "Zones" },
+        { id: "games",         label: "Recent" },
+        { id: "special-teams", label: "Special" },
+        { id: "fatigue",       label: "Fatigue" },
+        { id: "advanced",      label: "Advanced" },
+      ];
+
+  // Map ProfileData shots → Shot3D shot type for the 3D rink
+  const shots3D: Shot3DPoint[] = (shots ?? []).map((s) => ({
+    x: s.x,
+    y: s.y,
+    goal: !!s.goal,
+  }));
+  const goalieShots3D: Shot3DPoint[] = (goalieShots ?? []).map((s) => ({
+    x: s.x,
+    y: s.y,
+    goal: !!s.goal,
+  }));
+
+  // ── Status flags surfaced as HUD badges
+  const statusFlags: { tone: "good" | "warn" | "bad" | "accent" | "neutral"; label: string; pulse?: boolean }[] = (() => {
+    const out: { tone: "good" | "warn" | "bad" | "accent" | "neutral"; label: string; pulse?: boolean }[] = [];
+    if (injuryBadge) {
+      const isHard = injuryBadge === "Out" || injuryBadge.startsWith("IR");
+      out.push({ tone: isHard ? "bad" : "warn", label: injuryBadge, pulse: true });
+    } else if (data.ewma_form_flag === "rising" || (hhs ?? 0) > 0.7) {
+      out.push({ tone: "good", label: "Hot Hand", pulse: true });
+    } else if (data.ewma_form_flag === "falling") {
+      out.push({ tone: "warn", label: "Cooling", pulse: false });
+    } else {
+      out.push({ tone: "good", label: "Active", pulse: true });
+    }
+    if (data.war_rank && data.war_rank <= 30) {
+      out.push({ tone: "accent", label: `Rank #${data.war_rank}` });
+    }
+    if (fi != null) {
+      const fatLabel = fi >= 0.45 ? "Gassed" : fi >= 0.25 ? "Tired" : fi >= 0.12 ? "Worked" : "Fresh";
+      const tone: "good" | "warn" | "bad" = fi >= 0.45 ? "bad" : fi >= 0.25 ? "warn" : "good";
+      out.push({ tone, label: `${fatLabel} · FI ${fi.toFixed(2)}` });
+    }
+    return out;
+  })();
+
   return (
-    <main className="min-h-screen p-4 sm:p-6 max-w-3xl mx-auto w-full overflow-x-hidden w-full overflow-x-hidden">
+    <main className="relative min-h-screen p-4 sm:p-6 max-w-3xl lg:max-w-[1400px] mx-auto w-full overflow-x-hidden">
+      <HudGrid />
+
+      {/* ── HUD dossier header — classified-target chrome ── */}
+      <div className="relative mb-3 flex items-center gap-2 flex-wrap"
+        style={{ ["--hud-corner" as string]: teamColor }}>
+        <span className="hud-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-primary)]" aria-hidden>
+          ◢
+        </span>
+        <span className="hud-mono text-[10px] uppercase tracking-[0.18em]"
+          style={{ color: teamColor }}>
+          DOSSIER · SUBJECT {data.player_id ?? "—"}
+        </span>
+        <span className="hud-mono text-[9px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+          · CLASSIFIED · STATUS {injuryBadge ? injuryBadge.toUpperCase() : "ACTIVE"}
+        </span>
+        <span className="ml-auto flex items-center gap-1">
+          <span className="hud-pulse-dot" style={{ background: "#4ade80" }} />
+          <span className="hud-mono jarvis-flicker text-[9px] uppercase tracking-[0.18em] text-[#4ade80]">
+            LIVE
+          </span>
+        </span>
+      </div>
 
       {/* ── Search bar — team-colored ── */}
-      <div className="flex justify-center mb-5 gap-2">
+      <div className="relative flex justify-center mb-5 gap-2">
         {/* Team page button */}
         {displayTeam && (
           <Link
@@ -2285,9 +3230,45 @@ export default function PlayerProfilePage() {
       </div>
 
 
-      {/* ── Hero section — centered NHL.com style ── */}
-      <div className="rounded-2xl overflow-hidden mb-4 shadow-[0_16px_60px_rgba(0,0,0,0.75)]"
-        style={{ border: `1.5px solid ${teamColor}35`, background: `linear-gradient(175deg, ${teamDarkBg} 0%, #060708 60%)` }}>
+      {/* ── Hero section — HUD-styled identity panel ── */}
+      <div className="relative jarvis-shimmer rounded-2xl overflow-hidden mb-4 shadow-[0_16px_60px_rgba(0,0,0,0.75)]"
+        style={{ border: `1.5px solid ${teamColor}55`, background: `linear-gradient(175deg, ${teamDarkBg} 0%, #060708 60%)` }}>
+
+        {/* HUD corner brackets — four corners */}
+        {([
+          [6, 6, "border-l border-t"],
+          [6, 6, "border-r border-t right-1.5 left-auto"],
+          [6, 6, "border-l border-b bottom-1.5 top-auto"],
+          [6, 6, "border-r border-b right-1.5 bottom-1.5 left-auto top-auto"],
+        ] as [number, number, string][]).map(([w, h], i) => {
+          const pos =
+            i === 0 ? { top: 6, left: 6, borderTop: `1px solid ${teamColor}80`, borderLeft: `1px solid ${teamColor}80` } :
+            i === 1 ? { top: 6, right: 6, borderTop: `1px solid ${teamColor}80`, borderRight: `1px solid ${teamColor}80` } :
+            i === 2 ? { bottom: 6, left: 6, borderBottom: `1px solid ${teamColor}80`, borderLeft: `1px solid ${teamColor}80` } :
+                      { bottom: 6, right: 6, borderBottom: `1px solid ${teamColor}80`, borderRight: `1px solid ${teamColor}80` };
+          return (
+            <span key={i} className="absolute pointer-events-none z-10"
+              style={{ width: w + "px", height: h + "px", ...pos } as React.CSSProperties} />
+          );
+        })}
+
+        {/* Target Profile strip — terminal-style header bar */}
+        <div className="relative px-4 py-1.5 flex items-center gap-2 border-b"
+          style={{ borderColor: `${teamColor}22`, background: `linear-gradient(90deg, ${teamColor}1a 0%, transparent 60%)` }}>
+          <span className="hud-mono text-[9px] uppercase tracking-[0.20em]" style={{ color: teamColor }}>◢</span>
+          <span className="hud-mono text-[9px] uppercase tracking-[0.20em]" style={{ color: teamColor }}>
+            TARGET PROFILE
+          </span>
+          <span className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+            · IDX-{data.player_id ?? "—"} · {displayTeam || "—"}
+          </span>
+          <span className="ml-auto flex items-center gap-1.5">
+            <span className="hud-pulse-dot" style={{ background: teamColor }} />
+            <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+              {injuryBadge ? injuryBadge.toUpperCase() : "ACTIVE"}
+            </span>
+          </span>
+        </div>
 
         {/* Hero image strip */}
         {data.hero_image && (
@@ -2295,100 +3276,104 @@ export default function PlayerProfilePage() {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={data.hero_image} alt="" className="w-full h-full object-cover object-top opacity-25" />
             <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#0d0f13]" />
+            {/* Slow scan-line over the hero image */}
+            <div
+              className="absolute inset-0 pointer-events-none"
+              style={{
+                background: `linear-gradient(180deg, transparent 0%, ${teamColor}1a 50%, transparent 100%)`,
+                mixBlendMode: "screen",
+                animation: "heroScan 6s linear infinite",
+              }}
+            />
+            <style jsx>{`
+              @keyframes heroScan {
+                0%   { transform: translateY(-100%); }
+                100% { transform: translateY(100%); }
+              }
+            `}</style>
           </div>
         )}
 
-        {/* ── Centered hero body ── */}
-        <div className={`flex flex-col items-center text-center px-5 pb-6 ${data.hero_image ? "-mt-10 relative z-10" : "pt-8"}`}>
+        {/* ── Compact horizontal hero — headshot left, identity stack right ── */}
+        <div className={`flex items-center gap-4 sm:gap-5 px-4 sm:px-5 pb-3 ${data.hero_image ? "-mt-12 relative z-10" : "pt-4"}`}>
 
-          {/* Circular headshot — glow backdrop behind the ring */}
-          <div className="relative mb-4 shrink-0">
+          {/* Circular headshot — smaller, side-positioned */}
+          <div className="relative shrink-0">
             <div
               className="absolute inset-0 rounded-full pointer-events-none"
               style={{
                 background: `radial-gradient(circle, ${teamColor}55 0%, ${teamColor}22 45%, transparent 72%)`,
-                transform: "scale(1.6)",
-                filter: "blur(16px)",
+                transform: "scale(1.4)",
+                filter: "blur(12px)",
               }}
             />
-          <div
-            className="relative h-32 w-32 rounded-full overflow-hidden"
-            style={{
-              background: `radial-gradient(circle at 50% 40%, ${darkBlend(teamSecondary, 0.45)}, ${darkBlend(teamSecondary, 0.82)})`,
-              ...headshotRing,
-            }}
-          >
-            {headshotUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={headshotUrl} alt={data.player_name ?? ""} onError={() => setImgErr(true)}
-                className="h-full w-full object-cover object-top scale-110 origin-top" />
-            ) : (
-              <div className="h-full w-full flex items-center justify-center">
-                <span className="text-4xl font-bold text-white/30">
-                  {(data.player_name ?? "?").split(" ").map((w: string) => w[0]).slice(0, 2).join("")}
-                </span>
-              </div>
-            )}
-          </div>
+            <div
+              className="relative h-20 w-20 sm:h-24 sm:w-24 rounded-full overflow-hidden"
+              style={{
+                background: `radial-gradient(circle at 50% 40%, ${darkBlend(teamSecondary, 0.45)}, ${darkBlend(teamSecondary, 0.82)})`,
+                ...headshotRing,
+              }}
+            >
+              {headshotUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={headshotUrl} alt={data.player_name ?? ""} onError={() => setImgErr(true)}
+                  className="h-full w-full object-cover object-top scale-110 origin-top" />
+              ) : (
+                <div className="h-full w-full flex items-center justify-center">
+                  <span className="text-2xl font-bold text-white/30">
+                    {(data.player_name ?? "?").split(" ").map((w: string) => w[0]).slice(0, 2).join("")}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Name */}
-          <h1 className="text-3xl font-black text-white leading-tight tracking-tight mb-1">
-            {data.player_name}
-          </h1>
+          {/* Identity stack — name, meta, badges */}
+          <div className="flex-1 min-w-0 flex flex-col items-start gap-1">
+            <h1 className="text-xl sm:text-2xl font-black text-white leading-tight tracking-tight truncate w-full">
+              {data.player_name}
+            </h1>
 
-          {/* Team logo | #jersey | position — centered */}
-          <div className="flex items-center justify-center gap-2 mb-2 flex-wrap">
-            {displayTeam && (
-              <button onClick={() => router.push(`/teams/${displayTeam}`)} className="shrink-0 hover:opacity-80 transition-opacity">
-                <TeamLogo team={displayTeam} size={52} />
-              </button>
-            )}
-            {(bio?.jersey_number ?? nhlStats?.jersey ?? data.jersey_number) != null && (
-              <>
-                <span className="text-white/20 text-xs">|</span>
-                <span className="text-sm font-medium text-white/50">
+            {/* Team logo + #jersey + position — single line */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {displayTeam && (
+                <button onClick={() => router.push(`/teams/${displayTeam}`)} className="shrink-0 hover:opacity-80 transition-opacity">
+                  <TeamLogo team={displayTeam} size={28} />
+                </button>
+              )}
+              {(bio?.jersey_number ?? nhlStats?.jersey ?? data.jersey_number) != null && (
+                <span className="hud-mono text-[11px] text-white/55 tabular-nums">
                   #{bio?.jersey_number ?? nhlStats?.jersey ?? data.jersey_number}
                 </span>
-              </>
-            )}
-            {data.position && (
-              <>
-                <span className="text-white/20 text-xs">|</span>
-                <span className="text-sm font-semibold text-white/50">
+              )}
+              {data.position && (
+                <span className="hud-mono text-[10px] uppercase tracking-[0.18em] text-white/55">
                   {data.position === "L" ? "LW" : data.position === "R" ? "RW" : data.position}
                 </span>
-              </>
-            )}
-          </div>
-
-          {/* Archetype badge — centered */}
-          {playerType && (
-            <div className="mb-2">
-              <span
-                className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest rounded-full px-3 py-1"
-                style={{
-                  color: "#fcd34d",
-                  background: "linear-gradient(135deg, rgba(245,158,11,0.20) 0%, rgba(120,53,15,0.18) 100%)",
-                  border: "1px solid rgba(245,158,11,0.45)",
-                  boxShadow: "0 0 12px rgba(245,158,11,0.15)",
-                }}
-              >
-                <span style={{ fontSize: 8 }}>★</span>
-                {playerType}
-              </span>
+              )}
+              {playerType && (
+                <span
+                  className="hud-mono inline-flex items-center gap-1 text-[9px] uppercase tracking-[0.16em] rounded px-1.5 py-0.5 ml-1"
+                  style={{
+                    color: "#fcd34d",
+                    background: "rgba(245,158,11,0.10)",
+                    border: "1px solid rgba(245,158,11,0.40)",
+                  }}
+                >
+                  ★ {playerType}
+                </span>
+              )}
             </div>
-          )}
 
-          {/* Hot hand badge next to name area */}
+          {/* Hot hand badge */}
           {!injuryBadge && (data.hot_hand_score ?? 0) > 0.5 && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#C9A84C] bg-[#C9A84C]/10 border border-[#C9A84C]/30 rounded-full px-2.5 py-0.5 mb-2">
+            <span className="hud-mono inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.16em] text-[#C9A84C] bg-[#C9A84C]/10 border border-[#C9A84C]/30 rounded px-1.5 py-0.5">
               ⚡ Hot Hand
             </span>
           )}
 
-          {/* Injury / form / rank badges — centered */}
-          <div className="flex items-center justify-center gap-2 flex-wrap">
+          {/* Injury / form / rank badges */}
+          <div className="flex items-center gap-1.5 flex-wrap">
             {injuryBadge ? (
               <span
                 className="inline-flex items-center gap-1 text-[10px] font-bold rounded-full px-2.5 py-0.5 uppercase tracking-wide"
@@ -2423,6 +3408,7 @@ export default function PlayerProfilePage() {
                 </span>
               );
             })()}
+          </div>
           </div>
         </div>
 
@@ -2613,10 +3599,664 @@ export default function PlayerProfilePage() {
         )}
       </div>
 
+      {/* ─────────── HUD COMMAND DECK ─────────── */}
+      {/* 3-zone monitoring console: Vitals · Hologram · Neural Cortex.
+         Folds the most-glanced metrics into a single surface so the rest of
+         the page can hide behind tabs. */}
+      <div className="mt-4 grid gap-3 lg:grid-cols-12">
+
+        {/* VITALS column */}
+        <div className="lg:col-span-3 flex">
+          <HudPanel title="Vitals" themeColor={teamColor} scanline allCorners className="w-full flex flex-col">
+            <div className="grid grid-cols-2 gap-3 place-items-center">
+              {fi != null && (
+                <RingGauge value={fi} label="Fatigue" sublabel="FI" themeColor={teamColor} invert decimals={2} size={96} />
+              )}
+              {ci != null && (
+                <RingGauge value={Math.min(1, (ci + 0.1) / 0.2)} centerText={`${ci >= 0 ? "+" : ""}${ci.toFixed(2)}`} label="Confidence" sublabel="CI" themeColor={teamColor} size={96} />
+              )}
+              {hhs != null && (
+                <RingGauge value={Math.min(1, Math.max(0, (hhs + 2) / 4))} centerText={`${hhs >= 0 ? "+" : ""}${hhs.toFixed(1)}`} label="Hot Hand" sublabel="HHS" themeColor={teamColor} size={96} />
+              )}
+              {warVal != null && (
+                <RingGauge
+                  value={warRankPct ?? Math.min(1, Math.max(0, (warVal + 1) / 4))}
+                  centerText={`${warVal >= 0 ? "+" : ""}${warVal.toFixed(2)}`}
+                  label="WAR"
+                  sublabel={data.war_rank ? `#${data.war_rank}` : "rating"}
+                  themeColor={teamColor}
+                  size={96}
+                />
+              )}
+            </div>
+
+            {ewmaWave.length > 0 && (
+              <div className="mt-4 pt-3 border-t border-white/[0.04]">
+                <Waveform
+                  data={ewmaWave}
+                  themeColor={teamColor}
+                  label="EWMA xGF/60 · synth trail"
+                  width={260}
+                  height={54}
+                  ariaLabel="EWMA momentum waveform"
+                />
+              </div>
+            )}
+
+            {/* Quick-glance bio strip (height/weight/age/shoots) — fills the
+                empty vertical space when Neural Cortex is tall. */}
+            {bio && (
+              <div className="mt-4 pt-3 border-t border-white/[0.04] grid grid-cols-2 gap-y-1 gap-x-2 text-[10px]">
+                {bio.height_cm != null && (
+                  <>
+                    <span className="hud-mono uppercase tracking-[0.16em] text-[var(--text-secondary)]">HT</span>
+                    <span className="hud-mono tabular-nums text-right" style={{ color: teamColor }}>
+                      {fmtHeight(bio.height_cm).split(" / ")[0]}
+                    </span>
+                  </>
+                )}
+                {bio.weight_kg != null && (
+                  <>
+                    <span className="hud-mono uppercase tracking-[0.16em] text-[var(--text-secondary)]">WT</span>
+                    <span className="hud-mono tabular-nums text-right" style={{ color: teamColor }}>
+                      {Math.round(bio.weight_kg * 2.205)} lb
+                    </span>
+                  </>
+                )}
+                {bio.birth_date && (
+                  <>
+                    <span className="hud-mono uppercase tracking-[0.16em] text-[var(--text-secondary)]">AGE</span>
+                    <span className="hud-mono tabular-nums text-right" style={{ color: teamColor }}>
+                      {calcAge(bio.birth_date) ?? "—"}
+                    </span>
+                  </>
+                )}
+                {bio.shoots_catches && (
+                  <>
+                    <span className="hud-mono uppercase tracking-[0.16em] text-[var(--text-secondary)]">{isGoalie ? "CATCH" : "SHOOTS"}</span>
+                    <span className="hud-mono tabular-nums text-right" style={{ color: teamColor }}>
+                      {bio.shoots_catches}
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Status flags — pushed to bottom so the panel evenly fills */}
+            {statusFlags.length > 0 && (
+              <div className="mt-auto pt-3 flex flex-wrap gap-1.5">
+                {statusFlags.map((f, i) => (
+                  <HudBadge key={i} tone={f.tone} pulse={f.pulse} themeColor={teamColor}>
+                    {f.label}
+                  </HudBadge>
+                ))}
+              </div>
+            )}
+          </HudPanel>
+        </div>
+
+        {/* HOLOGRAM column — body silhouette with Iron Man HUD */}
+        <div className="lg:col-span-5 flex">
+          <HudPanel title="Hologram" subtitle={isGoalie ? "goalie scan" : "skater scan"} themeColor={teamColor} scanline allCorners className="w-full flex flex-col">
+            <HologramScanner
+              isGoalie={!!isGoalie}
+              teamColor={teamColor}
+              bodyIntensity={bodyIntensity}
+              telemetryLeft={!isGoalie ? [
+                { id: "speed",    label: "MAX SPEED",  val: data.skating_max_speed_kmh != null ? `${data.skating_max_speed_kmh.toFixed(1)} km/h` : null, target: "legs" as const },
+                { id: "hits",     label: "HITS/60",    val: data.hits_per60 != null ? data.hits_per60.toFixed(1) : null, target: "arms" as const },
+                { id: "blocks",   label: "BLOCKS/60",  val: data.blocks_per60 != null ? data.blocks_per60.toFixed(1) : null, target: "torso" as const },
+              ].filter(c => c.val !== null) : []}
+              telemetryRight={!isGoalie ? [
+                { id: "battle",   label: "BATTLE",     val: data.battle_percentile != null ? `${data.battle_percentile.toFixed(0)}th` : null, target: "torso" as const },
+                { id: "toi",      label: "EV TOI",     val: data.toi_ev != null ? `${data.toi_ev.toFixed(0)}m` : null, target: "head" as const },
+                { id: "edge",     label: "EDGE Δ",     val: phase3?.edge_load != null ? `${phase3.edge_load >= 0 ? "+" : ""}${(phase3.edge_load * 100).toFixed(1)}%` : null, target: "legs" as const },
+              ].filter(c => c.val !== null) : []}
+              tickerLine={[
+                fi != null ? `FI ${fi.toFixed(2)}` : null,
+                ci != null ? `CI ${ci >= 0 ? "+" : ""}${ci.toFixed(2)}` : null,
+                hhs != null ? `HHS ${hhs >= 0 ? "+" : ""}${hhs.toFixed(2)}` : null,
+                warVal != null ? `WAR ${warVal >= 0 ? "+" : ""}${warVal.toFixed(2)}` : null,
+                data.xgf_per60 != null ? `xGF/60 ${data.xgf_per60.toFixed(2)}` : null,
+                data.cdr != null ? `CDR ${data.cdr >= 0 ? "+" : ""}${data.cdr.toFixed(2)}` : null,
+                data.finishing != null ? `FIN ${data.finishing >= 0 ? "+" : ""}${data.finishing.toFixed(1)}` : null,
+                data.bayesian_rating != null ? `BAYES ${data.bayesian_rating.toFixed(3)}` : null,
+                phase3?.fi_multiplier != null ? `MULT ${phase3.fi_multiplier.toFixed(3)}` : null,
+              ].filter((s): s is string => Boolean(s))}
+            />
+            {/* Legacy hologram canvas (replaced by HologramScanner above) */}
+            <div className="hidden">
+            <div className="relative flex items-center justify-center py-2 min-h-[380px] flex-1">
+              {/* IRON MAN HUD — animated multi-ring scanner backdrop */}
+              <div
+                className="absolute inset-0 pointer-events-none"
+                style={{
+                  background: `radial-gradient(circle at 50% 50%, ${teamColor}30 0%, ${teamColor}08 35%, transparent 65%)`,
+                  filter: "blur(12px)",
+                }}
+              />
+              <svg viewBox="0 0 400 360" className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden>
+                <defs>
+                  <linearGradient id="hudArc" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stopColor={teamColor} stopOpacity="0" />
+                    <stop offset="40%" stopColor={teamColor} stopOpacity="0.85" />
+                    <stop offset="100%" stopColor={teamColor} stopOpacity="0" />
+                  </linearGradient>
+                  <linearGradient id="hudArc2" x1="1" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={teamColor} stopOpacity="0" />
+                    <stop offset="60%" stopColor={teamColor} stopOpacity="0.55" />
+                    <stop offset="100%" stopColor={teamColor} stopOpacity="0" />
+                  </linearGradient>
+                </defs>
+
+                {/* Outer slow-rotating dashed ring */}
+                <g style={{ transformOrigin: "200px 180px", animation: "ironRotateSlow 32s linear infinite" }}>
+                  <circle cx={200} cy={180} r={170} fill="none" stroke={teamColor} strokeOpacity={0.15} strokeDasharray="2 8" />
+                  {/* Tick marks at cardinal points */}
+                  {[0, 45, 90, 135, 180, 225, 270, 315].map((deg, i) => {
+                    const rad = (deg * Math.PI) / 180;
+                    const x1 = 200 + Math.cos(rad) * 162;
+                    const y1 = 180 + Math.sin(rad) * 162;
+                    const x2 = 200 + Math.cos(rad) * 178;
+                    const y2 = 180 + Math.sin(rad) * 178;
+                    return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={teamColor} strokeOpacity={0.55} strokeWidth={1.4} />;
+                  })}
+                </g>
+
+                {/* Middle counter-rotating arc */}
+                <g style={{ transformOrigin: "200px 180px", animation: "ironRotateRev 18s linear infinite" }}>
+                  <circle cx={200} cy={180} r={140} fill="none" stroke="url(#hudArc)" strokeWidth={1.5} strokeDasharray="60 40 25 40" strokeLinecap="round" />
+                </g>
+
+                {/* Inner fast arc */}
+                <g style={{ transformOrigin: "200px 180px", animation: "ironRotateFast 8s linear infinite" }}>
+                  <circle cx={200} cy={180} r={110} fill="none" stroke="url(#hudArc2)" strokeWidth={1.2} strokeDasharray="20 80" strokeLinecap="round" />
+                </g>
+
+                {/* Innermost dotted ring */}
+                <circle cx={200} cy={180} r={88} fill="none" stroke={teamColor} strokeOpacity={0.18} strokeDasharray="1 5" />
+
+                {/* Crosshair */}
+                <line x1={200} y1={0} x2={200} y2={360} stroke={teamColor} strokeOpacity={0.05} strokeDasharray="3 10" />
+                <line x1={0} y1={180} x2={400} y2={180} stroke={teamColor} strokeOpacity={0.05} strokeDasharray="3 10" />
+
+                {/* Corner reticle markers */}
+                {[
+                  { x: 40,  y: 40,  dx: 12, dy: 0  }, { x: 40,  y: 40,  dx: 0,  dy: 12 },
+                  { x: 360, y: 40,  dx: -12, dy: 0 }, { x: 360, y: 40,  dx: 0,  dy: 12 },
+                  { x: 40,  y: 320, dx: 12, dy: 0  }, { x: 40,  y: 320, dx: 0,  dy: -12 },
+                  { x: 360, y: 320, dx: -12, dy: 0 }, { x: 360, y: 320, dx: 0,  dy: -12 },
+                ].map((m, i) => (
+                  <line key={i} x1={m.x} y1={m.y} x2={m.x + m.dx} y2={m.y + m.dy} stroke={teamColor} strokeOpacity={0.65} strokeWidth={1.5} strokeLinecap="round" />
+                ))}
+
+                {/* Pulse rings — emit from center on a slow loop */}
+                <circle cx={200} cy={180} r={50} fill="none" stroke={teamColor} strokeOpacity={0.4} strokeWidth={1} style={{ animation: "ironPulse 4.4s ease-out infinite" }} />
+                <circle cx={200} cy={180} r={50} fill="none" stroke={teamColor} strokeOpacity={0.4} strokeWidth={1} style={{ animation: "ironPulse 4.4s ease-out infinite 2.2s" }} />
+              </svg>
+
+              {/* Iron Man corner indicator brackets */}
+              <span aria-hidden className="absolute top-1 left-1 hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: teamColor }}>◢ SCAN</span>
+              <span aria-hidden className="absolute top-1 right-1 hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: teamColor }}>LOCK ◣</span>
+              <span aria-hidden className="absolute bottom-1 left-1 hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: teamColor }}>◤ INTEL</span>
+              <span aria-hidden className="absolute bottom-1 right-1 hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: teamColor }}>LIVE ◥</span>
+
+              <style jsx>{`
+                @keyframes ironRotateSlow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+                @keyframes ironRotateRev  { from { transform: rotate(360deg); } to { transform: rotate(0deg); } }
+                @keyframes ironRotateFast { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+                @keyframes ironPulse {
+                  0%   { r: 50; stroke-opacity: 0.55; }
+                  100% { r: 165; stroke-opacity: 0; }
+                }
+                @media (prefers-reduced-motion: reduce) {
+                  svg g { animation: none !important; }
+                  circle { animation: none !important; }
+                }
+              `}</style>
+
+              {/* Silhouette — interactive zone-aware skater scan */}
+              <div className="relative" style={{ width: 220, height: 360 }}>
+                <BodySilhouette
+                  themeColor={teamColor}
+                  intensity={bodyIntensity}
+                  width={220}
+                  height={360}
+                  variant={isGoalie ? "goalie" : "skater"}
+                />
+
+                {/* Vertical scan line that sweeps top → bottom */}
+                <div
+                  aria-hidden
+                  className="absolute left-0 right-0 pointer-events-none"
+                  style={{
+                    top: 0,
+                    height: "2px",
+                    background: `linear-gradient(90deg, transparent, ${teamColor}cc, transparent)`,
+                    boxShadow: `0 0 12px ${teamColor}aa`,
+                    mixBlendMode: "screen",
+                    animation: "holoVScan 4.2s ease-in-out infinite",
+                  }}
+                />
+
+                {/* Zone hotspot dots (positions match BodySilhouette in 200×340 viewBox,
+                    scaled here to 220×360). Pulse intensity by FI sub-component. */}
+                {(() => {
+                  const sx = 220 / 200, sy = 360 / 340;
+                  const dot = (cx: number, cy: number, key: string, intensity: number) => (
+                    <span
+                      key={key}
+                      aria-hidden
+                      className="absolute rounded-full pointer-events-none"
+                      style={{
+                        left: cx * sx - 4,
+                        top: cy * sy - 4,
+                        width: 8,
+                        height: 8,
+                        background: intensity >= 0.5 ? "#f87171" : intensity >= 0.25 ? "#fbbf24" : teamColor,
+                        boxShadow: `0 0 8px ${intensity >= 0.5 ? "#f87171" : intensity >= 0.25 ? "#fbbf24" : teamColor}`,
+                        animation: `holoNode ${1.8 + (key.length % 3) * 0.4}s ease-in-out infinite`,
+                      }}
+                    />
+                  );
+                  return (
+                    <>
+                      {dot(100, 36, "head",  bodyIntensity.head ?? 0)}
+                      {dot(60,  70, "shdrL", bodyIntensity.shoulder ?? 0)}
+                      {dot(140, 70, "shdrR", bodyIntensity.shoulder ?? 0)}
+                      {dot(100, 130,"torso", bodyIntensity.torso ?? 0)}
+                      {dot(57,  140,"armL",  bodyIntensity.armL ?? 0)}
+                      {dot(143, 140,"armR",  bodyIntensity.armR ?? 0)}
+                      {dot(88,  280,"legL",  bodyIntensity.legL ?? 0)}
+                      {dot(112, 280,"legR",  bodyIntensity.legR ?? 0)}
+                    </>
+                  );
+                })()}
+              </div>
+
+              {/* LEFT telemetry callouts — leader lines pointing at body zones */}
+              {!isGoalie && (
+                <div className="absolute left-2 top-2 bottom-2 flex flex-col justify-between text-right pointer-events-none">
+                  {[
+                    { label: "MAX SPEED", val: data.skating_max_speed_kmh != null ? `${data.skating_max_speed_kmh.toFixed(1)} km/h` : "—", show: data.skating_max_speed_kmh != null },
+                    { label: "DISTANCE",  val: data.skating_distance_per_game_km != null ? `${data.skating_distance_per_game_km.toFixed(2)} km/g` : "—", show: data.skating_distance_per_game_km != null },
+                    { label: "HITS/60",   val: data.hits_per60 != null ? data.hits_per60.toFixed(1) : "—", show: data.hits_per60 != null },
+                    { label: "BLOCKS/60", val: data.blocks_per60 != null ? data.blocks_per60.toFixed(1) : "—", show: data.blocks_per60 != null },
+                  ].filter(c => c.show).slice(0, 4).map((c, i) => (
+                    <div key={i} className="flex flex-col items-end gap-0.5 px-1.5 py-1 rounded backdrop-blur"
+                      style={{
+                        background: "rgba(0,0,0,0.35)",
+                        border: `1px solid ${teamColor}22`,
+                      }}>
+                      <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+                        ▸ {c.label}
+                      </span>
+                      <span className="hud-mono text-[10px] tabular-nums" style={{ color: teamColor }}>
+                        {c.val}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* RIGHT telemetry callouts */}
+              {!isGoalie && (
+                <div className="absolute right-2 top-2 bottom-2 flex flex-col justify-between text-left pointer-events-none">
+                  {[
+                    { label: "BATTLE",  val: data.battle_percentile != null ? `${data.battle_percentile.toFixed(0)}th` : "—",          show: data.battle_percentile != null },
+                    { label: "EV TOI",  val: data.toi_ev != null ? `${data.toi_ev.toFixed(0)}m` : "—",                                 show: data.toi_ev != null },
+                    { label: "EDGE Δ",  val: phase3?.edge_load != null ? `${phase3.edge_load >= 0 ? "+" : ""}${(phase3.edge_load * 100).toFixed(1)}%` : "—", show: phase3?.edge_load != null },
+                    { label: "REST",    val: phase3?.goalie_rest_days != null ? `${phase3.goalie_rest_days}d` : (data.ewma_games != null ? `${data.ewma_games} GP` : "—"), show: true },
+                  ].filter(c => c.show).slice(0, 4).map((c, i) => (
+                    <div key={i} className="flex flex-col items-start gap-0.5 px-1.5 py-1 rounded backdrop-blur"
+                      style={{
+                        background: "rgba(0,0,0,0.35)",
+                        border: `1px solid ${teamColor}22`,
+                      }}>
+                      <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+                        {c.label} ◂
+                      </span>
+                      <span className="hud-mono text-[10px] tabular-nums" style={{ color: teamColor }}>
+                        {c.val}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Particle drift — decorative motes around the figure */}
+              <div className="absolute inset-0 pointer-events-none overflow-hidden">
+                {Array.from({ length: 14 }).map((_, i) => (
+                  <span
+                    key={i}
+                    aria-hidden
+                    className="absolute rounded-full"
+                    style={{
+                      left: `${(i * 73) % 100}%`,
+                      top: `${(i * 41) % 100}%`,
+                      width: "2px",
+                      height: "2px",
+                      background: teamColor,
+                      opacity: 0.4 + (i % 3) * 0.15,
+                      boxShadow: `0 0 4px ${teamColor}`,
+                      animation: `holoMote ${4 + (i % 5)}s ease-in-out infinite ${i * 0.3}s`,
+                    }}
+                  />
+                ))}
+              </div>
+
+              {/* Bottom ticker — scrolling stat readout */}
+              <div className="absolute left-2 right-2 bottom-2 h-5 overflow-hidden rounded"
+                style={{ background: "rgba(0,0,0,0.45)", border: `1px solid ${teamColor}22` }}>
+                <div className="absolute inset-y-0 flex items-center gap-6 whitespace-nowrap hud-mono text-[9px] uppercase tracking-[0.18em] px-3"
+                  style={{ color: `${teamColor}cc`, animation: "holoTicker 28s linear infinite" }}>
+                  {[
+                    fi != null ? `FI ${fi.toFixed(2)}` : null,
+                    ci != null ? `CI ${ci >= 0 ? "+" : ""}${ci.toFixed(2)}` : null,
+                    hhs != null ? `HHS ${hhs >= 0 ? "+" : ""}${hhs.toFixed(2)}` : null,
+                    warVal != null ? `WAR ${warVal >= 0 ? "+" : ""}${warVal.toFixed(2)}` : null,
+                    data.xgf_per60 != null ? `xGF/60 ${data.xgf_per60.toFixed(2)}` : null,
+                    data.cdr != null ? `CDR ${data.cdr >= 0 ? "+" : ""}${data.cdr.toFixed(2)}` : null,
+                    data.finishing != null ? `FIN ${data.finishing >= 0 ? "+" : ""}${data.finishing.toFixed(1)}` : null,
+                    data.bayesian_rating != null ? `BAYES ${data.bayesian_rating.toFixed(3)}` : null,
+                    phase3?.fi_multiplier != null ? `MULT ${phase3.fi_multiplier.toFixed(3)}` : null,
+                  ].filter(Boolean).map((t, i) => (
+                    <span key={i} className="inline-flex items-center gap-1">
+                      <span className="inline-block w-1 h-1 rounded-full" style={{ background: teamColor }} />
+                      {t}
+                    </span>
+                  ))}
+                  {/* Duplicate for seamless loop */}
+                  {[
+                    fi != null ? `FI ${fi.toFixed(2)}` : null,
+                    ci != null ? `CI ${ci >= 0 ? "+" : ""}${ci.toFixed(2)}` : null,
+                    hhs != null ? `HHS ${hhs >= 0 ? "+" : ""}${hhs.toFixed(2)}` : null,
+                    warVal != null ? `WAR ${warVal >= 0 ? "+" : ""}${warVal.toFixed(2)}` : null,
+                    data.xgf_per60 != null ? `xGF/60 ${data.xgf_per60.toFixed(2)}` : null,
+                    data.cdr != null ? `CDR ${data.cdr >= 0 ? "+" : ""}${data.cdr.toFixed(2)}` : null,
+                    data.finishing != null ? `FIN ${data.finishing >= 0 ? "+" : ""}${data.finishing.toFixed(1)}` : null,
+                    data.bayesian_rating != null ? `BAYES ${data.bayesian_rating.toFixed(3)}` : null,
+                    phase3?.fi_multiplier != null ? `MULT ${phase3.fi_multiplier.toFixed(3)}` : null,
+                  ].filter(Boolean).map((t, i) => (
+                    <span key={`d${i}`} className="inline-flex items-center gap-1">
+                      <span className="inline-block w-1 h-1 rounded-full" style={{ background: teamColor }} />
+                      {t}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <style jsx>{`
+                @keyframes holoVScan {
+                  0%   { transform: translateY(0);   opacity: 0; }
+                  10%  { opacity: 1; }
+                  90%  { opacity: 1; }
+                  100% { transform: translateY(360px); opacity: 0; }
+                }
+                @keyframes holoNode {
+                  0%, 100% { transform: scale(1);   opacity: 0.65; }
+                  50%      { transform: scale(1.4); opacity: 1; }
+                }
+                @keyframes holoMote {
+                  0%, 100% { transform: translate(0, 0);   opacity: 0.2; }
+                  50%      { transform: translate(8px, -6px); opacity: 0.7; }
+                }
+                @keyframes holoTicker {
+                  from { transform: translateX(0); }
+                  to   { transform: translateX(-50%); }
+                }
+                @media (prefers-reduced-motion: reduce) {
+                  div { animation: none !important; }
+                  span { animation: none !important; }
+                }
+              `}</style>
+            </div>
+            </div>
+          </HudPanel>
+        </div>
+
+        {/* NEURAL CORTEX column */}
+        <div className="lg:col-span-4 flex">
+          <HudPanel title="Neural Cortex" themeColor={teamColor} scanline allCorners className="w-full flex flex-col">
+            {/* MODEL STATUS strip — live signal vs idle */}
+            <div className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded border"
+              style={{ borderColor: `${teamColor}33`, background: "rgba(0,0,0,0.30)" }}>
+              <span className="hud-pulse-dot" style={{ background: "#4ade80" }} />
+              <span className="hud-mono jarvis-flicker text-[9px] uppercase tracking-[0.18em] text-[#4ade80]">INFER</span>
+              <span className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-muted)]">·</span>
+              <span className="hud-mono text-[9px] uppercase tracking-[0.18em]" style={{ color: teamColor }}>
+                BNN · v2.22
+              </span>
+              <span className="ml-auto hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+                {neuralNodes.length > 0 ? `${neuralNodes.length} CH` : "0 CH"}
+              </span>
+            </div>
+
+            {/* Archetype banner */}
+            {playerType && (
+              <div className="hud-mono text-[10px] uppercase tracking-[0.18em] px-2 py-1.5 mb-2 rounded border flex items-center gap-2"
+                style={{ color: teamColor, borderColor: `${teamColor}55`, background: `${teamColor}0f` }}>
+                <span className="hud-pulse-dot" style={{ background: teamColor }} />
+                ★ {playerType}
+              </div>
+            )}
+
+            {(() => {
+              // Build goalie-specific neural nodes from save% by zone
+              const goalieNodes: NeuralNode[] = isGoalie ? [
+                { id: "hd",   label: "HD Save",    weight: data.hdsv_pct != null ? Math.min(1, Math.max(0, (data.hdsv_pct - 0.70) / 0.20)) : 0 },
+                { id: "md",   label: "MD Save",    weight: data.mdsv_pct != null ? Math.min(1, Math.max(0, (data.mdsv_pct - 0.85) / 0.10)) : 0 },
+                { id: "ld",   label: "LD Save",    weight: data.ldsv_pct != null ? Math.min(1, Math.max(0, (data.ldsv_pct - 0.94) / 0.06)) : 0 },
+                { id: "ov",   label: "Overall",    weight: data.sv_pct   != null ? Math.min(1, Math.max(0, (data.sv_pct  - 0.880) / 0.045)) : 0 },
+                { id: "gsax", label: "GSAx",       weight: data.gsax    != null ? Math.min(1, Math.max(0, (data.gsax + 10) / 30)) : 0 },
+                { id: "vol",  label: "Workload",   weight: data.xga     != null ? Math.min(1, Math.max(0, data.xga / 80)) : 0 },
+              ] : [];
+              const activeNodes = isGoalie ? goalieNodes : neuralNodes;
+              const hasNodes    = activeNodes.length > 0 && activeNodes.some(n => n.weight > 0);
+              if (!hasNodes) {
+                return (
+                  <div className="py-6 text-center">
+                    <p className="hud-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                      Model not yet trained
+                    </p>
+                  </div>
+                );
+              }
+              return (
+                <div className="relative flex justify-center">
+                  <svg viewBox="0 0 300 200" className="absolute inset-0 pointer-events-none" aria-hidden>
+                    {[60, 80].map((r, i) => (
+                      <circle key={i} cx={150} cy={100} r={r} fill="none" stroke={teamColor} strokeOpacity={0.08 + i * 0.04} strokeDasharray="2 6" />
+                    ))}
+                    <line x1={150} y1={100} x2={150} y2={20}
+                      stroke={teamColor} strokeOpacity={0.55} strokeWidth={1.5}
+                      style={{
+                        transformOrigin: "150px 100px",
+                        animation: "ncRadar 6s linear infinite",
+                        filter: `drop-shadow(0 0 4px ${teamColor})`,
+                      }} />
+                  </svg>
+                  <NeuralGraph
+                    center={isGoalie ? "G" : "NN"}
+                    nodes={activeNodes}
+                    themeColor={teamColor}
+                    width={300}
+                    height={200}
+                  />
+                  <style jsx>{`
+                    @keyframes ncRadar { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+                    @media (prefers-reduced-motion: reduce) { line { animation: none !important; } }
+                  `}</style>
+                </div>
+              );
+            })()}
+
+            {/* DECISION MATRIX — animated bars per NN dimension (skater + goalie) */}
+            {(() => {
+              const goalieNodes: NeuralNode[] = isGoalie ? [
+                { id: "hd",   label: "HD Save",    weight: data.hdsv_pct != null ? Math.min(1, Math.max(0, (data.hdsv_pct - 0.70) / 0.20)) : 0 },
+                { id: "md",   label: "MD Save",    weight: data.mdsv_pct != null ? Math.min(1, Math.max(0, (data.mdsv_pct - 0.85) / 0.10)) : 0 },
+                { id: "ld",   label: "LD Save",    weight: data.ldsv_pct != null ? Math.min(1, Math.max(0, (data.ldsv_pct - 0.94) / 0.06)) : 0 },
+                { id: "ov",   label: "Overall",    weight: data.sv_pct   != null ? Math.min(1, Math.max(0, (data.sv_pct  - 0.880) / 0.045)) : 0 },
+                { id: "gsax", label: "GSAx",       weight: data.gsax    != null ? Math.min(1, Math.max(0, (data.gsax + 10) / 30)) : 0 },
+                { id: "vol",  label: "Workload",   weight: data.xga     != null ? Math.min(1, Math.max(0, data.xga / 80)) : 0 },
+              ] : [];
+              const matrixNodes = isGoalie ? goalieNodes : neuralNodes;
+              if (matrixNodes.length === 0 || !matrixNodes.some(n => n.weight > 0)) return null;
+              return (
+              <div className="mt-2 pt-2 border-t border-white/[0.05] space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="hud-mono text-[9px] uppercase tracking-[0.18em]" style={{ color: teamColor }}>
+                    ▸ DECISION MATRIX
+                  </span>
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                    weight 0 → 1
+                  </span>
+                </div>
+                {matrixNodes.slice(0, 6).map((n, i) => (
+                  <div key={n.id} className="flex items-center gap-2">
+                    <span className="hud-mono text-[9px] uppercase tracking-[0.14em] text-[var(--text-secondary)] w-16 shrink-0 truncate">
+                      {n.label}
+                    </span>
+                    <div className="flex-1 h-2 rounded-sm overflow-hidden relative"
+                      style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${teamColor}22` }}>
+                      <div
+                        className="h-full"
+                        style={{
+                          width: `${Math.round(n.weight * 100)}%`,
+                          background: `linear-gradient(90deg, ${teamColor}aa 0%, ${teamColor} 100%)`,
+                          boxShadow: `0 0 8px ${teamColor}55, inset 0 0 8px ${teamColor}44`,
+                          animation: `decMatrix 900ms cubic-bezier(0.22,1,0.36,1) ${i * 70}ms backwards`,
+                          transformOrigin: "left center",
+                        }}
+                      />
+                      {/* Sweeping scan line — continuous, makes the bar "live" */}
+                      <div
+                        className="absolute top-0 bottom-0 w-6 pointer-events-none"
+                        style={{
+                          background: `linear-gradient(90deg, transparent, ${teamColor}aa, transparent)`,
+                          animation: `decScan 3.4s linear infinite ${i * 0.25}s`,
+                          mixBlendMode: "screen",
+                          opacity: n.weight > 0.05 ? 0.7 : 0,
+                        }}
+                      />
+                    </div>
+                    <span className="hud-mono text-[10px] tabular-nums w-10 text-right font-semibold" style={{ color: teamColor }}>
+                      {n.weight.toFixed(2)}
+                    </span>
+                  </div>
+                ))}
+                <style jsx>{`
+                  @keyframes decMatrix {
+                    from { transform: scaleX(0); opacity: 0; }
+                    to   { transform: scaleX(1); opacity: 1; }
+                  }
+                  @keyframes decScan {
+                    0%   { transform: translateX(-30px); }
+                    100% { transform: translateX(280px); }
+                  }
+                  @media (prefers-reduced-motion: reduce) {
+                    div { animation: none !important; }
+                  }
+                `}</style>
+              </div>
+              );
+            })()}
+
+            {/* Quick neural readouts */}
+            <div className="mt-3 pt-2 border-t border-white/[0.05] grid grid-cols-2 gap-2 text-center">
+              {data.bayesian_rating != null && (
+                <div className="hud-mono px-1.5 py-1 rounded" style={{ background: "rgba(255,255,255,0.02)" }}>
+                  <div className="text-[8px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">BAYESIAN</div>
+                  <OdometerNumber value={data.bayesian_rating} decimals={3} className="text-sm" />
+                </div>
+              )}
+              {data.clutch_index != null && (
+                <div className="hud-mono px-1.5 py-1 rounded" style={{ background: "rgba(255,255,255,0.02)" }}>
+                  <div className="text-[8px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">CLUTCH</div>
+                  <OdometerNumber value={data.clutch_index} decimals={4} className="text-sm" />
+                </div>
+              )}
+              {data.hot_hand_score != null && (
+                <div className="hud-mono px-1.5 py-1 rounded" style={{ background: "rgba(255,255,255,0.02)" }}>
+                  <div className="text-[8px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">HOT HAND</div>
+                  <OdometerNumber value={data.hot_hand_score} decimals={2} className="text-sm" />
+                </div>
+              )}
+              {data.contract_efficiency != null && (
+                <div className="hud-mono px-1.5 py-1 rounded" style={{ background: "rgba(255,255,255,0.02)" }}>
+                  <div className="text-[8px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">CONTRACT</div>
+                  <OdometerNumber value={data.contract_efficiency} decimals={2} suffix="x" className="text-sm" />
+                </div>
+              )}
+            </div>
+            {playStyle && (
+              <p className="mt-2 text-[10px] text-[var(--text-secondary)] italic leading-relaxed text-center px-1">
+                {playStyle}
+              </p>
+            )}
+          </HudPanel>
+        </div>
+
+        {/* RATING STRIP — full width, 6 mini odometers */}
+        <div className="lg:col-span-12">
+          <HudPanel title="Ratings" subtitle="aggregate engine inputs" themeColor={teamColor}>
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 text-center">
+              {[
+                { label: "xGF/60",     val: data.xgf_per60,            dec: 2, suffix: "" },
+                { label: "xGA/60",     val: data.rapm_xga_60,          dec: 2, suffix: "" },
+                { label: "CDR",        val: data.cdr,                  dec: 2, suffix: "" },
+                { label: "Finishing",  val: data.finishing,            dec: 1, suffix: "" },
+                { label: "PP xGF/60",  val: data.special_teams_pp,     dec: 2, suffix: "" },
+                { label: "Bayes",      val: data.bayesian_rating,      dec: 3, suffix: "" },
+              ].map((m, i) =>
+                m.val != null ? (
+                  <div key={i} className="flex flex-col items-center gap-0.5">
+                    <span className="hud-mono text-[9px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+                      {m.label}
+                    </span>
+                    <OdometerNumber
+                      value={m.val}
+                      decimals={m.dec}
+                      suffix={m.suffix}
+                      className="text-base"
+                    />
+                  </div>
+                ) : (
+                  <div key={i} className="flex flex-col items-center gap-0.5 opacity-40">
+                    <span className="hud-mono text-[9px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                      {m.label}
+                    </span>
+                    <span className="hud-mono text-base text-[var(--text-muted)]">—</span>
+                  </div>
+                )
+              )}
+            </div>
+          </HudPanel>
+        </div>
+
+      </div>
+
+      {/* ── Telemetry tab bar — switches the cards below ── */}
+      <div className="mt-5 mb-2 px-1 flex items-center gap-2"
+        style={{ borderBottom: `1px solid ${teamColor}22` }}>
+        <span className="hud-mono text-[9px] uppercase tracking-[0.2em] text-[var(--text-secondary)] shrink-0 pr-2">
+          ▌ TELEMETRY
+        </span>
+        <HudTabBar
+          tabs={telemetryTabs}
+          active={telemetryTab}
+          onChange={(id) => setTelemetryTab(id as TelemetryTab)}
+          themeColor={teamColor}
+          scroll
+        />
+      </div>
+
       {/* ── Cards grid ── */}
-      <div className="mt-5 grid gap-4 sm:grid-cols-2 min-w-0 overflow-x-hidden">
+      <div className="grid gap-4 sm:grid-cols-2 min-w-0 overflow-x-hidden">
 
         {/* Tier legend — worst → best */}
+        {(telemetryTab === "advanced" || telemetryTab === "fatigue" || telemetryTab === "special-teams") && (
         <div className="sm:col-span-2 flex items-center justify-center gap-1 flex-wrap px-3 py-2 rounded-xl" style={{ border: `1px solid ${teamColor}15`, background: `${teamDarkBg}80` }}>
           <span className="text-[8px] text-white/20 uppercase tracking-wider font-semibold shrink-0 mr-0.5">Scale</span>
           {([["Low","Low"],["Below Average","Below Avg"],["Average","Avg"],["Above Average","Above Avg"],["Elite","Elite"]] as [Tier,string][]).map(([t, label], i, arr) => (
@@ -2629,9 +4269,17 @@ export default function PlayerProfilePage() {
             </div>
           ))}
         </div>
+        )}
+
+        {/* Empty-state — no card matches the current tab */}
+        {telemetryTab === "shot-map" && !isGoalie && shots.length === 0 && (
+          <div className="sm:col-span-2 hud-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] text-center py-6">
+            no shot data for this player yet
+          </div>
+        )}
 
         {/* ── Performance Snapshot charts ── */}
-        {!isGoalie && (
+        {!isGoalie && telemetryTab === "neural" && (
           <div className="sm:col-span-2">
             <Card title="Performance Snapshot" icon="📊" style={cardStyle}>
               <div className="flex flex-wrap justify-center gap-6">
@@ -2680,8 +4328,8 @@ export default function PlayerProfilePage() {
           </div>
         )}
 
-        {/* ── Shot Map card ── */}
-        {!isGoalie && (
+        {/* ── Shot Map card — 3D + 2D toggle ── */}
+        {!isGoalie && telemetryTab === "shot-map" && (
           <div className="sm:col-span-2">
             <Card title="Shot Map" icon="🎯" style={cardStyle}>
               {shots.length > 0 ? (
@@ -2689,7 +4337,12 @@ export default function PlayerProfilePage() {
                   <p className="text-[9px] uppercase tracking-wider text-center mb-3" style={{ color: "rgba(255,255,255,0.35)" }}>
                     Arena-adjusted shot locations · last 2 seasons · {shots.length} shots · {shots.filter(s => s.goal).length} goals
                   </p>
-                  <ShotMapViz shots={shots} />
+                  <Shot3D
+                    shots={shots3D}
+                    themeColor={teamColor}
+                    flip
+                    fallback={<ShotMapViz shots={shots} />}
+                  />
                 </>
               ) : (
                 <div className="flex flex-col items-center justify-center py-10 gap-2">
@@ -2704,50 +4357,68 @@ export default function PlayerProfilePage() {
         )}
 
         {/* ── Zone Tendencies — stacked, centered ── */}
-        {!isGoalie && (
+        {!isGoalie && telemetryTab === "zones" && (
           <div className="sm:col-span-2">
             <Card title="Zone Tendencies" style={cardStyle}>
-              <div className="flex flex-col items-center gap-3 max-w-md mx-auto w-full">
-                {/* Offensive Zone Tendency rink */}
+              <div className="flex flex-col items-stretch gap-4 w-full">
+                {/* Offensive Zone Tendency — 3D rink with 2D fallback */}
                 {data.nn_shoot_slot_pct != null ? (
                   <>
-                    <p className="text-[9px] font-semibold uppercase tracking-wider text-white/30 text-center">
-                      Offensive Zone Tendency
+                    <p className="hud-mono text-[9px] uppercase tracking-[0.22em] text-[var(--text-secondary)] text-center">
+                      ◢ OFFENSIVE ZONE TENDENCY · 3D
                     </p>
-                    <ZoneTendencyMap data={data} teamColor={teamColor} />
+                    <Zone3D
+                      activations={{
+                        slot:    data.nn_shoot_slot_pct ?? 0,
+                        perim:   data.nn_shoot_perimeter_pct ?? 0,
+                        net:     data.nn_drive_net_pct ?? 0,
+                        cornerL: data.nn_battle_corner_pct ?? 0,
+                        cornerR: data.nn_hold_corner_pct ?? 0,
+                      }}
+                      themeColor={teamColor}
+                      fallback={
+                        <div className="max-w-md mx-auto">
+                          <ZoneTendencyMap data={data} teamColor={teamColor} />
+                        </div>
+                      }
+                    />
                   </>
                 ) : (
                   <div className="flex flex-col items-center justify-center py-6 gap-1.5">
-                    <p className="text-[9px] text-white/20 uppercase tracking-wider">Model not yet trained</p>
+                    <p className="hud-mono text-[9px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Model not yet trained</p>
                   </div>
                 )}
-                {/* Ice Time By Zone bars — narrower than the rink */}
+                {/* Ice Time By Zone bars */}
                 {data.skating_zone_time_oz_pct != null ? (
-                  <div className="w-full max-w-[360px] mx-auto">
+                  <div className="w-full max-w-[420px] mx-auto">
                     <IceTimeByZoneBars data={data} />
                   </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center py-4 gap-1.5">
-                    <p className="text-[9px] text-white/20 uppercase tracking-wider">Model not yet trained</p>
-                  </div>
-                )}
-                <p className="text-[8px] text-center mt-1" style={{ color: "rgba(255,255,255,0.4)" }}>% of offensive actions by zone · % of skating time per zone</p>
+                ) : null}
+                <p className="hud-mono text-[8px] uppercase tracking-[0.18em] text-center text-[var(--text-muted)]">
+                  drag the 3D rink to rotate · scroll to zoom
+                </p>
               </div>
             </Card>
           </div>
         )}
 
         {/* Recent Games */}
-        {gl && gl.games.length > 0 && (
+        {telemetryTab === "games" && (
           <div className="sm:col-span-2">
             <Card title="Recent Games" icon="📅" style={cardStyle}>
-              <GameLogTable allGames={gl.games} />
+              {gl && gl.games.length > 0 ? (
+                <GameLogTable allGames={gl.games} />
+              ) : (
+                <div className="py-6 text-center hud-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                  no recent game log yet
+                </div>
+              )}
             </Card>
           </div>
         )}
 
         {/* Offensive Profile */}
-        {!isGoalie && (data.finishing != null || data.war != null || data.rapm_ev_off != null) && (
+        {!isGoalie && telemetryTab === "advanced" && (data.finishing != null || data.war != null || data.rapm_ev_off != null) && (
           <Card title="Offensive Profile" icon="⚡" style={cardStyle}>
             <div className="space-y-0">
               {data.finishing != null && (
@@ -2805,7 +4476,7 @@ export default function PlayerProfilePage() {
         )}
 
         {/* Defensive Profile */}
-        {!isGoalie && (data.cdr != null || data.rapm_ev_def != null || data.battle_score != null) && (
+        {!isGoalie && telemetryTab === "advanced" && (data.cdr != null || data.rapm_ev_def != null || data.battle_score != null) && (
           <Card title="Defensive Profile" icon="🛡️" style={cardStyle}>
             <div className="space-y-0">
               {(data.cdr != null || data.rapm_ev_def != null) && (
@@ -2853,7 +4524,7 @@ export default function PlayerProfilePage() {
         )}
 
         {/* Special Teams */}
-        {!isGoalie && (data.special_teams_pp != null || data.special_teams_pk != null) && (
+        {!isGoalie && telemetryTab === "special-teams" && (data.special_teams_pp != null || data.special_teams_pk != null) && (
           <Card title="Special Teams" icon="⭐" style={cardStyle}>
             <div className="space-y-0">
               {data.special_teams_pp != null && (
@@ -2879,7 +4550,7 @@ export default function PlayerProfilePage() {
         )}
 
         {/* Current Form */}
-        {!isGoalie && (data.ewma_xgf60 != null || data.hot_hand_score != null || data.clutch_index != null) && (
+        {!isGoalie && telemetryTab === "neural" && (data.ewma_xgf60 != null || data.hot_hand_score != null || data.clutch_index != null) && (
           <Card title="Current Form" icon="📈" style={cardStyle}>
             <div className="space-y-0">
               {data.ewma_xgf60 != null && (
@@ -2931,7 +4602,7 @@ export default function PlayerProfilePage() {
         )}
 
         {/* Playoff & Context */}
-        {!isGoalie && (data.playoff_delta != null || data.former_team_boost != null || data.bayesian_rating != null) && (
+        {!isGoalie && telemetryTab === "advanced" && (data.playoff_delta != null || data.former_team_boost != null || data.bayesian_rating != null) && (
           <Card title="Advanced Context" icon="🔬" style={cardStyle}>
             <div className="space-y-0">
               {data.bayesian_rating != null && (
@@ -2985,7 +4656,7 @@ export default function PlayerProfilePage() {
         )}
 
         {/* Phase 3 — Fatigue & Schedule */}
-        {!isGoalie && phase3 && phase3.fatigue_index != null && (() => {
+        {!isGoalie && telemetryTab === "fatigue" && phase3 && phase3.fatigue_index != null && (() => {
           const fi    = phase3.fatigue_index ?? 0;
           const fiTier   = fatigueTier(fi);
           const colorHex = TIER_COLOR[fiTier];
@@ -3119,7 +4790,7 @@ export default function PlayerProfilePage() {
         })()}
 
         {/* Confidence (Phase 17) — all players */}
-        {phase3?.confidence_index != null && (() => {
+        {telemetryTab === "fatigue" && phase3?.confidence_index != null && (() => {
           const ci = phase3.confidence_index;
           // Observed confidence_index values are concentrated in ±0.10 today
           // (the team-side signals are wired but not yet emitting), so the
@@ -3266,7 +4937,7 @@ export default function PlayerProfilePage() {
         })()}
 
         {/* Goalie Fatigue (3.24) — goalies only */}
-        {isGoalie && phase3?.goalie_fi != null && (() => {
+        {isGoalie && telemetryTab === "fatigue" && phase3?.goalie_fi != null && (() => {
           const gfi      = phase3.goalie_fi ?? 0;
           const gfiTier  = fatigueTier(gfi);
           const svDelta  = phase3.goalie_sv_delta ?? 0;
@@ -3332,7 +5003,7 @@ export default function PlayerProfilePage() {
         })()}
 
         {/* Behavioral NN + Skating */}
-        {!isGoalie && (
+        {!isGoalie && telemetryTab === "neural" && (
           (data.nn_carry_in_pct != null || data.skating_avg_speed_kmh != null) && (
           <Card title="Play Style (Neural Network)" icon="🧠" style={cardStyle}>
             {playStyle && (
@@ -3393,7 +5064,7 @@ export default function PlayerProfilePage() {
 
         {/* Goalie stats */}
         {/* Goalie Performance Snapshot — above Goalie Profile */}
-        {isGoalie && (
+        {isGoalie && telemetryTab === "neural" && (
           <div className="sm:col-span-2">
             <Card title="Performance Snapshot" icon="📊" style={cardStyle}>
               <div className="flex flex-wrap justify-center gap-6">
@@ -3406,7 +5077,7 @@ export default function PlayerProfilePage() {
           </div>
         )}
 
-        {isGoalie && (
+        {isGoalie && telemetryTab === "neural" && (
           <div className="sm:col-span-2">
             <Card title="Goalie Profile" icon="🥅" style={cardStyle}>
               <div className="space-y-0">
@@ -3470,31 +5141,35 @@ export default function PlayerProfilePage() {
         )}
 
         {/* Goalie — shots against heat map */}
-        {isGoalie && goalieShots.length > 0 && (
+        {isGoalie && telemetryTab === "shot-map" && goalieShots.length > 0 && (
           <div className="sm:col-span-2">
             <Card title="Shots Against" style={cardStyle}>
               <p className="text-[9px] uppercase tracking-wider text-center mb-3" style={{ color: "rgba(255,255,255,0.35)" }}>
                 Arena-adjusted · last 2 seasons · {goalieShots.length} shots · {goalieShots.filter(s => s.goal).length} goals allowed
               </p>
-              <GoalieShotMapViz shots={goalieShots} />
+              <Shot3D
+                shots={goalieShots3D}
+                themeColor={teamColor}
+                fallback={<GoalieShotMapViz shots={goalieShots} />}
+              />
             </Card>
           </div>
         )}
 
         {/* Goalie — save% by zone */}
-        {isGoalie && (data.hdsv_pct != null || data.mdsv_pct != null || data.ldsv_pct != null) && (
+        {isGoalie && telemetryTab === "zones" && (data.hdsv_pct != null || data.mdsv_pct != null || data.ldsv_pct != null) && (
           <div className="sm:col-span-2">
             <Card title="Save % by Zone" style={cardStyle}>
               <p className="text-[9px] text-white/25 uppercase tracking-wider text-center mb-3">
                 Color coded vs league averages · green = above avg · red = below avg
               </p>
-              <GoalieZoneViz data={data} />
+              <GoalieZoneViz data={data} teamColor={teamColor} />
             </Card>
           </div>
         )}
 
         {/* Goalie — neural net: shot-type + zone tendencies */}
-        {isGoalie && goalieNetData && (
+        {isGoalie && telemetryTab === "neural" && goalieNetData && (
           <div className="sm:col-span-2">
             <Card title="Shot Tendency Analysis" style={cardStyle}>
               <p className="text-[9px] text-white/25 uppercase tracking-wider text-center mb-4">
@@ -3506,7 +5181,7 @@ export default function PlayerProfilePage() {
         )}
 
         {/* Line Pairs (chemistry) */}
-        {!isGoalie && data.line_pairs && data.line_pairs.length > 0 && (
+        {!isGoalie && telemetryTab === "games" && data.line_pairs && data.line_pairs.length > 0 && (
           <div className="sm:col-span-2">
             <Card title="Best Linemates" icon="🤝" style={cardStyle}>
               <p className="text-[10px] text-white/30 mb-3">

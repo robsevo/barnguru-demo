@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { TEAM_COLORS, TEAM_SECONDARY, TEAM_FULL_NAMES, logoUrl } from "@/utils/nhl";
+import { HudGrid } from "@/components/hud";
 
 // ---------------------------------------------------------------------------
 // Division structure (2025-26 NHL season)
@@ -164,9 +165,24 @@ export default function LeagueTeamsPage() {
   }
 
   return (
-    <main className="min-h-screen p-4 sm:p-6 max-w-5xl mx-auto w-full overflow-x-hidden">
+    <main className="relative min-h-screen p-4 sm:p-6 max-w-5xl mx-auto w-full overflow-x-hidden">
+      <HudGrid />
+
+      {/* HUD dossier strip */}
+      <div className="relative z-10 mb-3 flex items-center gap-2 flex-wrap">
+        <span className="hud-mono text-[10px] uppercase tracking-[0.20em] text-[var(--brand-hex)]" aria-hidden>◢</span>
+        <span className="hud-mono text-[10px] uppercase tracking-[0.20em] text-[var(--brand-hex)]">
+          LEAGUE INDEX · 32 FRANCHISES
+        </span>
+        <span className="hud-mono text-[9px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">· 2025-26</span>
+        <span className="ml-auto flex items-center gap-1">
+          <span className="hud-pulse-dot" style={{ background: "#4ade80" }} />
+          <span className="hud-mono jarvis-flicker text-[9px] uppercase tracking-[0.18em] text-[#4ade80]">SYNCED</span>
+        </span>
+      </div>
+
       {/* Header */}
-      <div className="mb-6 sm:mb-8">
+      <div className="mb-6 sm:mb-8 relative z-10">
         <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-white/20 mb-1">
           NHL · 2025–26
         </p>

@@ -4,6 +4,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { TEAM_COLORS, TEAM_SECONDARY, TEAM_FULL_NAMES, logoUrl, normalizePlayerName } from "@/utils/nhl";
 import { useTheme } from "@/utils/themeContext";
+import { HudGrid, HudTabBar, type HudTab } from "@/components/hud";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -477,10 +478,26 @@ export default function TeamPage() {
   ];
 
   return (
-    <main className="min-h-screen p-4 sm:p-6 max-w-5xl mx-auto w-full overflow-x-hidden">
+    <main className="relative min-h-screen p-4 sm:p-6 max-w-5xl mx-auto w-full overflow-x-hidden">
+      <HudGrid />
+
+      {/* HUD dossier strip */}
+      <div className="relative z-10 mb-3 flex items-center gap-2 flex-wrap">
+        <span className="hud-mono text-[10px] uppercase tracking-[0.20em]" style={{ color: teamColor }} aria-hidden>◢</span>
+        <span className="hud-mono text-[10px] uppercase tracking-[0.20em]" style={{ color: teamColor }}>
+          TEAM DOSSIER · {team}
+        </span>
+        <span className="hud-mono text-[9px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+          · {TEAM_FULL_NAMES[team] ?? team}
+        </span>
+        <span className="ml-auto flex items-center gap-1">
+          <span className="hud-pulse-dot" style={{ background: "#4ade80" }} />
+          <span className="hud-mono jarvis-flicker text-[9px] uppercase tracking-[0.18em] text-[#4ade80]">LIVE</span>
+        </span>
+      </div>
 
       {/* Back + Set Theme row */}
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between relative z-10">
         <button
           onClick={() => router.back()}
           className="flex items-center gap-1.5 text-[11px] text-white/30 hover:text-white/60 transition-colors"
@@ -518,17 +535,56 @@ export default function TeamPage() {
         )}
       </div>
 
-      {/* Header card */}
+      {/* Header card — metallic chrome with rotating rings backdrop */}
       <div
-        className="mb-3 rounded-2xl border border-white/[0.08] overflow-hidden"
-        style={{ background: `linear-gradient(160deg, ${tableDarkBg} 0%, #060708 65%)` }}
+        className="relative jarvis-shimmer mb-3 rounded-2xl border overflow-hidden hud-panel--all-corners"
+        style={{
+          ["--hud-corner" as string]: `${teamColor}aa`,
+          borderColor: `${teamColor}40`,
+          background: `linear-gradient(160deg, ${tableDarkBg} 0%, #060708 65%)`,
+          boxShadow: `0 4px 24px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06), 0 0 24px ${teamColor}10`,
+        }}
       >
-        <div className="flex items-center gap-3 sm:gap-5 px-4 sm:px-5 pt-4 sm:pt-5 pb-3 sm:pb-4">
+        <span className="hud-panel__corner-tr" />
+        <span className="hud-panel__corner-bl" />
+        {/* Iron Man rings backdrop behind the logo */}
+        <svg viewBox="0 0 600 300" aria-hidden
+          className="absolute left-0 top-0 w-full h-full pointer-events-none opacity-60"
+          style={{ zIndex: 0 }}>
+          <g style={{ transformOrigin: "92px 92px", animation: "teamRingSlow 30s linear infinite" }}>
+            <circle cx={92} cy={92} r={80} fill="none" stroke={teamColor} strokeOpacity={0.25} strokeDasharray="2 8" />
+            {[0, 45, 90, 135, 180, 225, 270, 315].map((deg, i) => {
+              const rad = (deg * Math.PI) / 180;
+              return (
+                <line key={i}
+                  x1={92 + Math.cos(rad) * 74}
+                  y1={92 + Math.sin(rad) * 74}
+                  x2={92 + Math.cos(rad) * 86}
+                  y2={92 + Math.sin(rad) * 86}
+                  stroke={teamColor} strokeOpacity={0.6} strokeWidth={1.2} />
+              );
+            })}
+          </g>
+          <g style={{ transformOrigin: "92px 92px", animation: "teamRingRev 18s linear infinite" }}>
+            <circle cx={92} cy={92} r={66} fill="none" stroke={teamColor} strokeOpacity={0.4} strokeDasharray="30 20 10 20" strokeLinecap="round" strokeWidth={1.2} />
+          </g>
+          <line x1={184} y1={92} x2={580} y2={92} stroke={teamColor} strokeOpacity={0.08} strokeDasharray="3 10" />
+        </svg>
+
+        <style jsx>{`
+          @keyframes teamRingSlow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+          @keyframes teamRingRev  { from { transform: rotate(360deg); } to { transform: rotate(0deg); } }
+          @media (prefers-reduced-motion: reduce) {
+            svg g { animation: none !important; }
+          }
+        `}</style>
+
+        <div className="relative flex items-center gap-3 sm:gap-5 px-4 sm:px-5 pt-4 sm:pt-5 pb-3 sm:pb-4 z-10">
           <div
             className="shrink-0 rounded-2xl p-2 sm:p-2.5 flex items-center justify-center"
             style={{
               background: `radial-gradient(circle at 40% 35%, ${darkBlend(secondaryColor, 0.50)} 0%, ${darkBlend(secondaryColor, 0.88)} 60%, #080a0c 100%)`,
-              boxShadow: `0 4px 20px rgba(0,0,0,0.5), 0 1px 0 rgba(255,255,255,0.06) inset`,
+              boxShadow: `0 4px 20px rgba(0,0,0,0.5), 0 0 24px ${teamColor}33, inset 0 1px 0 rgba(255,255,255,0.10)`,
             }}
           >
             <img
@@ -537,7 +593,7 @@ export default function TeamPage() {
               width={80}
               height={80}
               className="object-contain w-[76px] h-[76px] sm:w-[84px] sm:h-[84px] -m-1"
-              style={{ filter: `drop-shadow(0 2px 10px rgba(255,255,255,0.18)) drop-shadow(0 0 4px rgba(255,255,255,0.10))` }}
+              style={{ filter: `drop-shadow(0 2px 10px rgba(255,255,255,0.18)) drop-shadow(0 0 4px rgba(255,255,255,0.10)) drop-shadow(0 0 12px ${teamColor}55)` }}
             />
           </div>
           <div className="w-px shrink-0 bg-white/[0.08]" style={{ height: 36 }} />
@@ -609,20 +665,22 @@ export default function TeamPage() {
           </div>
         </div>
 
-        {/* Tab bar */}
-        <div className="flex border-t border-white/[0.07]">
-          {(["stats", "injuries", "cap"] as const).map(t => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className="flex-1 py-3 text-xs sm:text-sm font-semibold uppercase tracking-wide transition-all duration-150"
-              style={tab === t
-                ? { color: teamColor, borderBottom: `2px solid ${teamColor}`, backgroundColor: `${teamColor}08` }
-                : { color: "rgba(255,255,255,0.30)", borderBottom: "2px solid transparent" }}
-            >
-              {t === "stats" ? "Roster" : t === "injuries" ? "Injuries" : "Cap"}
-            </button>
-          ))}
+        {/* HUD Tab bar */}
+        <div className="relative z-10 flex items-center gap-2 px-3 py-2 border-t" style={{ borderColor: `${teamColor}22` }}>
+          <span className="hud-mono text-[10px] uppercase tracking-[0.20em] shrink-0 pr-1" style={{ color: teamColor }}>
+            ▌
+          </span>
+          <HudTabBar
+            tabs={[
+              { id: "stats",    label: "Roster" },
+              { id: "injuries", label: "Injuries" },
+              { id: "cap",      label: "Cap" },
+            ] as HudTab[]}
+            active={tab}
+            onChange={(id) => setTab(id as typeof tab)}
+            themeColor={teamColor}
+            scroll
+          />
         </div>
       </div>
 
@@ -630,7 +688,7 @@ export default function TeamPage() {
       {tab === "stats" && (
         statsLoading ? <SkeletonRows n={14} /> :
         (!skaters || skaters.length === 0) ? (
-          <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] px-6 py-10 text-center space-y-1">
+          <div className="hud-panel hud-panel--all-corners px-6 py-10 text-center space-y-1">
             <p className="text-white/40 text-sm">No roster data available for {team}.</p>
             <p className="text-white/20 text-xs">Could not load stats from NHL API — try again</p>
             <button
@@ -829,7 +887,7 @@ export default function TeamPage() {
       {tab === "cap" && (
         capLoading ? <SkeletonRows n={14} /> :
         (!capData || (capData.players?.length ?? 0) === 0) ? (
-          <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] px-6 py-14 text-center space-y-1">
+          <div className="hud-panel hud-panel--all-corners px-6 py-14 text-center space-y-1">
             <p className="text-white/40 text-sm">Cap data unavailable.</p>
             <p className="text-white/20 text-xs mt-1">Could not parse cap data for this team.{capData?.status ? ` (${capData.status})` : ""}</p>
             <button
@@ -1188,7 +1246,7 @@ export default function TeamPage() {
               return (
                 <div className="space-y-5">
                   {picks.length === 0 ? (
-                    <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] px-6 py-10 text-center">
+                    <div className="hud-panel hud-panel--all-corners px-6 py-10 text-center">
                       <p className="text-white/25 text-xs">No draft pick data available.</p>
                     </div>
                   ) : (<>
@@ -1479,7 +1537,7 @@ export default function TeamPage() {
 
               if (!hasNHL && !hasMinors && !hasProspects) {
                 return (
-                  <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] px-6 py-10 text-center">
+                  <div className="hud-panel hud-panel--all-corners px-6 py-10 text-center">
                     <p className="text-white/25 text-xs">No depth chart data available.</p>
                   </div>
                 );
@@ -1578,7 +1636,7 @@ export default function TeamPage() {
       {tab === "injuries" && (
         injuryLoading ? <SkeletonRows n={6} /> :
         (!injuryData || injuryData.injuries.length === 0) ? (
-          <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] px-6 py-14 text-center space-y-1">
+          <div className="hud-panel hud-panel--all-corners px-6 py-14 text-center space-y-1">
             <p className="text-white/40 text-sm">No injuries reported for {team}.</p>
             {injuryData?.as_of && <p className="text-white/20 text-xs mt-1">As of {injuryData.as_of}</p>}
             <button

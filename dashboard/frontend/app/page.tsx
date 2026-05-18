@@ -2,35 +2,126 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { HudGrid } from "@/components/hud";
 
 export default function LandingPage() {
   const [aboutOpen, setAboutOpen] = useState(false);
 
   return (
-    <main className="min-h-screen flex flex-col items-center px-6 pt-3 pb-10">
+    <main className="relative min-h-screen flex flex-col items-center px-6 pt-3 pb-10">
+      <HudGrid />
+
+      {/* HUD dossier strip */}
+      <div className="relative z-10 w-full max-w-2xl mb-3 flex items-center gap-2">
+        <span className="hud-mono text-[10px] uppercase tracking-[0.20em] text-[var(--brand-hex)]" aria-hidden>◢</span>
+        <span className="hud-mono text-[10px] uppercase tracking-[0.20em] text-[var(--brand-hex)]">
+          GRTZKY · HOME
+        </span>
+        <span className="hud-mono text-[9px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">· welcome</span>
+        <span className="ml-auto flex items-center gap-1">
+          <span className="hud-pulse-dot" style={{ background: "#4ade80" }} />
+          <span className="hud-mono jarvis-flicker text-[9px] uppercase tracking-[0.18em] text-[#4ade80]">ONLINE</span>
+        </span>
+      </div>
 
       {/* Divider below goal feed */}
-      <div className="w-full max-w-2xl h-px bg-gradient-to-r from-transparent via-white/[0.10] to-transparent mb-3" />
+      <div className="w-full max-w-2xl h-px bg-gradient-to-r from-transparent via-white/[0.10] to-transparent mb-3 relative z-10" />
 
-      {/* Hero */}
-      <div className="text-center mb-2 max-w-2xl">
-        {/* "Welcome to:" — matches header logo text exactly */}
-        <p
-          className="font-black italic tracking-[0.06em] uppercase text-[17px] sm:text-[20px] mb-0 bg-gradient-to-r from-white via-[#E8D090] to-[#C9A84C] bg-clip-text text-transparent"
-          style={{ fontFamily: "var(--font-condensed)" }}
+      {/* Hero — animated HUD chrome surrounding the logo */}
+      <div className="text-center mb-2 max-w-2xl relative">
+        {/* Iron Man rings backdrop */}
+        <svg
+          viewBox="0 0 600 600"
+          aria-hidden
+          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none w-[120%] max-w-none h-[120%] opacity-60"
+          style={{ zIndex: 0 }}
         >
-          Welcome to:
-        </p>
+          <defs>
+            <linearGradient id="heroArc" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%"  stopColor="#C9A84C" stopOpacity="0" />
+              <stop offset="50%" stopColor="#C9A84C" stopOpacity="0.85" />
+              <stop offset="100%" stopColor="#C9A84C" stopOpacity="0" />
+            </linearGradient>
+            <linearGradient id="heroArc2" x1="1" y1="0" x2="0" y2="1">
+              <stop offset="0%"  stopColor="#E8D090" stopOpacity="0" />
+              <stop offset="60%" stopColor="#E8D090" stopOpacity="0.55" />
+              <stop offset="100%" stopColor="#E8D090" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          {/* Outer slow ring */}
+          <g style={{ transformOrigin: "300px 300px", animation: "heroRotateSlow 40s linear infinite" }}>
+            <circle cx={300} cy={300} r={280} fill="none" stroke="#C9A84C" strokeOpacity={0.12} strokeDasharray="2 12" />
+            {[0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330].map((deg, i) => {
+              const rad = (deg * Math.PI) / 180;
+              return (
+                <line
+                  key={i}
+                  x1={300 + Math.cos(rad) * 268}
+                  y1={300 + Math.sin(rad) * 268}
+                  x2={300 + Math.cos(rad) * 292}
+                  y2={300 + Math.sin(rad) * 292}
+                  stroke="#C9A84C" strokeOpacity={0.5} strokeWidth={1.2}
+                />
+              );
+            })}
+          </g>
+          {/* Middle counter-rotating arc */}
+          <g style={{ transformOrigin: "300px 300px", animation: "heroRotateRev 22s linear infinite" }}>
+            <circle cx={300} cy={300} r={235} fill="none" stroke="url(#heroArc)" strokeWidth={1.4} strokeDasharray="100 60 40 60" strokeLinecap="round" />
+          </g>
+          {/* Inner fast arc */}
+          <g style={{ transformOrigin: "300px 300px", animation: "heroRotateFast 12s linear infinite" }}>
+            <circle cx={300} cy={300} r={195} fill="none" stroke="url(#heroArc2)" strokeWidth={1.2} strokeDasharray="30 120" strokeLinecap="round" />
+          </g>
+          {/* Pulse rings */}
+          <circle cx={300} cy={300} r={140} fill="none" stroke="#C9A84C" strokeWidth={1}
+            style={{ animation: "heroPulse 5.4s ease-out infinite" }} />
+          <circle cx={300} cy={300} r={140} fill="none" stroke="#C9A84C" strokeWidth={1}
+            style={{ animation: "heroPulse 5.4s ease-out infinite 2.7s" }} />
+        </svg>
+
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/hero.png"
           alt="GRTZKY"
-          className="mx-auto w-full max-w-[420px] sm:max-w-[620px] lg:max-w-[760px] h-auto drop-shadow-2xl -mt-3"
+          className="relative z-10 mx-auto w-full max-w-[420px] sm:max-w-[620px] lg:max-w-[760px] h-auto drop-shadow-2xl -mt-3"
         />
+
+        {/* Scan-line sweeping the logo */}
+        <div
+          aria-hidden
+          className="absolute left-0 right-0 top-0 h-px pointer-events-none"
+          style={{
+            background: "linear-gradient(90deg, transparent, rgba(232,208,144,0.9), transparent)",
+            boxShadow: "0 0 12px rgba(232,208,144,0.6)",
+            animation: "heroScan 7s linear infinite",
+          }}
+        />
+
         {/* Acronym under logo */}
-        <p className="text-[10px] sm:text-[13px] font-light uppercase tracking-[0.22em] -mt-1 mb-6 bg-gradient-to-r from-[#C9A84C] via-[#E8D090] to-[#C9A84C] bg-clip-text text-transparent">
-          Bayesian&nbsp;·&nbsp;Analytics&nbsp;·&nbsp;Rating&nbsp;·&nbsp;Network
+        <p className="hud-mono text-[10px] sm:text-[13px] uppercase tracking-[0.28em] -mt-1 mb-6 bg-gradient-to-r from-[#C9A84C] via-[#E8D090] to-[#C9A84C] bg-clip-text text-transparent relative z-10">
+          ◢ Bayesian&nbsp;·&nbsp;Analytics&nbsp;·&nbsp;Rating&nbsp;·&nbsp;Network ◣
         </p>
+
+        <style jsx>{`
+          @keyframes heroRotateSlow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+          @keyframes heroRotateRev  { from { transform: rotate(360deg); } to { transform: rotate(0deg); } }
+          @keyframes heroRotateFast { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+          @keyframes heroPulse {
+            0%   { r: 140; stroke-opacity: 0.55; }
+            100% { r: 280; stroke-opacity: 0; }
+          }
+          @keyframes heroScan {
+            0%   { transform: translateY(0);     opacity: 0; }
+            10%  { opacity: 1; }
+            90%  { opacity: 1; }
+            100% { transform: translateY(380px); opacity: 0; }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            svg g, circle, div { animation: none !important; }
+          }
+        `}</style>
+
         {/* Collapsible About */}
         <div className="mb-1">
           <button
@@ -90,7 +181,7 @@ export default function LandingPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl">
 
         {/* GameCentre card */}
-        <Link href="/gamecentre" className="group">
+        <Link href="/gamecentre" className="group jarvis-lift">
           <div className="relative h-44 rounded-2xl border border-[#C9A84C]/[0.18] bg-gradient-to-b from-white/[0.015] via-white/[0.005] to-transparent hover:border-white/[0.36] transition-all duration-200 p-6 flex flex-col justify-between overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.80),0_2px_6px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.06),inset_0_-1px_0_rgba(0,0,0,0.35),inset_1px_0_0_rgba(255,255,255,0.01),inset_-1px_0_0_rgba(255,255,255,0.01)]">
             <div className="absolute -top-8 -right-8 w-40 h-40 rounded-full bg-white/[0.04] blur-2xl pointer-events-none group-hover:bg-white/[0.08] transition-all duration-300" />
             <div>
@@ -109,7 +200,7 @@ export default function LandingPage() {
         </Link>
 
         {/* Playoff Tree card — opens standings /tree view with live bracket */}
-        <Link href="/standings?view=tree" className="group">
+        <Link href="/standings?view=tree" className="group jarvis-lift">
           <div className="relative h-44 rounded-2xl border border-[#fbbf24]/15 bg-[#fbbf24]/[0.02] hover:bg-[#fbbf24]/[0.05] hover:border-[#fbbf24]/30 transition-all duration-200 p-6 flex flex-col justify-between overflow-hidden shadow-[0_4px_24px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(220,225,230,0.08)]">
             <div className="absolute -top-8 -right-8 w-40 h-40 rounded-full bg-[#fbbf24]/8 blur-2xl pointer-events-none group-hover:bg-[#fbbf24]/15 transition-all duration-300" />
             <div>
@@ -128,7 +219,7 @@ export default function LandingPage() {
         </Link>
 
         {/* Stats Leaders card */}
-        <Link href="/stats" className="group">
+        <Link href="/stats" className="group jarvis-lift">
           <div className="relative h-44 rounded-2xl border border-[#C9A84C]/[0.18] bg-gradient-to-b from-white/[0.015] via-white/[0.005] to-transparent hover:border-white/[0.36] transition-all duration-200 p-6 flex flex-col justify-between overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.80),0_2px_6px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.06),inset_0_-1px_0_rgba(0,0,0,0.35),inset_1px_0_0_rgba(255,255,255,0.01),inset_-1px_0_0_rgba(255,255,255,0.01)]">
             <div className="absolute -top-8 -left-8 w-40 h-40 rounded-full bg-white/[0.03] blur-2xl pointer-events-none group-hover:bg-white/[0.07] transition-all duration-300" />
             <div>
@@ -147,7 +238,7 @@ export default function LandingPage() {
         </Link>
 
         {/* Neural Scout card */}
-        <Link href="/players" className="group">
+        <Link href="/players" className="group jarvis-lift">
           <div className="relative h-44 rounded-2xl border border-[#a78bfa]/[0.18] bg-gradient-to-b from-[#a78bfa]/[0.03] via-transparent to-transparent hover:border-[#a78bfa]/[0.35] transition-all duration-200 p-6 flex flex-col justify-between overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.80),inset_0_1px_0_rgba(167,139,250,0.08)]">
             <div className="absolute -top-8 -right-8 w-40 h-40 rounded-full bg-[#a78bfa]/[0.06] blur-2xl pointer-events-none group-hover:bg-[#a78bfa]/[0.12] transition-all duration-300" />
             <div>

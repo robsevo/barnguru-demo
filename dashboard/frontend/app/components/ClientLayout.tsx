@@ -7,6 +7,7 @@ import { SeasonContextProvider } from "@/utils/contextToggle";
 import FloatingPlayer   from "./FloatingPlayer";
 import ThemeInjector    from "./ThemeInjector";
 import TeamThemeLoader  from "./TeamThemeLoader";
+import { AnimatePresence, motion } from "framer-motion";
 
 function AboutDisclaimer() {
   const [open, setOpen] = useState(false);
@@ -488,26 +489,81 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
           className={`flex-1 flex flex-col min-w-0 overflow-x-hidden transition-all duration-300 ease-in-out
             ${open ? "ml-64" : "ml-0"}`}
         >
-          {/* Top bar */}
+          {/* Top bar — solid navy matching the Stats dropdown background */}
           <header
-            className="sticky top-0 z-30 flex items-center gap-3 px-2 sm:px-3 h-12 backdrop-blur-2xl select-none"
+            className="relative sticky top-0 z-30 flex items-center gap-2 px-2 sm:px-3 h-11 backdrop-blur-2xl select-none"
             style={{
-              background: `linear-gradient(to right, rgba(var(--header-r), var(--header-g), var(--header-b), 0.98), rgba(var(--header-r), var(--header-g), var(--header-b), 0.95), rgba(var(--header-r), var(--header-g), var(--header-b), 0.98))`,
-              borderBottom: `1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.30)`,
-              boxShadow: `0 1px 0 rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.18), 0 4px 32px rgba(0,0,0,0.70), 0 0 40px rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.04), inset 0 1px 0 rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.10)`,
+              // Always navy regardless of team theme — team color stays on accents only
+              background: "rgba(10,12,16,0.97)",
+              borderBottom: `1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.35)`,
+              boxShadow: `
+                0 1px 0 rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.22),
+                0 6px 36px rgba(0,0,0,0.80),
+                0 0 60px rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.06),
+                inset 0 2px 0 rgba(220,228,240,0.18),
+                inset 0 1px 0 rgba(255,255,255,0.10),
+                inset 0 -1px 0 rgba(0,0,0,0.45),
+                inset 0 -8px 12px -8px rgba(0,0,0,0.50),
+                inset 1px 0 0 rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.10),
+                inset -1px 0 0 rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.10)
+              `,
             }}
           >
-            {/* Hamburger */}
+            {/* metallic top-edge highlight */}
+            <span aria-hidden className="absolute top-0 left-0 right-0 h-px pointer-events-none z-10"
+              style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent)" }} />
+
+            {/* HUD corner brackets — top-left + top-right */}
+            <span aria-hidden className="absolute pointer-events-none z-10"
+              style={{
+                top: 3, left: 3, width: 10, height: 10,
+                borderTop: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.65)`,
+                borderLeft: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.65)`,
+              }} />
+            <span aria-hidden className="absolute pointer-events-none z-10"
+              style={{
+                top: 3, right: 3, width: 10, height: 10,
+                borderTop: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.65)`,
+                borderRight: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.65)`,
+              }} />
+
+            {/* Hamburger — metallic JARVIS button with corner brackets */}
             <button
               onClick={() => setOpen((o) => !o)}
-              className="flex flex-col justify-center gap-[5px] w-7 h-7 rounded-md transition-colors duration-200 shrink-0 items-center"
-              style={{ background: open ? (theme ? "rgba(255,255,255,0.08)" : `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.08)`) : undefined }}
+              className="relative flex flex-col justify-center items-center gap-[3px] w-6 h-6 rounded-md shrink-0 transition-all duration-200 active:scale-[0.92] group"
+              style={{
+                background: open
+                  ? `linear-gradient(180deg, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.32) 0%, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.14) 50%, rgba(0,0,0,0.30) 100%)`
+                  : `linear-gradient(180deg, rgba(220,228,240,0.08) 0%, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.08) 50%, rgba(0,0,0,0.30) 100%)`,
+                border: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),${open ? 0.55 : 0.30})`,
+                boxShadow: open
+                  ? `0 0 10px rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.30), inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -1px 0 rgba(0,0,0,0.45)`
+                  : `inset 0 1px 0 rgba(255,255,255,0.10), inset 0 -1px 0 rgba(0,0,0,0.40)`,
+              }}
               aria-label="Toggle navigation"
             >
-              {(["rotate(45deg) translateY(7px)", undefined, "rotate(-45deg) translateY(-7px)"] as const).map((transform, i) => (
-                <span key={i} className="block h-[2px] w-[16px] rounded-full transition-all duration-200 origin-center"
+              {/* HUD corner brackets — top-left + bottom-right */}
+              <span aria-hidden className="absolute pointer-events-none"
+                style={{
+                  top: 2, left: 2, width: 5, height: 5,
+                  borderTop: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.70)`,
+                  borderLeft: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.70)`,
+                }} />
+              <span aria-hidden className="absolute pointer-events-none"
+                style={{
+                  bottom: 2, right: 2, width: 5, height: 5,
+                  borderBottom: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.70)`,
+                  borderRight: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.70)`,
+                }} />
+              {(["rotate(45deg) translateY(5px)", undefined, "rotate(-45deg) translateY(-5px)"] as const).map((transform, i) => (
+                <span key={i} className="block h-[1.5px] w-[12px] rounded-full transition-all duration-200 origin-center"
                   style={{
-                    background: theme ? "rgba(255,255,255,0.65)" : `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.60)`,
+                    background: theme
+                      ? "linear-gradient(90deg, rgba(255,255,255,0.40), rgba(255,255,255,0.85) 50%, rgba(255,255,255,0.40))"
+                      : `linear-gradient(90deg, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.45), rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.95) 50%, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.45))`,
+                    boxShadow: theme
+                      ? "0 0 4px rgba(255,255,255,0.30)"
+                      : `0 0 4px rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.40)`,
                     transform: open ? transform : undefined,
                     opacity: (i === 1 && open) ? 0 : 1,
                   }} />
@@ -543,31 +599,57 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                   <circle cx="24" cy="24" r="1.6" fill="white"   fillOpacity="0.72"/>
                 </svg>
               ) : (
-                <img src="/logo-circle.png" alt="GRTZKY" className="h-9 sm:h-8 w-auto block" />
+                <img
+                  src="/logo-circle.png"
+                  alt="GRTZKY"
+                  className="h-9 sm:h-8 w-auto block"
+                  style={{
+                    filter: `drop-shadow(0 1px 1px rgba(0,0,0,0.65))
+                             drop-shadow(0 0 4px rgba(255,255,255,0.20))
+                             drop-shadow(0 0 8px rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.30))`,
+                  }}
+                />
               )}
               <span
-                className="h-5 sm:h-5 w-px shrink-0 mx-2"
+                className="h-5 sm:h-5 w-px shrink-0 mx-1.5"
                 style={{ background: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.30)` }}
               />
               <span
                 className="font-black italic tracking-[0.06em] text-[14px] sm:text-[17px] lg:text-[20px] bg-clip-text text-transparent leading-none pr-1.5"
                 style={{
                   fontFamily: "var(--font-condensed)",
+                  // Brushed-steel multi-stop gradient with highlight band
                   backgroundImage: isCortexMode
-                    ? `linear-gradient(to right, #fff, #c4b5fd, #a78bfa)`
-                    : `linear-gradient(to right, #fff, ${brandHex2}, ${brandHex})`,
+                    ? `linear-gradient(180deg,
+                        #ffffff 0%,
+                        #ddd6fe 18%,
+                        #a78bfa 38%,
+                        #7c3aed 58%,
+                        #a78bfa 78%,
+                        #ddd6fe 100%)`
+                    : `linear-gradient(180deg,
+                        #ffffff 0%,
+                        ${brandHex2} 18%,
+                        ${brandHex} 38%,
+                        #6a5728 58%,
+                        ${brandHex} 78%,
+                        ${brandHex2} 100%)`,
+                  // Subtle outer + inner glow via text-shadow on the bg-clipped text
+                  filter: isCortexMode
+                    ? `drop-shadow(0 1px 0 rgba(0,0,0,0.85)) drop-shadow(0 0 6px rgba(167,139,250,0.30))`
+                    : `drop-shadow(0 1px 0 rgba(0,0,0,0.85)) drop-shadow(0 0 6px rgba(201,168,76,0.30))`,
                 }}
               >
                 {theme ? theme.abbrev : isCortexMode ? "CORTEX" : "GRTZKY"}
               </span>
             </Link>
 
-            <span className="hidden lg:block h-4 w-px mx-1" style={{ background: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.20)` }} />
+            <span className="hidden lg:block h-4 w-px mx-0.5" style={{ background: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.20)` }} />
             <span
-              className="text-[9px] font-medium tracking-[0.16em] uppercase hidden lg:block"
-              style={{ color: theme ? "rgba(255,255,255,0.38)" : `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.30)` }}
+              className="hud-mono text-[9px] tracking-[0.20em] uppercase hidden lg:block"
+              style={{ color: theme ? "rgba(255,255,255,0.45)" : `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.45)` }}
             >
-              {theme ? "" : isCortexMode ? "Player Intelligence · Neural Models" : "Bayesian Analytics and Rating Network"}
+              {theme ? "" : isCortexMode ? "◢ NEURAL CORE · v1.0" : "◢ BAYESIAN ANALYTICS · RATING NETWORK"}
             </span>
 
             {/* Quick-nav buttons */}
@@ -581,25 +663,27 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                   <Link
                     key={href}
                     href={href}
-                    className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md text-[8px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border flex items-center justify-center"
+                    className="hud-mono px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md text-[8px] sm:text-[9px] uppercase tracking-[0.14em] transition-all duration-150 border flex items-center justify-center"
                     style={active ? (theme ? {
-                      background: "rgba(255,255,255,0.18)",
+                      background: "linear-gradient(180deg, rgba(255,255,255,0.30) 0%, rgba(255,255,255,0.14) 50%, rgba(0,0,0,0.10) 100%)",
                       color: "#ffffff",
-                      borderColor: "rgba(255,255,255,0.45)",
-                      boxShadow: "0 0 8px rgba(255,255,255,0.12)",
+                      borderColor: "rgba(255,255,255,0.50)",
+                      boxShadow: "0 0 10px rgba(255,255,255,0.18), inset 0 1px 0 rgba(255,255,255,0.30), inset 0 -1px 0 rgba(0,0,0,0.35)",
                     } : {
-                      background: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.15)`,
+                      background: `linear-gradient(180deg, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.32) 0%, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.14) 50%, rgba(0,0,0,0.20) 100%)`,
                       color: brandHex,
-                      borderColor: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.40)`,
-                      boxShadow: `0 0 8px rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.15)`,
+                      borderColor: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.50)`,
+                      boxShadow: `0 0 10px rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.20), inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -1px 0 rgba(0,0,0,0.45)`,
                     }) : (theme ? {
-                      color: "rgba(255,255,255,0.55)",
-                      borderColor: "rgba(255,255,255,0.15)",
-                      background: "rgba(255,255,255,0.05)",
+                      color: "rgba(255,255,255,0.60)",
+                      borderColor: "rgba(255,255,255,0.18)",
+                      background: "linear-gradient(180deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 50%, rgba(0,0,0,0.20) 100%)",
+                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.10), inset 0 -1px 0 rgba(0,0,0,0.35)",
                     } : {
-                      color: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.45)`,
-                      borderColor: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.15)`,
-                      background: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.04)`,
+                      color: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.55)`,
+                      borderColor: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.22)`,
+                      background: `linear-gradient(180deg, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.10) 0%, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.03) 50%, rgba(0,0,0,0.25) 100%)`,
+                      boxShadow: `inset 0 1px 0 rgba(220,228,240,0.08), inset 0 -1px 0 rgba(0,0,0,0.40)`,
                     })}
                   >
                     <span className="sm:hidden">{labelSm}</span>
@@ -615,19 +699,25 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                 const teamsActive  = pathname.startsWith("/league") || pathname.startsWith("/teams/");
                 const anyActive    = statsActive || stndActive || teamsActive;
                 const activeStyle = anyActive ? (theme ? {
-                  background: "rgba(255,255,255,0.18)", color: "#ffffff",
-                  borderColor: "rgba(255,255,255,0.45)",
+                  background: "linear-gradient(180deg, rgba(255,255,255,0.30) 0%, rgba(255,255,255,0.14) 50%, rgba(0,0,0,0.10) 100%)",
+                  color: "#ffffff",
+                  borderColor: "rgba(255,255,255,0.50)",
+                  boxShadow: "0 0 10px rgba(255,255,255,0.18), inset 0 1px 0 rgba(255,255,255,0.30), inset 0 -1px 0 rgba(0,0,0,0.35)",
                 } : {
-                  background: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.15)`,
+                  background: `linear-gradient(180deg, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.32) 0%, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.14) 50%, rgba(0,0,0,0.20) 100%)`,
                   color: brandHex,
-                  borderColor: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.40)`,
+                  borderColor: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.50)`,
+                  boxShadow: `0 0 10px rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.20), inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -1px 0 rgba(0,0,0,0.45)`,
                 }) : (theme ? {
-                  color: "rgba(255,255,255,0.55)", borderColor: "rgba(255,255,255,0.15)",
-                  background: "rgba(255,255,255,0.05)",
+                  color: "rgba(255,255,255,0.60)",
+                  borderColor: "rgba(255,255,255,0.18)",
+                  background: "linear-gradient(180deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 50%, rgba(0,0,0,0.20) 100%)",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.10), inset 0 -1px 0 rgba(0,0,0,0.35)",
                 } : {
-                  color: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.45)`,
-                  borderColor: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.15)`,
-                  background: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.04)`,
+                  color: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.55)`,
+                  borderColor: `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.22)`,
+                  background: `linear-gradient(180deg, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.10) 0%, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.03) 50%, rgba(0,0,0,0.25) 100%)`,
+                  boxShadow: `inset 0 1px 0 rgba(220,228,240,0.08), inset 0 -1px 0 rgba(0,0,0,0.40)`,
                 });
                 const dropItemStyle = (active: boolean) => active ? {
                   background: theme ? "rgba(255,255,255,0.12)" : `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.12)`,
@@ -640,7 +730,7 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                     {/* Stats button — opens dropdown */}
                     <button
                       onClick={() => setStatsDropOpen(o => !o)}
-                      className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md text-[8px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border flex items-center gap-1"
+                      className="hud-mono px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md text-[8px] sm:text-[9px] uppercase tracking-[0.14em] transition-all duration-150 border flex items-center gap-1"
                       style={activeStyle}
                     >
                       <span className="sm:hidden">Stats</span>
@@ -649,55 +739,64 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                         <path d="M0.5 0.5L4 4L7.5 0.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
                       </svg>
                     </button>
-                    {/* Dropdown */}
+                    {/* Dropdown — JARVIS chrome with corner brackets + scan line */}
                     {statsDropOpen && (
                       <div
-                        className="absolute top-full right-0 mt-1 z-50 rounded-lg overflow-hidden"
+                        className="absolute top-full right-0 mt-1.5 z-50 hud-panel hud-panel--all-corners jarvis-shimmer"
                         style={{
-                          minWidth: "110px",
-                          background: theme ? "rgba(20,22,28,0.97)" : "rgba(10,12,16,0.97)",
-                          border: theme ? "1px solid rgba(255,255,255,0.12)" : `1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.20)`,
-                          boxShadow: "0 8px 24px rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.4)",
+                          minWidth: "150px",
+                          padding: "4px",
                         }}
                       >
+                        <span className="hud-panel__corner-tr" />
+                        <span className="hud-panel__corner-bl" />
+                        {/* Top mini dossier label */}
+                        <div className="px-2 pt-1.5 pb-1 flex items-center gap-1.5 border-b border-white/[0.06]">
+                          <span className="hud-mono text-[8px] uppercase tracking-[0.20em] text-[var(--brand-hex)]">◢</span>
+                          <span className="hud-mono text-[8px] uppercase tracking-[0.20em] text-[var(--brand-hex)]/80">INDEX</span>
+                          <span className="hud-pulse-dot ml-auto" style={{ background: "#4ade80", width: 5, height: 5 }} />
+                        </div>
                         <Link
                           href="/league/teams"
-                          className="flex items-center gap-2 px-3 py-2 text-[9px] font-black uppercase tracking-[0.1em] transition-colors duration-100 hover:brightness-125"
+                          className="hud-row flex items-center gap-2 px-2.5 py-2 mt-0.5 rounded hud-mono text-[10px] uppercase tracking-[0.16em] transition-all duration-150 hover:translate-x-0.5"
                           style={dropItemStyle(teamsActive)}
                           onClick={() => setStatsDropOpen(false)}
                         >
-                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <svg width="11" height="11" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <circle cx="3" cy="4" r="1.5" stroke="currentColor" strokeWidth="1.1" fill="none"/>
                             <circle cx="7" cy="4" r="1.5" stroke="currentColor" strokeWidth="1.1" fill="none"/>
                             <path d="M0.8 9 C0.8 7.3 1.8 6.5 3 6.5 C4.2 6.5 5.2 7.3 5.2 9" stroke="currentColor" strokeWidth="1.1" fill="none" strokeLinecap="round"/>
                             <path d="M4.8 9 C4.8 7.3 5.8 6.5 7 6.5 C8.2 6.5 9.2 7.3 9.2 9" stroke="currentColor" strokeWidth="1.1" fill="none" strokeLinecap="round"/>
                           </svg>
                           Teams
+                          <span className="ml-auto text-[8px] opacity-50">▸</span>
                         </Link>
                         <Link
                           href="/standings"
-                          className="flex items-center gap-2 px-3 py-2 text-[9px] font-black uppercase tracking-[0.1em] transition-colors duration-100 hover:brightness-125"
+                          className="hud-row flex items-center gap-2 px-2.5 py-2 rounded hud-mono text-[10px] uppercase tracking-[0.16em] transition-all duration-150 hover:translate-x-0.5"
                           style={dropItemStyle(stndActive)}
                           onClick={() => setStatsDropOpen(false)}
                         >
-                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <svg width="11" height="11" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <rect x="0.5" y="6.5" width="2" height="3" rx="0.5" fill="currentColor" opacity="0.9"/>
                             <rect x="4" y="3.5" width="2" height="6" rx="0.5" fill="currentColor" opacity="0.9"/>
                             <rect x="7.5" y="0.5" width="2" height="9" rx="0.5" fill="currentColor" opacity="0.9"/>
                           </svg>
                           Standings
+                          <span className="ml-auto text-[8px] opacity-50">▸</span>
                         </Link>
                         <Link
                           href="/stats"
-                          className="flex items-center gap-2 px-3 py-2 text-[9px] font-black uppercase tracking-[0.1em] transition-colors duration-100 hover:brightness-125"
+                          className="hud-row flex items-center gap-2 px-2.5 py-2 rounded hud-mono text-[10px] uppercase tracking-[0.16em] transition-all duration-150 hover:translate-x-0.5"
                           style={dropItemStyle(statsActive)}
                           onClick={() => setStatsDropOpen(false)}
                         >
-                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <svg width="11" height="11" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <circle cx="5" cy="5" r="3.5" stroke="currentColor" strokeWidth="1.2"/>
                             <circle cx="5" cy="5" r="1.2" fill="currentColor"/>
                           </svg>
                           Player Stats
+                          <span className="ml-auto text-[8px] opacity-50">▸</span>
                         </Link>
                       </div>
                     )}
@@ -705,10 +804,14 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                 );
               })()}
 
-              {/* BarnCentre — TV icon */}
+              {/* BarnCentre — TV icon (metallic) */}
               <Link
                 href="/barncentre"
-                className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md transition-all duration-150 border flex items-center justify-center text-[#C9A84C]/80 border-[#C9A84C]/30 bg-[#C9A84C]/[0.07] hover:text-[#C9A84C] hover:border-[#C9A84C]/55 hover:bg-[#C9A84C]/[0.13]"
+                className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md transition-all duration-150 border flex items-center justify-center text-[#C9A84C]/85 border-[#C9A84C]/35 hover:text-[#C9A84C] hover:border-[#C9A84C]/60"
+                style={{
+                  background: "linear-gradient(180deg, rgba(201,168,76,0.16) 0%, rgba(201,168,76,0.05) 50%, rgba(0,0,0,0.25) 100%)",
+                  boxShadow: "inset 0 1px 0 rgba(255,228,170,0.15), inset 0 -1px 0 rgba(0,0,0,0.45)",
+                }}
                 title="BarnCentre"
               >
                 {/* TV icon */}
@@ -728,31 +831,73 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                 return (
                   <Link
                     href="/players"
-                    className={`px-1.5 sm:px-2 py-1.5 sm:py-2 rounded-md text-[8px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border flex items-center justify-center ${
-                      cortexActive
-                        ? "bg-[#a78bfa]/15 text-[#a78bfa] border-[#a78bfa]/50 shadow-[0_0_8px_rgba(167,139,250,0.20)]"
-                        : "text-[#a78bfa]/50 border-[#a78bfa]/20 bg-[#a78bfa]/[0.04] hover:text-[#a78bfa]/80 hover:border-[#a78bfa]/40 hover:bg-[#a78bfa]/10"
-                    }`}
+                    className="px-1.5 sm:px-2 py-1.5 sm:py-2 rounded-md text-[8px] sm:text-[9px] transition-all duration-150 border flex items-center justify-center"
+                    style={cortexActive ? {
+                      color: "#a78bfa",
+                      borderColor: "rgba(167,139,250,0.55)",
+                      background: "linear-gradient(180deg, rgba(167,139,250,0.32) 0%, rgba(167,139,250,0.14) 50%, rgba(0,0,0,0.20) 100%)",
+                      boxShadow: "0 0 10px rgba(167,139,250,0.22), inset 0 1px 0 rgba(220,210,255,0.20), inset 0 -1px 0 rgba(0,0,0,0.40)",
+                    } : {
+                      color: "rgba(167,139,250,0.65)",
+                      borderColor: "rgba(167,139,250,0.25)",
+                      background: "linear-gradient(180deg, rgba(167,139,250,0.10) 0%, rgba(167,139,250,0.03) 50%, rgba(0,0,0,0.25) 100%)",
+                      boxShadow: "inset 0 1px 0 rgba(220,210,255,0.10), inset 0 -1px 0 rgba(0,0,0,0.40)",
+                    }}
                   >
                     <MiniCortex />
                   </Link>
                 );
               })()}
 
-              {/* Logout button */}
+              {/* Logout button (metallic red) */}
               <button
                 onClick={handleLogout}
                 title="Logout"
                 aria-label="Logout"
-                className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md text-[10px] sm:text-[9px] font-black uppercase tracking-normal transition-all duration-150 border flex items-center justify-center text-[#f87171]/80 border-[#f87171]/30 bg-[#f87171]/[0.07] hover:text-[#f87171] hover:border-[#f87171]/55 hover:bg-[#f87171]/[0.13]"
+                className="hud-mono px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md text-[10px] sm:text-[9px] uppercase tracking-[0.14em] transition-all duration-150 border flex items-center justify-center text-[#f87171]/85 border-[#f87171]/35 hover:text-[#f87171] hover:border-[#f87171]/60"
+                style={{
+                  background: "linear-gradient(180deg, rgba(248,113,113,0.16) 0%, rgba(248,113,113,0.05) 50%, rgba(0,0,0,0.25) 100%)",
+                  boxShadow: "inset 0 1px 0 rgba(255,200,200,0.15), inset 0 -1px 0 rgba(0,0,0,0.45)",
+                }}
               >
                 <span className="sm:hidden leading-none">✕</span>
                 <span className="hidden sm:inline">Logout</span>
               </button>
             </div>
+            {/* HUD scan-line under the header — slow horizontal sweep, decorative only */}
+            <span
+              aria-hidden
+              className="absolute bottom-0 left-0 right-0 h-px pointer-events-none overflow-hidden"
+              style={{ background: `linear-gradient(90deg, transparent, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.55), transparent)`, opacity: 0.7 }}
+            />
+            <span
+              aria-hidden
+              className="absolute -bottom-px left-0 h-px w-24 pointer-events-none"
+              style={{
+                background: `linear-gradient(90deg, transparent, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.85), transparent)`,
+                animation: "headerSweep 5.5s linear infinite",
+              }}
+            />
+            <style jsx>{`
+              @keyframes headerSweep {
+                0%   { transform: translateX(0); }
+                100% { transform: translateX(100vw); }
+              }
+            `}</style>
           </header>
 
-          {children}
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={pathname}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              className="flex-1 flex flex-col min-w-0"
+            >
+              {children}
+            </motion.div>
+          </AnimatePresence>
         </div>
       </div>
       </PiPProvider>

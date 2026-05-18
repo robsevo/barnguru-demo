@@ -197,10 +197,14 @@ function GameCard({ g }: { g: Game }) {
   const gcShadow = isLive ? "rgba(74,222,128,0.35)" : isFinal ? "rgba(248,113,113,0.35)" : "rgba(251,191,36,0.35)";
   const gcBorder = isLive ? "rgba(74,222,128,0.45)" : isFinal ? "rgba(248,113,113,0.45)" : "rgba(251,191,36,0.45)";
 
-  // Glossy glass cards — shiny effect, strong button feel
+  // HUD-styled cards — corner brackets via ::before/::after (hud-panel--all-corners helper)
   const cardCls = live
-    ? "border-[1.5px] border-[#4ade80]/[0.38] bg-gradient-to-b from-white/[0.20] via-white/[0.08] to-transparent backdrop-blur-sm cursor-pointer active:scale-[0.97] transition-all duration-150 shadow-[0_10px_40px_rgba(0,0,0,0.90),0_0_24px_rgba(74,222,128,0.18),0_2px_6px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.32),inset_0_-1px_0_rgba(0,0,0,0.40),inset_1px_0_0_rgba(255,255,255,0.10),inset_-1px_0_0_rgba(255,255,255,0.10)] hover:shadow-[0_10px_40px_rgba(0,0,0,0.95),0_0_32px_rgba(74,222,128,0.28),inset_0_1px_0_rgba(255,255,255,0.36),inset_0_-1px_0_rgba(0,0,0,0.45)] hover:border-[#4ade80]/[0.55] hover:bg-gradient-to-b hover:from-white/[0.24] hover:via-white/[0.10]"
-    : "border-[1.5px] border-[#C9A84C]/[0.30] bg-gradient-to-b from-[#C9A84C]/[0.06] via-white/[0.04] to-transparent backdrop-blur-sm cursor-pointer active:scale-[0.97] transition-all duration-150 shadow-[0_8px_32px_rgba(0,0,0,0.85),0_0_18px_rgba(201,168,76,0.12),0_2px_6px_rgba(0,0,0,0.60),inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-1px_0_rgba(0,0,0,0.40),inset_1px_0_0_rgba(201,168,76,0.04),inset_-1px_0_0_rgba(201,168,76,0.04)] hover:shadow-[0_8px_32px_rgba(0,0,0,0.90),0_0_24px_rgba(201,168,76,0.22),inset_0_1px_0_rgba(255,255,255,0.25)] hover:border-[#C9A84C]/[0.50] hover:from-[#C9A84C]/[0.10] hover:via-white/[0.06]";
+    ? "hud-panel hud-panel--all-corners cursor-pointer active:scale-[0.97] transition-all duration-150 hover:shadow-[0_0_24px_rgba(74,222,128,0.35)]"
+    : isFinal
+    ? "hud-panel hud-panel--all-corners cursor-pointer active:scale-[0.97] transition-all duration-150 hover:opacity-90"
+    : "hud-panel hud-panel--all-corners cursor-pointer active:scale-[0.97] transition-all duration-150 hover:shadow-[0_0_18px_rgba(251,191,36,0.25)]";
+
+  const cardThemeColor = live ? "#4ade80" : isFinal ? "#f87171" : "#fbbf24";
 
   const homeClr = TEAM_COLORS[g.home_team] ?? "#C9A84C";
   const awayClr = TEAM_COLORS[g.away_team] ?? "#94a3b8";
@@ -273,8 +277,11 @@ function GameCard({ g }: { g: Game }) {
   const rightClr = rightIsSeries ? "text-[#C9A84C]/75" : countdownClr;
 
   return (
-    <Link href={`/game/${g.game_id}`} className="block shrink-0 w-[132px]">
-    <div className={`relative group flex flex-col justify-center gap-1 px-2 py-1.5 w-full rounded-xl transition-all duration-200 border ${cardCls}`}>
+    <Link href={`/game/${g.game_id}`} className="block shrink-0 w-[140px]">
+    <div className={`relative group flex flex-col justify-center gap-1 px-2 py-1.5 w-full ${cardCls}`}
+      style={{ ["--hud-corner" as string]: `${cardThemeColor}aa` }}>
+      <span className="hud-panel__corner-tr" />
+      <span className="hud-panel__corner-bl" />
       {row(g.away_team, g.away_score, awayWins, false)}
       {row(g.home_team, g.home_score, homeWins, true)}
 
@@ -283,13 +290,13 @@ function GameCard({ g }: { g: Game }) {
         {live && !isInt && (
           <span className="w-1.5 h-1.5 rounded-full bg-[#4ade80] shadow-[0_0_6px_rgba(74,222,128,0.9)] animate-pulse shrink-0" />
         )}
-        <span className={`text-[11px] font-black tracking-wider uppercase truncate ${
-          live && !isInt ? "text-[#4ade80]" : isFinal ? "text-white/20" : labelClr
+        <span className={`hud-mono text-[10px] tracking-[0.16em] uppercase truncate ${
+          live && !isInt ? "text-[#4ade80]" : isFinal ? "text-white/30" : labelClr
         }`}>
           {hideScores && (isLive || isFinal) && !isInt ? "—" : label}
         </span>
         {(isInt || !hideScores) && rightText && (
-          <span className={`text-[11px] font-black font-mono tabular-nums ml-auto shrink-0 ${rightClr}`}>
+          <span className={`hud-mono text-[10px] tabular-nums ml-auto shrink-0 ${rightClr}`}>
             {rightText}
           </span>
         )}
@@ -355,8 +362,10 @@ function DateSep({ date }: { date: string }) {
     weekday: "short", month: "short", day: "numeric",
   });
   return (
-    <div className="flex flex-col items-center justify-center px-2 shrink-0">
-      <span className="text-[8px] font-black tracking-[0.2em] uppercase text-white/30 whitespace-nowrap underline underline-offset-2 decoration-white/20">
+    <div className="flex flex-col items-center justify-center px-2 shrink-0 relative">
+      <span className="absolute -left-0.5 top-1/2 -translate-y-1/2 hud-mono text-[7px]" style={{ color: "var(--brand-hex)", opacity: 0.5 }}>▶</span>
+      <span className="hud-mono text-[8px] tracking-[0.22em] uppercase whitespace-nowrap"
+        style={{ color: "rgba(255,255,255,0.40)", textShadow: "0 0 6px rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.25)" }}>
         {label}
       </span>
     </div>
@@ -456,7 +465,7 @@ export default function ScoreboardBar() {
   return (
     <div className="select-none">
       {/* Label strip */}
-      <div className="flex items-center justify-center gap-2 border-b border-[#C9A84C]/[0.18] h-8 relative" style={{ background: "linear-gradient(to bottom, rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.04), transparent)" }}>
+      <div className="flex items-center justify-center gap-2 border-b border-[#C9A84C]/[0.18] h-6 relative" style={{ background: "linear-gradient(to bottom, rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.04), transparent)" }}>
         {theme && (
           <button
             onClick={clearTheme}
@@ -470,7 +479,10 @@ export default function ScoreboardBar() {
             ? "bg-[#4ade80]/80 border-[#4ade80]/60 shadow-[0_0_7px_rgba(74,222,128,0.75)] animate-pulse"
             : "bg-[#ef4444]/70 border-[#ef4444]/50 shadow-[0_0_5px_rgba(239,68,68,0.45)]"
         }`} />
-        <span className="text-[10px] font-semibold uppercase tracking-[0.25em] text-[#c8cdd2]/40">Live Games</span>
+        <span className="hud-mono text-[10px] tracking-[0.25em] uppercase"
+          style={{ color: hasLive ? "rgba(74,222,128,0.85)" : "rgba(200,205,210,0.50)" }}>
+          ◢ LIVE GAMES
+        </span>
         {hasLive && (
           <button
             onClick={toggleHideAll}
@@ -486,7 +498,7 @@ export default function ScoreboardBar() {
       </div>
 
       {games.length > 0 && (
-        <div className="flex items-center border-b border-[#C9A84C]/[0.14] py-1.5" style={{ background: "linear-gradient(to bottom, rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.025), transparent)" }}>
+        <div className="flex items-center border-b border-[#C9A84C]/[0.14] py-1" style={{ background: "linear-gradient(to bottom, rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.025), transparent)" }}>
           <Arrow dir="left" onClick={() => scroll("left")} visible={canLeft} />
           <div
             ref={scrollRef}

@@ -53,10 +53,25 @@ export default function LoginPage() {
       <div className="fixed inset-0 -z-10" style={{ background: "radial-gradient(ellipse 70% 50% at 50% 0%, rgba(210,215,225,0.06) 0%, transparent 65%)" }} />
       <div className="fixed inset-0 -z-10" style={{ background: "radial-gradient(ellipse 60% 40% at 50% 100%, rgba(0,0,0,0.5) 0%, transparent 70%)" }} />
 
+      {/* HUD dossier strip */}
+      <div className="fixed top-3 left-3 right-3 z-20 flex items-center gap-2 flex-wrap">
+        <span className="hud-mono text-[10px] uppercase tracking-[0.20em] text-[#C9A84C]" aria-hidden>◢</span>
+        <span className="hud-mono text-[10px] uppercase tracking-[0.20em] text-[#C9A84C]">
+          GRTZKY · ACCESS PORTAL
+        </span>
+        <span className="hud-mono text-[9px] uppercase tracking-[0.16em] text-white/40">· auth required</span>
+        <span className="ml-auto flex items-center gap-1">
+          <span className="hud-pulse-dot" style={{ background: "#4ade80" }} />
+          <span className="hud-mono jarvis-flicker text-[9px] uppercase tracking-[0.18em] text-[#4ade80]">ONLINE</span>
+        </span>
+      </div>
+
       {/* Card */}
       <div className="relative z-10 w-full max-w-sm mx-4">
-        <div className="rounded-2xl border border-[#C9A84C]/[0.18] bg-gradient-to-b from-[#0d0f13]/95 via-[#0a0b0e]/90 to-[#080909]/95 backdrop-blur-2xl overflow-hidden
-          shadow-[0_40px_100px_rgba(0,0,0,0.90),0_8px_32px_rgba(0,0,0,0.70),inset_0_1px_0_rgba(220,225,235,0.10),inset_0_-1px_0_rgba(0,0,0,0.40)]">
+        <div className="hud-panel hud-panel--all-corners jarvis-shimmer relative overflow-hidden"
+          style={{ boxShadow: "0 40px 100px rgba(0,0,0,0.90),0 8px 32px rgba(0,0,0,0.70),inset 0 1px 0 rgba(220,225,235,0.10),inset 0 -1px 0 rgba(0,0,0,0.40)" }}>
+          <span className="hud-panel__corner-tr" />
+          <span className="hud-panel__corner-bl" />
 
           {/* Branding — always visible */}
           <button
@@ -94,7 +109,7 @@ export default function LoginPage() {
 
             <form onSubmit={handleSubmit} className="px-6 py-5 space-y-3.5">
               <div className="space-y-1">
-                <label className="text-[8px] font-black uppercase tracking-[0.25em] text-white/25">Username</label>
+                <label className="hud-mono text-[9px] uppercase tracking-[0.22em] text-[var(--brand-hex)]/55">Username</label>
                 <input
                   type="text"
                   value={username}
@@ -107,7 +122,7 @@ export default function LoginPage() {
               </div>
 
               <div className="space-y-1">
-                <label className="text-[8px] font-black uppercase tracking-[0.25em] text-white/25">Password</label>
+                <label className="hud-mono text-[9px] uppercase tracking-[0.22em] text-[var(--brand-hex)]/55">Password</label>
                 <div className="relative">
                   <input
                     type={showPw ? "text" : "password"}
@@ -126,7 +141,7 @@ export default function LoginPage() {
               </div>
 
               <div className="space-y-1">
-                <label className="text-[8px] font-black uppercase tracking-[0.25em] text-white/25">Secret Word</label>
+                <label className="hud-mono text-[9px] uppercase tracking-[0.22em] text-[var(--brand-hex)]/55">Secret Word</label>
                 <div className="relative">
                   <input
                     type={showSecret ? "text" : "password"}
@@ -150,9 +165,22 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-2.5 rounded-xl border border-white/[0.10] bg-gradient-to-b from-white/[0.08] to-white/[0.04] text-[10px] font-black uppercase tracking-[0.22em] text-white/60 hover:border-white/[0.22] hover:text-white/85 hover:from-white/[0.12] hover:to-white/[0.06] active:scale-[0.98] transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_4px_16px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.08),inset_0_-1px_0_rgba(0,0,0,0.35)]"
+                className="hud-mono jarvis-glitch-hover w-full py-3 rounded border text-[11px] uppercase tracking-[0.28em] active:scale-[0.98] transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                style={{
+                  color: "#C9A84C",
+                  borderColor: "rgba(201,168,76,0.55)",
+                  background: "linear-gradient(180deg, rgba(201,168,76,0.32) 0%, rgba(201,168,76,0.14) 50%, rgba(0,0,0,0.20) 100%)",
+                  boxShadow: "0 0 14px rgba(201,168,76,0.25), inset 0 1px 0 rgba(255,228,170,0.18), inset 0 -1px 0 rgba(0,0,0,0.45)",
+                }}
               >
-                {loading ? "Authenticating…" : "Enter"}
+                {loading ? (
+                  <>
+                    <span className="hud-pulse-dot" style={{ background: "#C9A84C" }} />
+                    AUTHENTICATING…
+                  </>
+                ) : (
+                  <>◢ ENTER ◣</>
+                )}
               </button>
 
               {/* Home screen tip */}

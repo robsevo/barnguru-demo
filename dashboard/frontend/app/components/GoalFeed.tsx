@@ -291,7 +291,7 @@ export default function GoalFeed() {
 
       <div ref={stripRef}>
           {/* Toggle strip */}
-          <div className={`w-full flex items-center border-b h-7 transition-all duration-200 select-none ${flashing && feedEnabled ? "goal-flash" : "bg-[#0a0b0d]/80 backdrop-blur-sm border-white/[0.10]"}`}>
+          <div className={`w-full flex items-center border-b h-6 transition-all duration-200 select-none ${flashing && feedEnabled ? "goal-flash" : "bg-[#0a0b0d]/80 backdrop-blur-sm border-white/[0.10]"}`}>
             {/* Left slot — notification bell toggle */}
             <div className="w-10 shrink-0 flex items-center justify-center">
               <button
@@ -314,8 +314,8 @@ export default function GoalFeed() {
               className="flex-1 flex items-center justify-center gap-1.5 h-full hover:bg-white/[0.04] transition-colors duration-200 group"
             >
               <GoalLight state={!feedEnabled ? "off" : flashing ? "on" : hasLive ? "standby" : "off"} />
-              <span className={`text-[9px] font-semibold tracking-[0.25em] uppercase transition-colors duration-200 ${feedEnabled ? "text-white/20 group-hover:text-white/40" : "text-white/12"}`}>
-                Live Goal Feed
+              <span className={`hud-mono text-[10px] tracking-[0.25em] uppercase transition-colors duration-200 ${feedEnabled ? "text-white/30 group-hover:text-white/55" : "text-white/15"}`}>
+                ◢ LIVE GOAL FEED ◣
               </span>
               {unread > 0 && (
                 <span className={`flex items-center justify-center h-4 min-w-[16px] px-1 rounded-full text-[8px] font-black leading-none transition-all duration-200 ${feedEnabled ? "bg-[#ef4444] text-white shadow-[0_0_8px_rgba(239,68,68,0.7)]" : "bg-white/[0.08] text-white/25"}`}>
@@ -327,15 +327,48 @@ export default function GoalFeed() {
               </span>
             </button>
 
-            {/* Right slot — on/off toggle, same width as left slot */}
-            <div className="w-10 shrink-0 flex items-center justify-center">
+            {/* Right slot — JARVIS feed-arm/disarm toggle */}
+            <div className="w-12 shrink-0 flex items-center justify-center">
               <button
                 onClick={toggleFeed}
-                title={feedEnabled ? "Turn off feed" : "Turn on feed"}
-                className="flex items-center"
+                title={feedEnabled ? "Disarm feed" : "Arm feed"}
+                aria-label={feedEnabled ? "Disarm feed" : "Arm feed"}
+                className="group relative flex items-center transition-transform duration-150 active:scale-[0.92]"
               >
-                <div className={`relative w-7 h-3.5 rounded-full transition-all duration-200 ${feedEnabled ? "bg-[#ef4444]/60" : "bg-white/10"}`}>
-                  <div className={`absolute top-0.5 h-2.5 w-2.5 rounded-full transition-all duration-200 ${feedEnabled ? "right-0.5 bg-white shadow-[0_0_4px_rgba(239,68,68,0.8)]" : "left-0.5 bg-white/30"}`} />
+                {/* Track — slotted rail with inset shadow */}
+                <div
+                  className="relative h-4 w-9 rounded-sm overflow-hidden flex items-center"
+                  style={{
+                    background: feedEnabled
+                      ? "linear-gradient(180deg, rgba(239,68,68,0.45) 0%, rgba(127,29,29,0.55) 100%)"
+                      : "linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(0,0,0,0.40) 100%)",
+                    border: `1px solid ${feedEnabled ? "rgba(239,68,68,0.65)" : "rgba(255,255,255,0.10)"}`,
+                    boxShadow: feedEnabled
+                      ? "inset 0 1px 4px rgba(0,0,0,0.55), 0 0 8px rgba(239,68,68,0.40)"
+                      : "inset 0 1px 4px rgba(0,0,0,0.65)",
+                  }}
+                >
+                  {/* Tick marks for futuristic gauge feel */}
+                  <div className="absolute inset-y-1 left-1 right-1 flex justify-between pointer-events-none">
+                    {[0,1,2,3,4].map(i => (
+                      <span key={i} className="w-px"
+                        style={{ background: feedEnabled ? "rgba(255,200,200,0.30)" : "rgba(255,255,255,0.10)" }} />
+                    ))}
+                  </div>
+                  {/* Thumb */}
+                  <div
+                    className="absolute h-3 w-3 rounded-[2px] transition-all duration-200"
+                    style={{
+                      top: 1,
+                      left: feedEnabled ? "calc(100% - 14px)" : "1px",
+                      background: feedEnabled
+                        ? "linear-gradient(180deg, #fff 0%, #fca5a5 50%, #ef4444 100%)"
+                        : "linear-gradient(180deg, rgba(220,228,240,0.75) 0%, rgba(150,160,170,0.55) 100%)",
+                      boxShadow: feedEnabled
+                        ? "0 0 8px rgba(239,68,68,0.85), inset 0 1px 0 rgba(255,255,255,0.55), inset 0 -1px 0 rgba(0,0,0,0.45)"
+                        : "0 1px 3px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -1px 0 rgba(0,0,0,0.40)",
+                    }}
+                  />
                 </div>
               </button>
             </div>

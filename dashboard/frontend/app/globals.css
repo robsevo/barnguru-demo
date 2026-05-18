@@ -30,6 +30,21 @@
   --foreground:      #f1f5f9;
   /* glossy card shadow — top-edge highlight + depth */
   --shadow-glass:    0 4px 28px rgba(0,0,0,0.70), inset 0 1px 0 rgba(255,255,255,0.13), inset 0 0 0 1px rgba(255,255,255,0.03);
+
+  /* ─── HUD tokens ─────────────────────────────────────────────────────────
+     Used by app/components/hud/* primitives. Brand-aware via --brand-r/g/b
+     so gold, Cortex purple, and team colors all reuse the same chrome.       */
+  --hud-corner:      rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.55);
+  --hud-corner-dim:  rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.20);
+  --hud-scan-color:  rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.18);
+  --hud-scan:        linear-gradient(180deg, transparent 0%, var(--hud-scan-color) 50%, transparent 100%);
+  --hud-grid:
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 32px),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 32px);
+  --hud-glow-sm:     0 0 8px rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.35);
+  --hud-glow-md:     0 0 16px rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.30);
+  --hud-glow-lg:     0 0 32px rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.22);
+  --font-mono:       ui-monospace, "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
 }
 
 /* Base font scale — bumps rem-based sizes site-wide */
@@ -238,4 +253,287 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .team-logo-link:active {
   transform: scale(0.88);
   transition-duration: 0.07s;
+}
+
+/* ─── HUD chrome ─────────────────────────────────────────────────────────────
+   Utility classes + keyframes consumed by app/components/hud/*.
+   All animations gate on prefers-reduced-motion: no-preference.              */
+
+.hud-mono { font-family: var(--font-mono); letter-spacing: 0.04em; }
+
+/* Metallic JARVIS button — drop this on any <button> for instant chrome.
+   Inherits the active --brand-r/g/b vars so it themes with the page. */
+.hud-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4em;
+  padding: 0.55em 1.1em;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.85);
+  border: 1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.40);
+  border-radius: 0.375rem;
+  background:
+    linear-gradient(180deg,
+      rgba(220,228,240,0.10) 0%,
+      rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.18) 22%,
+      rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.08) 55%,
+      rgba(0,0,0,0.30) 100%);
+  box-shadow:
+    0 2px 10px rgba(0,0,0,0.55),
+    0 0 14px rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.18),
+    inset 0 1px 0 rgba(255,255,255,0.18),
+    inset 0 -1px 0 rgba(0,0,0,0.45),
+    inset 0 -6px 10px -6px rgba(0,0,0,0.50);
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+.hud-btn:hover {
+  color: rgba(var(--brand-r), var(--brand-g), var(--brand-b), 1);
+  border-color: rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.70);
+  box-shadow:
+    0 4px 18px rgba(0,0,0,0.65),
+    0 0 22px rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.32),
+    inset 0 1px 0 rgba(255,255,255,0.25),
+    inset 0 -1px 0 rgba(0,0,0,0.50),
+    inset 0 -6px 10px -6px rgba(0,0,0,0.50);
+}
+.hud-btn:active {
+  transform: translateY(1px);
+  box-shadow:
+    0 1px 4px rgba(0,0,0,0.65),
+    inset 0 2px 6px rgba(0,0,0,0.55),
+    inset 0 1px 0 rgba(255,255,255,0.08);
+}
+.hud-btn[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Corner-bracketed panel. Brackets are pseudo-elements positioned at the four
+   corners; --hud-corner color is brand-aware so panels respect team theming.
+   The 5-stop vertical gradient + multi-inset shadows give a brushed-steel
+   metallic depth — top-edge highlight, mid body, bottom-edge shadow.        */
+.hud-panel {
+  position: relative;
+  background:
+    linear-gradient(180deg,
+      rgba(220,228,240,0.045) 0%,
+      rgba(var(--card-base-r), var(--card-base-g), var(--card-base-b), 0.92) 10%,
+      rgba(var(--card-base-r), var(--card-base-g), var(--card-base-b), 0.96) 35%,
+      rgba(var(--card-mid-r),  var(--card-mid-g),  var(--card-mid-b),  0.99) 75%,
+      rgba(0,0,0,0.50) 100%),
+    linear-gradient(160deg,
+      rgba(var(--card-base-r), var(--card-base-g), var(--card-base-b), 0.92) 0%,
+      rgba(var(--card-mid-r),  var(--card-mid-g),  var(--card-mid-b),  0.97) 100%);
+  border: 1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.22);
+  border-radius: 0.5rem;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow:
+    0 6px 28px rgba(0,0,0,0.75),
+    0 2px 6px rgba(0,0,0,0.50),
+    0 0 24px rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.06),
+    inset 0 2px 0 rgba(220,228,240,0.14),
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    inset 0 -1px 0 rgba(0,0,0,0.45),
+    inset 0 -10px 16px -10px rgba(0,0,0,0.55),
+    inset 1px 0 0 rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.10),
+    inset -1px 0 0 rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.10);
+  overflow: hidden;
+}
+.hud-panel::before,
+.hud-panel::after {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--hud-corner);
+  pointer-events: none;
+}
+.hud-panel::before { top: 4px;    left: 4px;    border-right: none; border-bottom: none; }
+.hud-panel::after  { bottom: 4px; right: 4px;   border-left: none;  border-top: none; }
+
+/* Optional second pair of corners (use .hud-panel--all-corners) */
+.hud-panel--all-corners > .hud-panel__corner-tr,
+.hud-panel--all-corners > .hud-panel__corner-bl {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--hud-corner);
+  pointer-events: none;
+}
+.hud-panel--all-corners > .hud-panel__corner-tr { top: 4px; right: 4px; border-left: none; border-bottom: none; }
+.hud-panel--all-corners > .hud-panel__corner-bl { bottom: 4px; left: 4px; border-right: none; border-top: none; }
+
+/* Scan line — slow vertical sweep inside a panel */
+.hud-scan {
+  position: absolute;
+  inset: 0;
+  background: var(--hud-scan);
+  pointer-events: none;
+  opacity: 0.7;
+  mix-blend-mode: screen;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hud-scan { animation: hudScan 6s linear infinite; }
+}
+
+@keyframes hudScan {
+  0%   { transform: translateY(-100%); opacity: 0; }
+  8%   { opacity: 0.7; }
+  92%  { opacity: 0.7; }
+  100% { transform: translateY(100%); opacity: 0; }
+}
+
+/* Soft pulse — used by status dots, ring threshold glow */
+@keyframes hudPulse {
+  0%, 100% { opacity: 0.55; box-shadow: 0 0 0 0 rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.45); }
+  50%      { opacity: 1.00; box-shadow: 0 0 0 5px rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0); }
+}
+
+.hud-pulse-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.85);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hud-pulse-dot { animation: hudPulse 1.8s ease-in-out infinite; }
+}
+
+/* Brief glitch — used on errors / alarm states (optional) */
+@keyframes hudGlitch {
+  0%, 100% { transform: translate(0, 0); }
+  20% { transform: translate(-1px, 0.5px); }
+  40% { transform: translate(1px, -0.5px); }
+  60% { transform: translate(-0.5px, 1px); }
+  80% { transform: translate(0.5px, -1px); }
+}
+
+/* Ring gauge fill — used by RingGauge.tsx initial reveal */
+@keyframes ringFill {
+  from { stroke-dashoffset: var(--ring-circ, 100); }
+  to   { stroke-dashoffset: var(--ring-target, 0); }
+}
+
+/* Waveform draw — used by Waveform.tsx */
+@keyframes waveformDraw {
+  from { stroke-dashoffset: var(--wave-len, 500); }
+  to   { stroke-dashoffset: 0; }
+}
+
+/* Subtle hover lift for HUD list rows */
+.hud-row {
+  transition: background-color 150ms ease, transform 150ms ease;
+}
+.hud-row:hover {
+  background-color: rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.05);
+}
+
+/* Faint background grid for full-page chrome (HudGrid component) */
+.hud-grid-bg {
+  position: absolute;
+  inset: 0;
+  background-image: var(--hud-grid);
+  background-position: center;
+  pointer-events: none;
+  mask-image: radial-gradient(ellipse 70% 70% at 50% 40%, rgba(0,0,0,0.8) 0%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 40%, rgba(0,0,0,0.8) 0%, transparent 80%);
+}
+
+/* ─── JARVIS micro-interactions ────────────────────────────────────────────
+   Reusable text/element effects for that "interacting with a futuristic
+   intelligence" feel. All cheap CSS — no JS, no perf cost on video pages. */
+
+/* Typing-in reveal (use on titles for a glyph-by-glyph entrance) */
+@keyframes jarvisType {
+  from { clip-path: inset(0 100% 0 0); }
+  to   { clip-path: inset(0 0 0 0); }
+}
+.jarvis-type {
+  display: inline-block;
+  animation: jarvisType 1.4s steps(40, end) 1 both;
+}
+
+/* Subtle horizontal jitter on hover — feels like real-time data corruption */
+@keyframes jarvisGlitch {
+  0%, 100% { transform: translate(0, 0); filter: hue-rotate(0deg); }
+  20% { transform: translate(-0.5px, 0.3px); }
+  40% { transform: translate(0.5px, -0.3px); filter: hue-rotate(2deg); }
+  60% { transform: translate(-0.3px, 0.5px); }
+  80% { transform: translate(0.3px, -0.5px); filter: hue-rotate(-2deg); }
+}
+.jarvis-glitch-hover:hover {
+  animation: jarvisGlitch 0.35s steps(5, end) 1;
+}
+
+/* Subtle continuous flicker — for ambient "live signal" feel */
+@keyframes jarvisFlicker {
+  0%, 100%   { opacity: 1; }
+  47%        { opacity: 1; }
+  48%        { opacity: 0.72; }
+  49%        { opacity: 1; }
+  90%        { opacity: 1; }
+  91%        { opacity: 0.85; }
+  92%        { opacity: 1; }
+}
+.jarvis-flicker { animation: jarvisFlicker 5.4s ease-in-out infinite; }
+
+/* Holographic shimmer band — sweeps over an element on first paint */
+@keyframes jarvisShimmer {
+  0%   { transform: translateX(-100%); opacity: 0; }
+  20%  { opacity: 1; }
+  80%  { opacity: 1; }
+  100% { transform: translateX(200%); opacity: 0; }
+}
+.jarvis-shimmer { position: relative; overflow: hidden; isolation: isolate; }
+.jarvis-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg,
+    transparent 35%,
+    rgba(255,255,255,0.12) 50%,
+    transparent 65%);
+  pointer-events: none;
+  z-index: 1;
+  animation: jarvisShimmer 2.2s ease-out 1 both;
+}
+
+/* Vertical data-stream rain (decorative) — drops glyph slivers down a track */
+@keyframes jarvisDataRain {
+  0%   { transform: translateY(-100%); opacity: 0; }
+  10%  { opacity: 0.85; }
+  90%  { opacity: 0.85; }
+  100% { transform: translateY(900%); opacity: 0; }
+}
+
+/* Soft elevate-on-hover for interactive cards */
+.jarvis-lift {
+  transition: transform 200ms cubic-bezier(0.22,1,0.36,1), box-shadow 200ms ease;
+}
+.jarvis-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.6), 0 0 18px rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.25);
+}
+
+/* Reduced motion — kill every decorative animation */
+@media (prefers-reduced-motion: reduce) {
+  .hud-scan,
+  .hud-pulse-dot,
+  .hud-row,
+  .jarvis-type,
+  .jarvis-glitch-hover,
+  .jarvis-flicker,
+  .jarvis-shimmer::after,
+  .jarvis-lift {
+    animation: none !important;
+    transition: none !important;
+  }
 }

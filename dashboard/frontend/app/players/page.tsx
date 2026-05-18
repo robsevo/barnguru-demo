@@ -6,6 +6,7 @@ import { TEAM_COLORS, TEAM_SECONDARY, normalizePlayerName } from "@/utils/nhl";
 import TeamLogoLink from "@/components/TeamLogoLink";
 import { useTheme } from "@/utils/themeContext";
 import { SeasonContextPill, useSeasonContext } from "@/utils/contextToggle";
+import { HudPanel, HudGrid, NeuralGraph, HudTabBar, HudBadge, type HudTab } from "@/components/hud";
 
 function darkBlend(hex: string, darkness = 0.88): string {
   const base = [9, 10, 12];
@@ -785,6 +786,8 @@ function Section({
   children,
   className = "",
   defaultOpen = false,
+  domain,
+  currentDomain,
 }: {
   title: string;
   icon?: string;
@@ -792,26 +795,32 @@ function Section({
   children: React.ReactNode;
   className?: string;
   defaultOpen?: boolean;
+  /** If both `domain` and `currentDomain` are provided and they don't match,
+   *  the section renders nothing (used by Cortex domain tabs). */
+  domain?: string;
+  currentDomain?: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  if (domain && currentDomain && domain !== currentDomain) return null;
   return (
     <div
-      className={`rounded-2xl overflow-hidden w-full shadow-[0_4px_16px_rgba(0,0,0,0.50)] ${className}`}
-      style={{
-        background: `linear-gradient(160deg, rgba(var(--card-base-r),var(--card-base-g),var(--card-base-b),0.90) 0%, rgba(var(--card-mid-r),var(--card-mid-g),var(--card-mid-b),0.97) 100%)`,
-        border: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.14)`,
-      }}
+      className={`hud-panel w-full ${className}`}
     >
+      <span className="hud-panel__corner-tr" />
+      <span className="hud-panel__corner-bl" />
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-2.5 px-4 py-3 border-b border-white/[0.06] hover:bg-white/[0.03] transition-colors text-left"
+        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 border-b border-white/[0.05] hover:bg-white/[0.03] transition-colors text-left"
       >
-        <span className="w-0.5 h-4 rounded-full shrink-0" style={{ background: `rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.50)` }} />
-        <p className="text-[11px] font-black uppercase tracking-[0.12em] text-white/70">{title}</p>
+        <span className="hud-mono text-[10px] uppercase tracking-[0.18em] text-[var(--brand-hex)] opacity-80 select-none">◢</span>
+        <p className="hud-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-primary)] truncate">{title}</p>
         {count !== undefined && (
-          <span className="text-[9px] font-mono text-white/20">{count}</span>
+          <span className="hud-mono text-[9px] tracking-[0.14em] text-[var(--text-secondary)]">[{count}]</span>
         )}
-        <span className="ml-auto text-[#a78bfa]/40 text-[10px] transition-transform duration-200" style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }}>▾</span>
+        <span className="ml-auto hud-mono text-[10px] transition-transform duration-200"
+          style={{ color: "var(--brand-hex)", opacity: 0.55, transform: open ? "rotate(0deg)" : "rotate(-90deg)" }}>
+          ▾
+        </span>
       </button>
       {open && <div className="p-3 space-y-1.5">{children}</div>}
     </div>
@@ -1021,6 +1030,19 @@ export default function PlayersPage() {
   const [rapmCategory,   setRapmCategory]   = useState<"ev_off" | "ev_def" | "pp" | "pk">("ev_off");
   const [xgaList,        setXgaList]        = useState<XGAEntry[] | null>(null);
   const [edgeSkateMetric, setEdgeSkateMetric] = useState<"max_speed_kmh" | "avg_speed_kmh" | "distance_per_game_km">("max_speed_kmh");
+
+  // Cortex domain tabs — replaces the flat list of 19 sections with a focused
+  // 6-domain command deck. Default to OFFENSE.
+  type CortexDomain = "offense" | "defense" | "form" | "net" | "roster" | "value";
+  const [cortexDomain, setCortexDomain] = useState<CortexDomain>("offense");
+  const cortexDomainTabs: HudTab[] = [
+    { id: "offense", label: "Offense" },
+    { id: "defense", label: "Defense" },
+    { id: "form",    label: "Form & Motion" },
+    { id: "net",     label: "Goaltending" },
+    { id: "roster",  label: "Roster Intel" },
+    { id: "value",   label: "Value" },
+  ];
   const [edgeShotMetric,  setEdgeShotMetric]  = useState<"max_shot_speed_mph" | "avg_shot_speed_mph" | "hard_shot_count">("max_shot_speed_mph");
   const [stSide,          setStSide]          = useState<"PP" | "PK">("PP");
 
@@ -1239,7 +1261,7 @@ export default function PlayersPage() {
 
   return (
     <main
-      className="min-h-screen p-3 sm:p-6 max-w-3xl mx-auto w-full overflow-x-hidden"
+      className="relative min-h-screen p-3 sm:p-6 max-w-5xl mx-auto w-full overflow-x-hidden"
       style={{
         /* Force Cortex purple brand vars — overrides any active team theme on this page */
         "--brand-r": "167", "--brand-g": "139", "--brand-b": "250",
@@ -1248,18 +1270,32 @@ export default function PlayersPage() {
         "--card-mid-r":  "10", "--card-mid-g":  "8",  "--card-mid-b":  "16",
       } as React.CSSProperties}
     >
+      <HudGrid />
 
-      {/* ── Page Header ── */}
-      <div
-        className="mb-5 rounded-xl backdrop-blur-sm shadow-[inset_0_1px_0_rgba(167,139,250,0.10),0_4px_24px_rgba(0,0,0,0.60)] overflow-hidden"
-        style={{
-          background: `linear-gradient(160deg, rgba(18,14,28,0.95) 0%, rgba(10,8,16,0.98) 100%)`,
-          border: `1px solid rgba(167,139,250,0.14)`,
-        }}
-      >
-        <div className="px-6 py-3 border-b border-[#a78bfa]/[0.08] flex items-center justify-center gap-3">
-          <div className="h-px flex-1 bg-gradient-to-r from-transparent to-[#a78bfa]/20" />
-          <div className="flex items-center gap-2.5">
+      {/* ── HUD Dossier Header ── */}
+      <div className="mb-3 flex items-center gap-2 flex-wrap relative z-10">
+        <span className="hud-mono text-[10px] uppercase tracking-[0.18em] text-[#a78bfa]" aria-hidden>
+          ◢
+        </span>
+        <span className="hud-mono text-[10px] uppercase tracking-[0.18em] text-[#a78bfa]">
+          CORTEX · NEURAL CORE
+        </span>
+        <span className="hud-mono text-[9px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+          · LEAGUE INTELLIGENCE FEED · LIVE
+        </span>
+        <span className="ml-auto flex items-center gap-1">
+          <span className="hud-pulse-dot" style={{ background: "#4ade80" }} />
+          <span className="hud-mono jarvis-flicker text-[9px] uppercase tracking-[0.18em] text-[#4ade80]">
+            MONITORING
+          </span>
+        </span>
+      </div>
+
+      {/* ── Page Header (HUD-wrapped Neural Core hero) ── */}
+      <HudPanel themeColor="#a78bfa" scanline allCorners className="mb-5 jarvis-shimmer">
+        <div className="relative px-4 py-4 sm:py-5 grid grid-cols-1 md:grid-cols-[1fr_minmax(220px,300px)_1fr] items-center gap-3">
+          <div className="hidden md:block h-px bg-gradient-to-r from-transparent to-[#a78bfa]/30" />
+          <div className="flex items-center justify-center gap-3">
             <p
               className="font-black italic tracking-[0.10em] text-[22px] sm:text-[26px] bg-gradient-to-r from-white via-[#c4b5fd] to-[#a78bfa] bg-clip-text text-transparent leading-none"
               style={{ fontFamily: "var(--font-condensed)" }}
@@ -1268,14 +1304,35 @@ export default function PlayersPage() {
             </p>
             <CortexIcon size={36} />
           </div>
-          <div className="h-px flex-1 bg-gradient-to-l from-transparent to-[#a78bfa]/20" />
+          <div className="hidden md:block h-px bg-gradient-to-l from-transparent to-[#a78bfa]/30" />
+
+          {/* Decorative neural graph backdrop — radiates from the centered name */}
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-30">
+            <NeuralGraph
+              decorative
+              center=""
+              nodes={[
+                { id: "a", label: "", weight: 0.5 },
+                { id: "b", label: "", weight: 0.7 },
+                { id: "c", label: "", weight: 0.4 },
+                { id: "d", label: "", weight: 0.6 },
+                { id: "e", label: "", weight: 0.8 },
+                { id: "f", label: "", weight: 0.3 },
+                { id: "g", label: "", weight: 0.55 },
+                { id: "h", label: "", weight: 0.65 },
+              ]}
+              themeColor="#a78bfa"
+              width={420}
+              height={120}
+            />
+          </div>
         </div>
-        <div className="px-6 py-2.5 text-center">
-          <p className="text-[9px] font-light uppercase tracking-[0.14em] text-[#a78bfa]/40">
+        <div className="px-6 py-2 text-center border-t border-white/[0.04]">
+          <p className="hud-mono text-[9px] font-light uppercase tracking-[0.18em] text-[#a78bfa]/50">
             Player Intelligence · Advanced Models · Live Leaderboards
           </p>
         </div>
-      </div>
+      </HudPanel>
 
       {/* ── About pill ── */}
       <CortexAbout />
@@ -1373,7 +1430,7 @@ export default function PlayersPage() {
 
       {/* Not found */}
       {playerNotFound && !playerLoading && (
-        <div className="mb-5 rounded-2xl border border-white/[0.07] bg-white/[0.02] px-6 py-8 text-center">
+        <div className="mb-5 hud-panel hud-panel--all-corners px-6 py-8 text-center">
           <p className="text-white/50 text-sm">No player found for &ldquo;{query}&rdquo;.</p>
           <p className="text-white/25 text-xs mt-1">Only skaters and goalies with enough ice time this season are available.</p>
         </div>
@@ -1392,23 +1449,106 @@ export default function PlayersPage() {
         </div>
       )}
 
-      {/* ── Leaderboards header ── */}
-      <div className="flex items-center gap-3 mb-1">
-        <span className="text-[9px] font-black uppercase tracking-[0.28em] text-[#a78bfa]/40">Leaderboards</span>
-        <div className="flex-1 h-px bg-gradient-to-r from-[#a78bfa]/15 to-transparent" />
+      {/* ── PULSE — 4 live-highlight tiles ──────────────────────────── */}
+      {(rising || falling || warList || injuries) && (
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4 relative z-10">
+        {([
+          { kind: "Hottest", color: "#4ade80", domain: "form" as const,   item: rising?.[0],
+            line: rising?.[0]?.delta != null ? `+${rising[0].delta!.toFixed(2)} EWMA` : null },
+          { kind: "Coldest", color: "#f87171", domain: "form" as const,   item: falling?.[0],
+            line: falling?.[0]?.delta != null ? `${falling[0].delta!.toFixed(2)} EWMA` : null },
+          { kind: "Top WAR", color: "#a78bfa", domain: "value" as const,  item: warList?.[0],
+            line: warList?.[0]?.war != null ? `+${warList[0].war!.toFixed(2)} WAR` : null },
+          { kind: "Alerts",  color: "#fbbf24", domain: "roster" as const, item: injuries?.[0],
+            line: injuries?.[0]?.status ?? null },
+        ]).map((tile) => {
+          const it = tile.item;
+          const empty = !it;
+          const teamAbbrev = (it as { team?: string } | undefined)?.team ?? "";
+          const name = (it as { player_name?: string } | undefined)?.player_name ?? "";
+          return (
+            <HudPanel
+              key={tile.kind}
+              themeColor={tile.color}
+              padded={false}
+              className="group cursor-pointer jarvis-lift"
+            >
+              <button
+                onClick={() => {
+                  if (name) {
+                    router.push(`/players/${encodeURIComponent(normalizePlayerName(name))}`);
+                  } else {
+                    setCortexDomain(tile.domain);
+                  }
+                }}
+                className="w-full text-left p-2.5 flex flex-col gap-1.5"
+                type="button"
+              >
+                <div className="flex items-center gap-1.5">
+                  <span className="hud-pulse-dot" style={{ background: tile.color }} />
+                  <span className="hud-mono text-[9px] uppercase tracking-[0.20em]" style={{ color: tile.color }}>
+                    {tile.kind}
+                  </span>
+                </div>
+                {empty ? (
+                  <p className="hud-mono text-[10px] uppercase tracking-[0.16em] text-white/30 py-1">— no data —</p>
+                ) : (
+                  <div className="flex items-center gap-2 min-w-0">
+                    {teamAbbrev ? (
+                      <span
+                        className="shrink-0"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          router.push(`/teams/${teamAbbrev}`);
+                        }}
+                      >
+                        <TeamLogo team={teamAbbrev} size={32} className="shrink-0" />
+                      </span>
+                    ) : null}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-white/90 truncate leading-tight">{name}</p>
+                      <p className="hud-mono text-[10px] text-white/50 tabular-nums truncate">
+                        {teamAbbrev}{tile.line ? ` · ${tile.line}` : ""}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-white/25 mt-auto pt-0.5">
+                  ▸ open {tile.domain}
+                </span>
+              </button>
+            </HudPanel>
+          );
+        })}
+      </div>
+      )}
+
+      {/* ── Domain Tab Bar ─────────────────────────────────────────── */}
+      <div className="mb-3 mt-1 relative z-10 flex items-center gap-2"
+        style={{ borderBottom: "1px solid rgba(167,139,250,0.20)" }}>
+        <span className="hud-mono text-[10px] uppercase tracking-[0.20em] text-[#a78bfa] shrink-0 pr-2">
+          ▌ Intelligence
+        </span>
+        <HudTabBar
+          tabs={cortexDomainTabs}
+          active={cortexDomain}
+          onChange={(id) => setCortexDomain(id as CortexDomain)}
+          themeColor="#a78bfa"
+          scroll
+        />
       </div>
 
-      {/* ── Sections ── */}
-      <div className="flex flex-col gap-4">
+      {/* ── Sections — domain-filtered ────────────────────────────── */}
+      <div className="grid gap-3 md:grid-cols-2 relative z-10">
 
         {/* Hot Streaks */}
-        <Section title="Hot Streak" count={rising?.length}>
+        <Section title="Hot Streak" count={rising?.length} domain="form" currentDomain={cortexDomain} defaultOpen>
           <InfoTip tip="EWMA xGF/60 trending upward over last 5–10 games vs. the player's own season baseline. Delta = how far above their own average they are running right now. Bayesian-shrunk. Source: GRTZKY model 2.13." />
           {rising === null ? <SectionLoading /> :
            rising.length === 0 ? <SectionEmpty msg="Nothing to report yet." /> : (
            <div className="space-y-1">
              {rising.map((p, i) => (
-               <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
+               <div key={i} className="hud-row flex items-center gap-3 px-3 py-2 rounded-md border border-white/[0.06] hover:border-[var(--brand-hex)]/40 transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                  {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                  <div className="flex-1 min-w-0">
                    <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
@@ -1422,7 +1562,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* Scoring Leaders */}
-        <Section title={seasonCtx === "playoffs" ? "Scoring Leaders · Playoffs" : "Scoring Leaders · Regular Season"} count={scoringCategories?.[scoringSort]?.length}>
+        <Section title={seasonCtx === "playoffs" ? "Scoring Leaders · Playoffs" : "Scoring Leaders · Regular Season"} count={scoringCategories?.[scoringSort]?.length} domain="offense" currentDomain={cortexDomain} defaultOpen>
           {scoringCategories === null ? <SectionLoading /> :
            (scoringCategories[scoringSort]?.length ?? 0) === 0 ? <SectionEmpty msg={seasonCtx === "playoffs" ? "No 2025-26 playoff stats available yet." : "NHL stats unavailable."} /> : (
            <>
@@ -1451,7 +1591,7 @@ export default function PlayersPage() {
                {scoringCategories[scoringSort].map((p, i) => {
                  const unit = scoringSort === "points" ? "pts" : scoringSort === "goals" ? "G" : "A";
                  return (
-                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.name)}>
+                   <div key={i} className="hud-row flex items-center gap-3 px-3 py-2 rounded-md border border-white/[0.06] hover:border-[var(--brand-hex)]/40 transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.name)}>
                      <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
                      {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                      <div className="flex-1 min-w-0">
@@ -1468,7 +1608,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* Goalie Leaders — context-aware NHL counting stats (W / Sv% / GAA / SO) */}
-        <Section title={seasonCtx === "playoffs" ? "Goalie Leaders · Playoffs" : "Goalie Leaders · Regular Season"} count={goalieLeaders?.[goalieLeaderSort]?.length}>
+        <Section title={seasonCtx === "playoffs" ? "Goalie Leaders · Playoffs" : "Goalie Leaders · Regular Season"} count={goalieLeaders?.[goalieLeaderSort]?.length} domain="net" currentDomain={cortexDomain} defaultOpen>
           {goalieLeaders === null ? <SectionLoading /> :
            (goalieLeaders[goalieLeaderSort]?.length ?? 0) === 0 ? <SectionEmpty msg={seasonCtx === "playoffs" ? "No 2025-26 playoff goalie stats yet." : "NHL goalie stats unavailable."} /> : (
            <>
@@ -1505,7 +1645,7 @@ export default function PlayersPage() {
                    goalieLeaderSort === "shutouts" ? "SO" :
                                                      "";
                  return (
-                   <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.name)}>
+                   <div key={i} className="hud-row flex items-center gap-3 px-3 py-2 rounded-md border border-white/[0.06] hover:border-[var(--brand-hex)]/40 transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.name)}>
                      <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
                      {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                      <div className="flex-1 min-w-0">
@@ -1522,14 +1662,14 @@ export default function PlayersPage() {
         </Section>
 
         {/* Clutch Index Leaderboard */}
-        <Section title="Clutch Index" count={clutchList?.length}>
+        <Section title="Clutch Index" count={clutchList?.length} domain="offense" currentDomain={cortexDomain} defaultOpen>
           <InfoTip tip="Win Probability Added (WPA) above expectation. Clutch Index = actual WPA/60 minus expected WPA/60 given the opportunities faced. Positive = outperforms in high-leverage moments. Bayesian-shrunk (small samples near zero). Source: GRTZKY model 2.29." />
           {clutchList === null ? <SectionLoading /> : clutchList.length === 0 ? <SectionEmpty msg="Run train-clutch to populate." /> : (
             <div className="space-y-1 max-h-72 overflow-y-auto pr-1 mt-2">
               {clutchList.map((p, i) => {
                 const color = (p.value ?? 0) >= 0.05 ? "#4ade80" : (p.value ?? 0) >= 0 ? "#fbbf24" : "#f87171";
                 return (
-                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
+                  <div key={i} className="hud-row flex items-center gap-3 px-3 py-2 rounded-md border border-white/[0.06] hover:border-[var(--brand-hex)]/40 transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
                     {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
@@ -1545,14 +1685,14 @@ export default function PlayersPage() {
         </Section>
 
         {/* Hot Hand Leaderboard */}
-        <Section title="Hot Hand Score" count={hotHandList?.length}>
+        <Section title="Hot Hand Score" count={hotHandList?.length} domain="offense" currentDomain={cortexDomain} defaultOpen>
           <InfoTip tip="5-game burst signal. Hot Hand Score = z-score of (goals − expected goals) over last 5 games vs. player's own season variance. +2.0 = 2 standard deviations above their own mean — runaway hot streak. Bayesian-shrunk by career GP. Source: GRTZKY model 2.28." />
           {hotHandList === null ? <SectionLoading /> : hotHandList.length === 0 ? <SectionEmpty msg="Run train-hot-hand to populate." /> : (
             <div className="space-y-1 max-h-72 overflow-y-auto pr-1 mt-2">
               {hotHandList.map((p, i) => {
                 const color = (p.value ?? 0) >= 1 ? "#4ade80" : (p.value ?? 0) >= 0 ? "#fbbf24" : "#f87171";
                 return (
-                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
+                  <div key={i} className="hud-row flex items-center gap-3 px-3 py-2 rounded-md border border-white/[0.06] hover:border-[var(--brand-hex)]/40 transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
                     {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
@@ -1572,13 +1712,13 @@ export default function PlayersPage() {
         </Section>
 
         {/* Cold Streaks */}
-        <Section title="Cold Streak" count={falling?.length}>
+        <Section title="Cold Streak" count={falling?.length} domain="form" currentDomain={cortexDomain} defaultOpen>
           <InfoTip tip="EWMA xGF/60 trending downward over last 5–10 games vs. the player's own season baseline. Delta = how far below their own average they are running right now. Bayesian-shrunk. Source: GRTZKY model 2.13." />
           {falling === null ? <SectionLoading /> :
            falling.length === 0 ? <SectionEmpty msg="Nothing to report yet." /> : (
            <div className="space-y-1">
              {falling.map((p, i) => (
-               <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
+               <div key={i} className="hud-row flex items-center gap-3 px-3 py-2 rounded-md border border-white/[0.06] hover:border-[var(--brand-hex)]/40 transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                  {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                  <div className="flex-1 min-w-0">
                    <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
@@ -1592,7 +1732,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* Top Performers */}
-        <Section title="WAR Rankings" count={warList?.length}>
+        <Section title="WAR Rankings" count={warList?.length} domain="value" currentDomain={cortexDomain} defaultOpen>
           <InfoTip tip="Wins Above Replacement. Combines offensive (xGF) and defensive (xGA) contributions relative to a replacement-level player at the same position. League average = 0; elite forwards/D-men typically 3–6 WAR. Source: GRTZKY model 2.25." />
           {warList === null ? <SectionLoading /> :
            warList.length === 0 ? <SectionEmpty msg="Run compute-war to populate." /> : (
@@ -1600,7 +1740,7 @@ export default function PlayersPage() {
              {warList.map((p, i) => {
                const warColor = p.war != null && p.war >= 2 ? "#4ade80" : p.war != null && p.war >= 0 ? "#fbbf24" : "#f87171";
                return (
-                 <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
+                 <div key={i} className="hud-row flex items-center gap-3 px-3 py-2 rounded-md border border-white/[0.06] hover:border-[var(--brand-hex)]/40 transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                    {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                    <div className="flex-1 min-w-0">
                      <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
@@ -1615,14 +1755,14 @@ export default function PlayersPage() {
         </Section>
 
         {/* Injuries */}
-        <Section title="Injured / DTD" count={injuries?.length}>
+        <Section title="Injured / DTD" count={injuries?.length} domain="roster" currentDomain={cortexDomain} defaultOpen>
           {injuries === null ? <SectionLoading /> :
            injuries.length === 0 ? <SectionEmpty msg="No injury data synced yet. Run sync." /> : (
            <div className="space-y-1">
              {injuries.slice(0, 10).map((p, i) => {
                const statusColor = p.status === "Out" ? "#f87171" : p.status === "DTD" ? "#fbbf24" : p.status === "Questionable" ? "#fb923c" : "#94a3b8";
                return (
-                 <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
+                 <div key={i} className="hud-row flex items-center gap-3 px-3 py-2 rounded-md border border-white/[0.06] hover:border-[var(--brand-hex)]/40 transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                    {p.team_code && <TeamLogo team={p.team_code} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team_code}`)} />}
                    <div className="flex-1 min-w-0">
                      <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
@@ -1637,13 +1777,13 @@ export default function PlayersPage() {
         </Section>
 
         {/* Quality of Teammates */}
-        <Section title="Quality of Teammates" count={qotList?.length}>
+        <Section title="Quality of Teammates" count={qotList?.length} domain="roster" currentDomain={cortexDomain} defaultOpen>
           <InfoTip tip="Quality of Teammates (QoT): average RAPM of a player's on-ice linemates at even strength, weighted by shared ice time. High QoT = plays with skilled partners. Compare with QoC (Quality of Competition) to understand context. Source: GRTZKY model 2.3." />
           {qotList === null ? <SectionLoading /> :
            qotList.length === 0 ? <SectionEmpty msg="Run train-matchup to populate." /> : (
            <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
              {qotList.map((p, i) => (
-               <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
+               <div key={i} className="hud-row flex items-center gap-3 px-3 py-2 rounded-md border border-white/[0.06] hover:border-[var(--brand-hex)]/40 transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                  {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                  <div className="flex-1 min-w-0">
                    <p className="text-[11px] font-semibold text-white/80 truncate">{p.player_name}</p>
@@ -1661,7 +1801,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* Recent Moves */}
-        <Section title="Recent Moves">
+        <Section title="Recent Moves" domain="roster" currentDomain={cortexDomain} defaultOpen>
           {txns === null ? <SectionLoading /> :
            txns.length === 0 ? <SectionEmpty msg="No transactions in the last 7 days. Run sync." /> : (
            <div className="space-y-1 max-h-72 overflow-y-auto pr-1">
@@ -1702,7 +1842,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* Team Disruption */}
-        <Section title="Team Disruption">
+        <Section title="Team Disruption" domain="roster" currentDomain={cortexDomain} defaultOpen>
           <InfoTip tip="Roster Disruption Index (RDI): measures how much a team's lineup has been destabilized by trades, injuries, and call-ups over the last 30 days. High RDI = chemistry disrupted, depth tested. Correlates with short-term performance drops. Source: GRTZKY model 2.19." />
           {rdi === null ? <SectionLoading /> :
            rdi.filter(t => (t.n_moves_30d ?? 0) > 0).length === 0 ? (
@@ -1740,7 +1880,7 @@ export default function PlayersPage() {
         {/* ─────────────────────────────────────────────────────────────────── */}
 
         {/* EDGE Skating Leaderboard */}
-        <Section title="EDGE Skating" count={edgeSkating?.length}>
+        <Section title="EDGE Skating" count={edgeSkating?.length} domain="form" currentDomain={cortexDomain} defaultOpen>
           {/* Tab bar */}
           <div className="flex gap-1.5 mb-2 flex-wrap">
             {([
@@ -1760,7 +1900,7 @@ export default function PlayersPage() {
               {edgeSkating.map((p, i) => {
                 const unit = edgeSkateMetric === "distance_per_game_km" ? " km/g" : " km/h";
                 return (
-                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
+                  <div key={i} className="hud-row flex items-center gap-3 px-3 py-2 rounded-md border border-white/[0.06] hover:border-[var(--brand-hex)]/40 transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
                     {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
@@ -1776,7 +1916,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* EDGE Shot Speed Leaderboard */}
-        <Section title="EDGE Shot Speed" count={edgeShotSpeed?.length}>
+        <Section title="EDGE Shot Speed" count={edgeShotSpeed?.length} domain="form" currentDomain={cortexDomain} defaultOpen>
           <div className="flex gap-1.5 mb-2 flex-wrap">
             {([
               { k: "max_shot_speed_mph",  label: "Max Shot Speed" },
@@ -1794,7 +1934,7 @@ export default function PlayersPage() {
               {edgeShotSpeed.map((p, i) => {
                 const unit = edgeShotMetric === "hard_shot_count" ? "" : " mph";
                 return (
-                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
+                  <div key={i} className="hud-row flex items-center gap-3 px-3 py-2 rounded-md border border-white/[0.06] hover:border-[var(--brand-hex)]/40 transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
                     {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
@@ -1810,7 +1950,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* Goalie Leaderboard */}
-        <Section title="Goalies" count={goalieList?.length}>
+        <Section title="Goalies" count={goalieList?.length} domain="net" currentDomain={cortexDomain} defaultOpen>
           <div className="flex gap-1.5 mb-2 flex-wrap">
             {([
               { k: "gsax",     label: "GSAx",        tip: "Goals Saved Above Expected" },
@@ -1834,7 +1974,7 @@ export default function PlayersPage() {
                   ? `.${((p.value ?? 0) * 1000).toFixed(0)}`
                   : `${((p.value ?? 0) * 100).toFixed(1)}%`;
                 return (
-                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
+                  <div key={i} className="hud-row flex items-center gap-3 px-3 py-2 rounded-md border border-white/[0.06] hover:border-[var(--brand-hex)]/40 transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
                     {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
@@ -1853,7 +1993,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* PP & PK xGF/60 */}
-        <Section title="Special Teams xGF/60">
+        <Section title="Special Teams xGF/60" domain="offense" currentDomain={cortexDomain} defaultOpen>
           <div className="flex gap-1.5 mb-2">
             {(["PP", "PK"] as const).map(side => (
               <button key={side}
@@ -1873,7 +2013,7 @@ export default function PlayersPage() {
               {ppList === null ? <SectionLoading /> : ppList.length === 0 ? <SectionEmpty msg="Run train-special-teams." /> : (
                 <div className="space-y-1 max-h-72 overflow-y-auto pr-1">
                   {ppList.map((p, i) => (
-                    <div key={i} className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] transition-all cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
+                    <div key={i} className="hud-row flex items-center gap-2.5 px-3 py-2 rounded-md border border-white/[0.06] hover:border-[var(--brand-hex)]/40 transition-all cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                       <span className="text-[9px] font-mono text-white/25 w-4 shrink-0">{p.rank}</span>
                       {p.team && <TeamLogo team={p.team} size={34} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                       <p className="text-[11px] font-semibold text-white/80 flex-1 truncate">{p.player_name}</p>
@@ -1888,7 +2028,7 @@ export default function PlayersPage() {
               {pkList === null ? <SectionLoading /> : pkList.length === 0 ? <SectionEmpty msg="Run train-special-teams." /> : (
                 <div className="space-y-1 max-h-72 overflow-y-auto pr-1">
                   {pkList.map((p, i) => (
-                    <div key={i} className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] transition-all cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
+                    <div key={i} className="hud-row flex items-center gap-2.5 px-3 py-2 rounded-md border border-white/[0.06] hover:border-[var(--brand-hex)]/40 transition-all cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                       <span className="text-[9px] font-mono text-white/25 w-4 shrink-0">{p.rank}</span>
                       {p.team && <TeamLogo team={p.team} size={34} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                       <p className="text-[11px] font-semibold text-white/80 flex-1 truncate">{p.player_name}</p>
@@ -1902,7 +2042,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* xG Leaderboard */}
-        <Section title="xGF/60 Leaders" count={xgList?.length}>
+        <Section title="xGF/60 Leaders" count={xgList?.length} domain="offense" currentDomain={cortexDomain} defaultOpen>
           <InfoTip tip="Expected Goals For per 60 minutes (EWMA — exponentially weighted 20-game rolling average, λ=0.96). Measures how much offense a player drives at even strength, independent of finishing luck. League average ≈ 4.09 xGF/60. Source: GRTZKY model 2.13." />
           {xgList === null ? <SectionLoading /> : xgList.length === 0 ? <SectionEmpty msg="Run compute-ewma to populate." /> : (
             <div className="space-y-1 max-h-72 overflow-y-auto pr-1 mt-2">
@@ -1910,7 +2050,7 @@ export default function PlayersPage() {
                 const above = (p.value ?? 0) - 4.09;
                 const color = above >= 2 ? "#4ade80" : above >= 0.5 ? "#fbbf24" : "#94a3b8";
                 return (
-                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
+                  <div key={i} className="hud-row flex items-center gap-3 px-3 py-2 rounded-md border border-white/[0.06] hover:border-[var(--brand-hex)]/40 transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
                     {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
@@ -1926,14 +2066,14 @@ export default function PlayersPage() {
         </Section>
 
         {/* CDR Leaderboard */}
-        <Section title="Composite Defensive Rating" count={cdrList?.length}>
+        <Section title="Composite Defensive Rating" count={cdrList?.length} domain="defense" currentDomain={cortexDomain} defaultOpen>
           <InfoTip tip="CDR = 0.60×z(EV Def RAPM xGA) + 0.25×z(Takeaway/Giveaway ratio) + 0.15×z(−xGA/60 adj). All components z-scored; DZS% adjusts xGA so heavy defensive deployment is credited. Positive = better than average defender. Source: GRTZKY model 2.26." />
           {cdrList === null ? <SectionLoading /> : cdrList.length === 0 ? <SectionEmpty msg="Run rate-def to populate." /> : (
             <div className="space-y-1 max-h-72 overflow-y-auto pr-1 mt-2">
               {cdrList.map((p, i) => {
                 const color = (p.value ?? 0) >= 1 ? "#4ade80" : (p.value ?? 0) >= 0 ? "#fbbf24" : "#f87171";
                 return (
-                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
+                  <div key={i} className="hud-row flex items-center gap-3 px-3 py-2 rounded-md border border-white/[0.06] hover:border-[var(--brand-hex)]/40 transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
                     {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
@@ -1953,7 +2093,7 @@ export default function PlayersPage() {
         </Section>
 
         {/* RAPM Leaderboard */}
-        <Section title="RAPM" count={rapmList?.length}>
+        <Section title="RAPM" count={rapmList?.length} domain="defense" currentDomain={cortexDomain} defaultOpen>
           <div className="flex gap-1.5 mb-2 flex-wrap">
             {([
               { k: "ev_off", label: "EV Off",  tip: "Even Strength Offensive RAPM" },
@@ -1974,7 +2114,7 @@ export default function PlayersPage() {
               {rapmList.map((p, i) => {
                 const color = (p.value ?? 0) >= 1 ? "#4ade80" : (p.value ?? 0) >= 0 ? "#fbbf24" : "#f87171";
                 return (
-                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
+                  <div key={i} className="hud-row flex items-center gap-3 px-3 py-2 rounded-md border border-white/[0.06] hover:border-[var(--brand-hex)]/40 transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
                     {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
@@ -1990,14 +2130,14 @@ export default function PlayersPage() {
         </Section>
 
         {/* xGA/60 Leaderboard */}
-        <Section title="xGA/60 (Defensive Wall)" count={xgaList?.length}>
+        <Section title="xGA/60 (Defensive Wall)" count={xgaList?.length} domain="defense" currentDomain={cortexDomain} defaultOpen>
           <InfoTip tip="On-ice expected goals against per 60 minutes at even strength. Lower = better — this player's line suppresses shot quality when on the ice. Source: GRTZKY RAPM model. Min 20 GP. Complements CDR (2.26) for identifying elite defensive forwards and D-men." />
           {xgaList === null ? <SectionLoading /> : xgaList.length === 0 ? <SectionEmpty msg="Run train-rapm to populate." /> : (
             <div className="space-y-1 max-h-72 overflow-y-auto pr-1 mt-2">
               {xgaList.map((p, i) => {
                 const color = (p.value ?? 99) <= 1.5 ? "#4ade80" : (p.value ?? 99) <= 2.5 ? "#fbbf24" : "#f87171";
                 return (
-                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.10] transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
+                  <div key={i} className="hud-row flex items-center gap-3 px-3 py-2 rounded-md border border-white/[0.06] hover:border-[var(--brand-hex)]/40 transition-all duration-150 cursor-pointer" onClick={() => handleRowClick(p.player_name)}>
                     <span className="text-[9px] font-mono text-white/25 w-4 shrink-0 text-right">{p.rank}</span>
                     {p.team && <TeamLogo team={p.team} size={40} className="shrink-0" onTeamClick={() => router.push(`/teams/${p.team}`)} />}
                     <div className="flex-1 min-w-0">
