@@ -161,13 +161,6 @@ export default function LandingPage() {
             <p className="text-[13px] text-white/60 leading-relaxed max-w-lg mx-auto mb-3">
               The live goal feed runs site-wide in real time. Every goal appears as a clickable alert at the top — tap it and you&apos;re at the game instantly. The NHL API registers goals the moment they happen, almost always before your stream catches up. That gap is your window. It&apos;s not a glitch — it&apos;s the fastest way to watch hockey.
             </p>
-            <div className="w-12 h-px bg-white/[0.12] mx-auto mb-3" />
-            <div className="max-w-lg mx-auto rounded-xl border border-[#fbbf24]/20 bg-[#fbbf24]/[0.04] px-4 py-3 mb-3 text-left">
-              <p className="text-[9px] font-semibold uppercase tracking-[0.22em] text-[#fbbf24]/60 mb-1.5">Ad Notice</p>
-              <p className="text-[13px] text-white/60 leading-relaxed">
-                The Dev is actively working to eliminate ads from this platform entirely. For now, on desktop, some may slip through. Use <span className="font-semibold text-white/80">Brave Browser</span> or an ad blocker extension until that&apos;s resolved.
-              </p>
-            </div>
           </div>
         </div>
         {/* Divider below about pill */}
