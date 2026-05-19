@@ -476,9 +476,9 @@ export default function ScoreboardBar() {
         {theme && (
           <button
             onClick={clearTheme}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-[9px] font-black uppercase tracking-[0.14em] px-2.5 py-[3px] rounded-md border transition-all duration-200 text-white/30 border-white/[0.10] bg-white/[0.03] hover:text-white/60 hover:border-white/[0.20] hover:bg-white/[0.06]"
+            className="absolute left-4 top-1/2 -translate-y-1/2 hud-mono text-[8px] font-black uppercase tracking-[0.10em] px-1.5 py-[1px] leading-none rounded-md border transition-all duration-200 whitespace-nowrap text-white/40 border-white/[0.12] bg-white/[0.03] hover:text-white/70 hover:border-white/[0.22] hover:bg-white/[0.06]"
           >
-            Reset Theme
+            reset
           </button>
         )}
         <span className={`h-2 w-2 rounded-full shrink-0 border transition-all duration-300 ${
@@ -493,13 +493,13 @@ export default function ScoreboardBar() {
         {hasLive && (
           <button
             onClick={toggleHideAll}
-            className={`absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-black uppercase tracking-[0.14em] px-2.5 py-[3px] rounded-md border transition-all duration-200 ${
+            className={`absolute right-4 top-1/2 -translate-y-1/2 hud-mono text-[8px] font-black uppercase tracking-[0.10em] px-1.5 py-[1px] leading-none rounded-md border transition-all duration-200 whitespace-nowrap ${
               hideAll
                 ? "text-[#C9A84C] border-[#C9A84C]/50 bg-[#C9A84C]/[0.12] shadow-[0_0_8px_rgba(201,168,76,0.15)]"
-                : "text-[#C9A84C]/50 border-[#C9A84C]/20 bg-[#C9A84C]/[0.04] hover:text-[#C9A84C]/80 hover:border-[#C9A84C]/35 hover:bg-[#C9A84C]/[0.08]"
+                : "text-[#C9A84C]/55 border-[#C9A84C]/22 bg-[#C9A84C]/[0.04] hover:text-[#C9A84C]/85 hover:border-[#C9A84C]/35 hover:bg-[#C9A84C]/[0.08]"
             }`}
           >
-            {hideAll ? "show scores" : "hide scores"}
+            {hideAll ? "show" : "hide"}
           </button>
         )}
       </div>
