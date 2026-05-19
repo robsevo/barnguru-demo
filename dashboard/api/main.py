@@ -715,20 +715,43 @@ async def scoreboard() -> dict:
     _today             = date.fromisoformat(today_str)
     yesterday_str      = (_today - timedelta(days=1)).isoformat()
     two_days_ago_str   = (_today - timedelta(days=2)).isoformat()
-    tomorrow_str       = (_today + timedelta(days=1)).isoformat()
-    keep_dates         = {today_str, yesterday_str, two_days_ago_str, tomorrow_str}
+    # Look 6 days forward — playoff rounds with only 4 teams left have very
+    # few games per day, so the strip needs a deeper future window to stay
+    # useful.
+    forward_dates = [(_today + timedelta(days=i)).isoformat() for i in range(1, 7)]
+    keep_dates    = {today_str, yesterday_str, two_days_ago_str, *forward_dates}
 
-    # Flatten last 2 days + today + tomorrow
+    # Flatten last 2 days + today + up to 6 days forward
     all_games: list[dict] = []
     date_labels: dict = {}
+    seen_game_ids: set[int] = set()
     for bucket in games_by_date:
         date_str = bucket.get("date", "")
         if date_str not in keep_dates:
             continue
         for g in bucket.get("games") or []:
             all_games.append(g)
-            if g.get("id"):
-                date_labels[g["id"]] = date_str
+            gid = g.get("id")
+            if gid:
+                date_labels[gid] = date_str
+                seen_game_ids.add(gid)
+
+    # NHL's /score/now usually only covers ~2 days. Supplement future dates
+    # from /schedule/now's gameWeek so the ECF schedule shows multiple days
+    # forward even though those games aren't live yet.
+    if isinstance(sched_raw, dict):
+        for bucket in sched_raw.get("gameWeek") or []:
+            date_str = bucket.get("date", "")
+            if date_str not in keep_dates:
+                continue
+            for g in bucket.get("games") or []:
+                gid = g.get("id")
+                if gid and gid in seen_game_ids:
+                    continue
+                all_games.append(g)
+                if gid:
+                    date_labels[gid] = date_str
+                    seen_game_ids.add(gid)
 
     normalised = []
     for g in all_games:

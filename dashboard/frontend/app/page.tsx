@@ -28,7 +28,11 @@ export default function LandingPage() {
       <div className="w-full max-w-2xl h-px bg-gradient-to-r from-transparent via-white/[0.10] to-transparent mb-3 relative z-10" />
 
       {/* Hero — animated HUD chrome surrounding the logo */}
-      <div className="text-center mb-2 max-w-2xl relative">
+      <div className="text-center mb-2 max-w-2xl">
+        {/* Inner wrapper anchors the rings to the logo only — the About
+            collapsible below sits outside so expanding it doesn't shove
+            the animation downward. */}
+        <div className="relative">
         {/* Iron Man rings backdrop */}
         <svg
           viewBox="0 0 600 600"
@@ -102,6 +106,7 @@ export default function LandingPage() {
         <p className="hud-mono text-[10px] sm:text-[13px] uppercase tracking-[0.28em] -mt-1 mb-6 bg-gradient-to-r from-[#C9A84C] via-[#E8D090] to-[#C9A84C] bg-clip-text text-transparent relative z-10">
           ◢ Bayesian&nbsp;·&nbsp;Analytics&nbsp;·&nbsp;Rating&nbsp;·&nbsp;Network ◣
         </p>
+        </div>
 
         <style jsx>{`
           @keyframes heroRotateSlow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

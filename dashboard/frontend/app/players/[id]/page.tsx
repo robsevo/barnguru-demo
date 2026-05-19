@@ -598,6 +598,7 @@ function StatInfoTip({ label, tip }: { label: string; tip: string }) {
 function StatRow({ label, value, tier, sub, tip }: {
   label: string; value: string; tier?: Tier; sub?: string; tip?: string;
 }) {
+  const valueColor = tier ? TIER_COLOR[tier] : null;
   return (
     <div className="py-2.5 border-b border-white/[0.05] last:border-0">
       <div className="flex items-center justify-between gap-3">
@@ -609,7 +610,15 @@ function StatRow({ label, value, tier, sub, tip }: {
           {sub && <p className="text-[9px] text-white/30 mt-0.5">{sub}</p>}
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
-          <span className="text-[12px] font-semibold font-mono text-white/85">{value}</span>
+          <span
+            className="text-[12px] font-semibold font-mono tabular-nums"
+            style={valueColor ? {
+              color: valueColor,
+              textShadow: `0 0 6px ${valueColor}55`,
+            } : { color: "rgba(255,255,255,0.85)" }}
+          >
+            {value}
+          </span>
           {tier && <TierBadge tier={tier} />}
         </div>
       </div>
@@ -3287,7 +3296,7 @@ export default function PlayerProfilePage() {
               }}
             />
             <div
-              className="relative h-20 w-20 sm:h-24 sm:w-24 rounded-full overflow-hidden"
+              className="jarvis-photo-frame relative h-20 w-20 sm:h-24 sm:w-24 rounded-full overflow-hidden"
               style={{
                 background: `radial-gradient(circle at 50% 40%, ${darkBlend(teamSecondary, 0.45)}, ${darkBlend(teamSecondary, 0.82)})`,
                 ...headshotRing,
@@ -3398,15 +3407,25 @@ export default function PlayerProfilePage() {
 
         {/* ── 2025-26 stats strip — flips between season + playoffs ── */}
         {nhlStats && (
-          <div className="border-t px-3 sm:px-5 py-3 flex items-center justify-center gap-2.5 sm:gap-4" style={{ borderColor: `${teamColor}20` }}>
-            <span className="text-[8px] sm:text-[9px] uppercase tracking-widest font-semibold"
-                  style={{ color: nhlContextFallback ? "rgba(251,191,36,0.55)" : "rgba(255,255,255,0.28)" }}
-                  title={nhlContextFallback
-                    ? "No data for the selected context — falling back to the other endpoint."
-                    : undefined}>
-              {seasonCtx === "playoffs" ? "2025-26 PO" : "2025-26"}
-              {nhlContextFallback && " · regular-season fallback"}
-            </span>
+          <div className="border-t px-3 sm:px-5 py-3 flex items-center justify-center gap-2.5 sm:gap-4 flex-wrap" style={{ borderColor: `${teamColor}20` }}>
+            {nhlContextFallback ? (
+              <span
+                className="hud-mono text-[8px] sm:text-[9px] uppercase tracking-[0.18em] rounded border px-1.5 py-0.5"
+                style={{
+                  color: "#fbbf24",
+                  borderColor: "rgba(251,191,36,0.45)",
+                  backgroundColor: "rgba(251,191,36,0.10)",
+                  textShadow: "0 0 6px rgba(251,191,36,0.45)",
+                }}
+                title="No data for the selected context — falling back to regular-season numbers."
+              >
+                {seasonCtx === "playoffs" ? "2025-26 · NO PO DATA · REG-SZN" : "2025-26"}
+              </span>
+            ) : (
+              <span className="text-[8px] sm:text-[9px] uppercase tracking-widest font-semibold text-white/30">
+                {seasonCtx === "playoffs" ? "2025-26 PO" : "2025-26"}
+              </span>
+            )}
             {isGoalie ? (
               <>
                 {[
@@ -3421,15 +3440,32 @@ export default function PlayerProfilePage() {
                   </div>
                 ))}
                 <div className="flex flex-col items-center min-w-0">
-                  <span className="text-xs sm:text-base font-black tabular-nums" style={{ color: teamColor }}>
+                  <span className="text-xs sm:text-base font-black tabular-nums"
+                    style={{
+                      color: nhlStats.sv_pct ? TIER_COLOR[svpctTier(nhlStats.sv_pct)] : teamColor,
+                      textShadow: nhlStats.sv_pct ? `0 0 6px ${TIER_COLOR[svpctTier(nhlStats.sv_pct)]}55` : undefined,
+                    }}>
                     {nhlStats.sv_pct ? `.${Math.round(nhlStats.sv_pct * 1000)}` : "—"}
                   </span>
                   <span className="text-[7px] sm:text-[8px] text-white/30 uppercase tracking-wider">SV%</span>
                 </div>
                 <div className="flex flex-col items-center min-w-0">
-                  <span className="text-xs sm:text-sm font-bold tabular-nums text-white/85">
-                    {nhlStats.gaa?.toFixed(2) ?? "—"}
-                  </span>
+                  {(() => {
+                    const gaa = nhlStats.gaa ?? null;
+                    // Lower GAA is better — derive a tier inline.
+                    const gaaTier: Tier | null = gaa == null ? null :
+                      gaa <= 2.40 ? "Elite" :
+                      gaa <= 2.70 ? "Above Average" :
+                      gaa <= 3.00 ? "Average" :
+                      gaa <= 3.40 ? "Below Average" : "Low";
+                    const col = gaaTier ? TIER_COLOR[gaaTier] : "rgba(255,255,255,0.85)";
+                    return (
+                      <span className="text-xs sm:text-sm font-bold tabular-nums"
+                        style={{ color: col, textShadow: gaaTier ? `0 0 6px ${col}55` : undefined }}>
+                        {gaa?.toFixed(2) ?? "—"}
+                      </span>
+                    );
+                  })()}
                   <span className="text-[7px] sm:text-[8px] text-white/30 uppercase tracking-wider">GAA</span>
                 </div>
                 <div className="flex flex-col items-center min-w-0">
@@ -3478,26 +3514,55 @@ export default function PlayerProfilePage() {
           </div>
         )}
 
-        {/* Career totals */}
-        {(data.nhl_games_played || data.nhl_career_points) && (
-          <div className="border-t px-5 py-2.5 flex items-center justify-center gap-4 flex-wrap" style={{ borderColor: `${teamColor}12` }}>
-            <span className="text-[9px] text-white/20 uppercase tracking-widest font-semibold">Career</span>
-            {data.nhl_games_played && (
-              <div className="flex flex-col items-center min-w-[36px]">
-                <span className="text-sm font-bold text-white/70 tabular-nums">{data.nhl_games_played}</span>
-                <span className="text-[8px] text-white/25 uppercase tracking-wider">GP</span>
+        {/* Career totals — HUD-styled, with derived assists when available */}
+        {(data.nhl_games_played != null || data.nhl_career_points != null) && (
+          <div
+            className="border-t px-5 py-3 flex items-center justify-center gap-4 flex-wrap relative"
+            style={{
+              borderColor: `${teamColor}22`,
+              background: `linear-gradient(90deg, transparent 0%, ${teamColor}07 50%, transparent 100%)`,
+            }}
+          >
+            <span aria-hidden className="absolute left-3 top-1/2 -translate-y-1/2 hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: teamColor, opacity: 0.7 }}>◢</span>
+            <span aria-hidden className="absolute right-3 top-1/2 -translate-y-1/2 hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: teamColor, opacity: 0.7 }}>◣</span>
+            <span className="hud-mono text-[9px] uppercase tracking-[0.24em]" style={{ color: teamColor }}>
+              CAREER · NHL
+            </span>
+            {data.nhl_games_played != null && (
+              <div className="flex flex-col items-center min-w-[40px]">
+                <span className="hud-mono text-sm font-bold text-white/85 tabular-nums">{data.nhl_games_played}</span>
+                <span className="hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: `${teamColor}AA` }}>GP</span>
               </div>
             )}
-            {data.nhl_career_goals && (
-              <div className="flex flex-col items-center min-w-[36px]">
-                <span className="text-sm font-bold text-white/70 tabular-nums">{data.nhl_career_goals}</span>
-                <span className="text-[8px] text-white/25 uppercase tracking-wider">G</span>
+            {data.nhl_career_goals != null && (
+              <div className="flex flex-col items-center min-w-[40px]">
+                <span className="hud-mono text-sm font-bold text-white/85 tabular-nums">{data.nhl_career_goals}</span>
+                <span className="hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: `${teamColor}AA` }}>G</span>
               </div>
             )}
-            {data.nhl_career_points && (
-              <div className="flex flex-col items-center min-w-[36px]">
-                <span className="text-sm font-bold tabular-nums" style={{ color: `${teamColor}CC` }}>{data.nhl_career_points}</span>
-                <span className="text-[8px] text-white/25 uppercase tracking-wider">PTS</span>
+            {data.nhl_career_goals != null && data.nhl_career_points != null && (
+              <div className="flex flex-col items-center min-w-[40px]">
+                <span className="hud-mono text-sm font-bold text-white/85 tabular-nums">
+                  {Math.max(0, data.nhl_career_points - data.nhl_career_goals)}
+                </span>
+                <span className="hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: `${teamColor}AA` }}>A</span>
+              </div>
+            )}
+            {data.nhl_career_points != null && (
+              <div className="flex flex-col items-center min-w-[40px]">
+                <span className="hud-mono text-base font-black tabular-nums"
+                  style={{ color: teamColor, textShadow: `0 0 6px ${teamColor}66` }}>
+                  {data.nhl_career_points}
+                </span>
+                <span className="hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: `${teamColor}AA` }}>PTS</span>
+              </div>
+            )}
+            {data.nhl_games_played != null && data.nhl_career_points != null && data.nhl_games_played > 0 && (
+              <div className="flex flex-col items-center min-w-[40px]">
+                <span className="hud-mono text-sm font-bold text-white/75 tabular-nums">
+                  {(data.nhl_career_points / data.nhl_games_played).toFixed(2)}
+                </span>
+                <span className="hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: `${teamColor}AA` }}>PPG</span>
               </div>
             )}
           </div>
@@ -4177,19 +4242,20 @@ export default function PlayerProfilePage() {
           </HudPanel>
         </div>
 
-        {/* RATING STRIP — full width, 6 mini odometers */}
+        {/* RATING STRIP — full width, 6 mini odometers, tier-coloured */}
         <div className="lg:col-span-12">
           <HudPanel title="Ratings" subtitle="aggregate engine inputs" themeColor={teamColor}>
             <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 text-center">
               {[
-                { label: "xGF/60",     val: data.xgf_per60,            dec: 2, suffix: "" },
-                { label: "xGA/60",     val: data.rapm_xga_60,          dec: 2, suffix: "" },
-                { label: "CDR",        val: data.cdr,                  dec: 2, suffix: "" },
-                { label: "Finishing",  val: data.finishing,            dec: 1, suffix: "" },
-                { label: "PP xGF/60",  val: data.special_teams_pp,     dec: 2, suffix: "" },
-                { label: "Bayes",      val: data.bayesian_rating,      dec: 3, suffix: "" },
-              ].map((m, i) =>
-                m.val != null ? (
+                { label: "xGF/60",     val: data.xgf_per60,            dec: 2, suffix: "", tier: data.xgf_per60     != null ? xgf60Tier(data.xgf_per60)         : null },
+                { label: "xGA/60",     val: data.rapm_xga_60,          dec: 2, suffix: "", tier: data.rapm_xga_60   != null ? xgaAllowedTier(data.rapm_xga_60)  : null },
+                { label: "CDR",        val: data.cdr,                  dec: 2, suffix: "", tier: data.cdr           != null ? defTier(data.cdr)                : null },
+                { label: "Finishing",  val: data.finishing,            dec: 1, suffix: "", tier: data.finishing     != null ? finishingTier(data.finishing)    : null },
+                { label: "PP xGF/60",  val: data.special_teams_pp,     dec: 2, suffix: "", tier: data.special_teams_pp != null ? stTier(data.special_teams_pp): null },
+                { label: "Bayes",      val: data.bayesian_rating,      dec: 3, suffix: "", tier: data.bayesian_rating != null ? bayesianTier(data.bayesian_rating) : null },
+              ].map((m, i) => {
+                const tierColor = m.tier ? TIER_COLOR[m.tier] : null;
+                return m.val != null ? (
                   <div key={i} className="flex flex-col items-center gap-0.5">
                     <span className="hud-mono text-[9px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
                       {m.label}
@@ -4200,6 +4266,19 @@ export default function PlayerProfilePage() {
                       suffix={m.suffix}
                       className="text-base"
                     />
+                    {m.tier && tierColor && (
+                      <span
+                        className="hud-mono text-[8px] uppercase tracking-[0.18em] rounded border px-1.5 py-0.5 mt-0.5"
+                        style={{
+                          color: tierColor,
+                          borderColor: `${tierColor}55`,
+                          backgroundColor: `${tierColor}14`,
+                          textShadow: `0 0 6px ${tierColor}55`,
+                        }}
+                      >
+                        {TIER_ABBREV[m.tier]}
+                      </span>
+                    )}
                   </div>
                 ) : (
                   <div key={i} className="flex flex-col items-center gap-0.5 opacity-40">
@@ -4208,8 +4287,8 @@ export default function PlayerProfilePage() {
                     </span>
                     <span className="hud-mono text-base text-[var(--text-muted)]">—</span>
                   </div>
-                )
-              )}
+                );
+              })}
             </div>
           </HudPanel>
         </div>

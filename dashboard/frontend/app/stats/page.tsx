@@ -97,7 +97,7 @@ function PlayerHeadshot({ src, name, team, size = 32 }: { src: string | null; na
 
   if (!err && src) {
     return (
-      <div className="rounded-full shrink-0 overflow-hidden relative"
+      <div className="jarvis-photo-frame rounded-full shrink-0 overflow-hidden relative"
         style={{ width: size, height: size, background: `linear-gradient(to bottom, ${secondaryColor} 0%, ${secondaryColor} 72%, #b0b0b0 100%)`, ...ringStyle }}>
         <img src={src} alt={name} width={size} height={size}
           className="h-full w-full object-cover"
@@ -364,14 +364,14 @@ export default function StatsPage() {
           <Link href="/" className="hud-mono text-[9px] uppercase tracking-[0.28em] text-white/30 hover:text-[var(--brand-hex)] transition-colors mb-1.5 block">
             ← GRTZKY
           </Link>
-          <h1 className="text-[28px] sm:text-[34px] font-black tracking-[0.10em] uppercase leading-none bg-clip-text text-transparent"
+          <h1 className="text-[19px] sm:text-[34px] font-black tracking-[0.08em] sm:tracking-[0.10em] uppercase leading-none bg-clip-text text-transparent"
             style={{ backgroundImage: "linear-gradient(180deg, #ffffff 0%, #E8D090 38%, #C9A84C 58%, #6a5728 78%, #E8D090 100%)", filter: "drop-shadow(0 1px 0 rgba(0,0,0,0.85))" }}>
             ◢ STATS LEADERS ◣
           </h1>
         </div>
         <button onClick={() => playerTab === "skaters" ? fetchSkaters() : playerTab === "goalies" ? fetchGoalies() : fetchCalder()}
           title="Refresh"
-          className="hud-mono text-[10px] uppercase tracking-[0.18em] px-2.5 py-1.5 rounded border transition-all"
+          className="hud-mono text-[8px] sm:text-[10px] uppercase tracking-[0.14em] sm:tracking-[0.18em] px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded border transition-all"
           style={{
             color: "var(--brand-hex)",
             borderColor: "rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.40)",

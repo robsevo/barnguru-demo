@@ -523,6 +523,65 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   box-shadow: 0 8px 24px rgba(0,0,0,0.6), 0 0 18px rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.25);
 }
 
+/* ─── Player headshot treatment ──────────────────────────────────────────────
+   Apply globally to every NHL mugshot so player photos read as part of the
+   site's holographic dossier theme rather than dropped-in stock images.
+   Cool contrast + subtle desaturation + team-tinted halo. Targets the NHL
+   API's `/mugs/nhl/...` URL pattern so we cover every page that pulls a
+   headshot without touching individual <img> tags. */
+img[src*="assets.nhle.com/mugs"] {
+  filter:
+    contrast(1.10)
+    saturate(0.90)
+    brightness(1.05)
+    drop-shadow(0 0 5px rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.32));
+  transition: filter 200ms ease;
+}
+img[src*="assets.nhle.com/mugs"]:hover {
+  filter:
+    contrast(1.14)
+    saturate(0.95)
+    brightness(1.08)
+    drop-shadow(0 0 9px rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.48));
+}
+
+/* Stronger HUD overlay for hero/profile portraits — pair with an img tag
+   that already lives inside a relative container, this wrapper adds a
+   scanline + holographic tint over the photo. */
+.jarvis-photo-frame {
+  position: relative;
+  isolation: isolate;
+}
+.jarvis-photo-frame::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    180deg,
+    transparent 0px,
+    transparent 2px,
+    rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.045) 2px,
+    rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.045) 3px
+  );
+  mix-blend-mode: screen;
+  pointer-events: none;
+  z-index: 2;
+}
+.jarvis-photo-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    160deg,
+    rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.08) 0%,
+    transparent 40%,
+    transparent 70%,
+    rgba(0, 0, 0, 0.25) 100%
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
 /* Reduced motion — kill every decorative animation */
 @media (prefers-reduced-motion: reduce) {
   .hud-scan,
