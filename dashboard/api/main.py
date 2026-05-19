@@ -9992,12 +9992,13 @@ def _quality_score(title: str, url: str) -> int:
 def _sort_by_url_priority(candidates: list[dict]) -> list[dict]:
     """Sort channel candidates for initial game-page playback.
 
-    Two-axis sort. Primary axis: stream quality (UHD > FHD > untagged ≈ HD
-    > 480p-pinned > SD). Secondary axis: host reliability (most → least
-    reliable: kstv, an upstream host, ampztl, tvpass, thetvapp, other untested
-    upstream, other). The quality axis dominates because users notice picture
-    quality immediately; host reliability only matters as a tiebreaker
-    among same-quality candidates.
+    Three-axis sort. Primary axis (Bob, 2026-05-18): an upstream host candidates
+    win unconditionally — promoted to "main link" for the game page so the
+    primary chip click always lands on an upstream host.an upstream host.co when present.
+    Secondary axis: stream quality (UHD > FHD > untagged ≈ HD > 480p-pinned
+    > SD). Tertiary axis: host reliability (kstv, an upstream host, ampztl,
+    tvpass, thetvapp, other untested upstream, other) as the final
+    tiebreaker among same-quality non-an upstream host candidates.
 
     kstv (puny243) returned auth=0 as of 2026-05-04 (Bob's premium panel
     appears to have lapsed). It still leads the host-priority tier so when
@@ -10008,9 +10009,6 @@ def _sort_by_url_priority(candidates: list[dict]) -> list[dict]:
         u = m["url"]
         if "kstv.us" in u:
             return 0
-        # an upstream host.an upstream host.co — Bob 2026-05-06: passthrough rendition is
-        # buttery, no re-transcode needed. Promoted to tier 1 alongside
-        # an upstream host. Anywhere an upstream host has a candidate, prefer it.
         if "an upstream host" in u:
             return 1
         if "an upstream host" in u:
@@ -10025,8 +10023,9 @@ def _sort_by_url_priority(candidates: list[dict]) -> list[dict]:
             return 5
         return 6
 
-    def _key(m: dict) -> tuple[int, int]:
-        return (_quality_score(m.get("title", ""), m["url"]), _host_prio(m))
+    def _key(m: dict) -> tuple[int, int, int]:
+        is_an upstream host = 0 if "an upstream host" in m["url"] else 1
+        return (is_an upstream host, _quality_score(m.get("title", ""), m["url"]), _host_prio(m))
 
     return sorted(candidates, key=_key)
 

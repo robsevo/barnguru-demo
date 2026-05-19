@@ -476,7 +476,7 @@ export default function ScoreboardBar() {
         {theme && (
           <button
             onClick={clearTheme}
-            className="absolute left-2 text-[9px] font-black uppercase tracking-[0.14em] px-2 py-[3px] rounded-md border transition-all duration-200 text-white/30 border-white/[0.10] bg-white/[0.03] hover:text-white/60 hover:border-white/[0.20] hover:bg-white/[0.06]"
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-[9px] font-black uppercase tracking-[0.14em] px-2.5 py-[3px] rounded-md border transition-all duration-200 text-white/30 border-white/[0.10] bg-white/[0.03] hover:text-white/60 hover:border-white/[0.20] hover:bg-white/[0.06]"
           >
             Reset Theme
           </button>
@@ -493,7 +493,7 @@ export default function ScoreboardBar() {
         {hasLive && (
           <button
             onClick={toggleHideAll}
-            className={`absolute right-2 text-[9px] font-black uppercase tracking-[0.14em] px-2 py-[3px] rounded-md border transition-all duration-200 ${
+            className={`absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-black uppercase tracking-[0.14em] px-2.5 py-[3px] rounded-md border transition-all duration-200 ${
               hideAll
                 ? "text-[#C9A84C] border-[#C9A84C]/50 bg-[#C9A84C]/[0.12] shadow-[0_0_8px_rgba(201,168,76,0.15)]"
                 : "text-[#C9A84C]/50 border-[#C9A84C]/20 bg-[#C9A84C]/[0.04] hover:text-[#C9A84C]/80 hover:border-[#C9A84C]/35 hover:bg-[#C9A84C]/[0.08]"
