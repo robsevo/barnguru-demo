@@ -198,11 +198,20 @@ function GameCard({ g }: { g: Game }) {
   const gcBorder = isLive ? "rgba(74,222,128,0.45)" : isFinal ? "rgba(248,113,113,0.45)" : "rgba(251,191,36,0.45)";
 
   // HUD-styled cards — corner brackets via ::before/::after (hud-panel--all-corners helper)
+  // No corner brackets on game cards — they read cleaner without
   const cardCls = live
-    ? "hud-panel hud-panel--all-corners cursor-pointer active:scale-[0.97] transition-all duration-150 hover:shadow-[0_0_24px_rgba(74,222,128,0.35)]"
+    ? "rounded-md cursor-pointer active:scale-[0.97] transition-all duration-150 hover:shadow-[0_0_24px_rgba(74,222,128,0.35)]"
     : isFinal
-    ? "hud-panel hud-panel--all-corners cursor-pointer active:scale-[0.97] transition-all duration-150 hover:opacity-90"
-    : "hud-panel hud-panel--all-corners cursor-pointer active:scale-[0.97] transition-all duration-150 hover:shadow-[0_0_18px_rgba(251,191,36,0.25)]";
+    ? "rounded-md cursor-pointer active:scale-[0.97] transition-all duration-150 hover:opacity-90"
+    : "rounded-md cursor-pointer active:scale-[0.97] transition-all duration-150 hover:shadow-[0_0_18px_rgba(251,191,36,0.25)]";
+
+  const cardStyle: React.CSSProperties = {
+    background: live
+      ? "linear-gradient(180deg, rgba(74,222,128,0.10) 0%, rgba(var(--card-base-r),var(--card-base-g),var(--card-base-b),0.95) 30%, rgba(var(--card-mid-r),var(--card-mid-g),var(--card-mid-b),0.99) 100%)"
+      : "linear-gradient(180deg, rgba(220,228,240,0.04) 0%, rgba(var(--card-base-r),var(--card-base-g),var(--card-base-b),0.95) 30%, rgba(var(--card-mid-r),var(--card-mid-g),var(--card-mid-b),0.99) 100%)",
+    border: `1px solid ${live ? "rgba(74,222,128,0.30)" : isFinal ? "rgba(255,255,255,0.08)" : "rgba(251,191,36,0.25)"}`,
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -1px 0 rgba(0,0,0,0.40), 0 2px 8px rgba(0,0,0,0.50)",
+  };
 
   const cardThemeColor = live ? "#4ade80" : isFinal ? "#f87171" : "#fbbf24";
 
@@ -279,9 +288,7 @@ function GameCard({ g }: { g: Game }) {
   return (
     <Link href={`/game/${g.game_id}`} className="block shrink-0 w-[140px]">
     <div className={`relative group flex flex-col justify-center gap-1 px-2 py-1.5 w-full ${cardCls}`}
-      style={{ ["--hud-corner" as string]: `${cardThemeColor}aa` }}>
-      <span className="hud-panel__corner-tr" />
-      <span className="hud-panel__corner-bl" />
+      style={cardStyle}>
       {row(g.away_team, g.away_score, awayWins, false)}
       {row(g.home_team, g.home_score, homeWins, true)}
 
