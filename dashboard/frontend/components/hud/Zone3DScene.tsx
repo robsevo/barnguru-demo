@@ -401,7 +401,7 @@ export default function Zone3DScene({ activations, themeColor = "#C9A84C" }: Zon
       </div>
 
       {hoveredZone && hoveredVal != null && (
-        <div className="absolute bottom-2 left-2 hud-mono text-[10px] uppercase tracking-[0.18em] px-2 py-1 rounded border pointer-events-none"
+        <div className="absolute bottom-2 right-2 hud-mono text-[10px] uppercase tracking-[0.18em] px-2 py-1 rounded border pointer-events-none"
           style={{
             color: themeColor,
             borderColor: `${themeColor}55`,
@@ -411,6 +411,37 @@ export default function Zone3DScene({ activations, themeColor = "#C9A84C" }: Zon
           ▸ {hoveredZone.label} · {hoveredVal.toFixed(1)}%
         </div>
       )}
+
+      {/* Glossary panel — zone color legend */}
+      <div className="absolute bottom-2 left-2 hud-mono text-[8px] uppercase tracking-[0.16em] rounded border px-2 py-1.5 pointer-events-none"
+        style={{
+          color: "var(--text-secondary)",
+          borderColor: `${themeColor}33`,
+          background: "rgba(0,0,0,0.65)",
+          backdropFilter: "blur(6px)",
+        }}>
+        <div className="flex items-center gap-1 mb-1" style={{ color: themeColor }}>◢ LEGEND</div>
+        <div className="flex items-center gap-1.5">
+          <span className="inline-block rounded-sm" style={{ width: 8, height: 8, background: themeColor, opacity: 0.5 }} />
+          <span>slot · perim · base</span>
+        </div>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <span className="inline-block rounded-sm" style={{ width: 8, height: 8, background: "#38bdf8", opacity: 0.5 }} />
+          <span>corner · cycle zones</span>
+        </div>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <span className="inline-block rounded-sm" style={{ width: 8, height: 8, background: "#fbbf24", opacity: 0.65 }} />
+          <span>net-front · &gt;15% activity</span>
+        </div>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <span className="inline-block rounded-sm" style={{ width: 8, height: 8, background: "#f87171", opacity: 0.75 }} />
+          <span>hot · &gt;25% activity</span>
+        </div>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <span className="hud-mono" style={{ color: themeColor }}>%</span>
+          <span>floating · share of OZ touches</span>
+        </div>
+      </div>
     </div>
   );
 }

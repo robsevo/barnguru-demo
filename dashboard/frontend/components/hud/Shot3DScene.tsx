@@ -387,6 +387,34 @@ export default function Shot3DScene({ shots, themeColor = "#C9A84C", flip = fals
           drag · scroll · right-drag to pan
         </span>
       </div>
+
+      {/* Glossary panel — legend for the 3D shot rendering */}
+      <div className="absolute bottom-2 left-2 hud-mono text-[8px] uppercase tracking-[0.16em] rounded border px-2 py-1.5 pointer-events-none"
+        style={{
+          color: "var(--text-secondary)",
+          borderColor: `${themeColor}33`,
+          background: "rgba(0,0,0,0.65)",
+          backdropFilter: "blur(6px)",
+        }}>
+        <div className="flex items-center gap-1 mb-1" style={{ color: themeColor }}>◢ LEGEND</div>
+        <div className="flex items-center gap-1.5">
+          <span className="inline-block rounded-full" style={{ width: 8, height: 8, background: themeColor, boxShadow: `0 0 6px ${themeColor}` }} />
+          <span>shot · miss</span>
+        </div>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <span className="inline-block rounded-full"
+            style={{ width: 10, height: 10, background: "#fff", boxShadow: `0 0 10px ${themeColor}, inset 0 0 4px ${themeColor}` }} />
+          <span>goal · scored</span>
+        </div>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <span className="inline-block" style={{ width: 8, height: 3, background: "#ff3030", borderRadius: 1, boxShadow: "0 0 4px rgba(255,48,48,0.6)" }} />
+          <span>net · 6ft × 4ft</span>
+        </div>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <span className="inline-block" style={{ width: 8, height: 1.5, background: "#3b8fd0" }} />
+          <span>blue line · OZ entry</span>
+        </div>
+      </div>
     </div>
   );
 }

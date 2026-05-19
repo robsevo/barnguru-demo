@@ -3143,27 +3143,6 @@ export default function PlayerProfilePage() {
     <main className="relative min-h-screen p-4 sm:p-6 max-w-3xl lg:max-w-[1400px] mx-auto w-full overflow-x-hidden">
       <HudGrid />
 
-      {/* ── HUD dossier header — classified-target chrome ── */}
-      <div className="relative mb-3 flex items-center gap-2 flex-wrap"
-        style={{ ["--hud-corner" as string]: teamColor }}>
-        <span className="hud-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-primary)]" aria-hidden>
-          ◢
-        </span>
-        <span className="hud-mono text-[10px] uppercase tracking-[0.18em]"
-          style={{ color: teamColor }}>
-          DOSSIER · SUBJECT {data.player_id ?? "—"}
-        </span>
-        <span className="hud-mono text-[9px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
-          · CLASSIFIED · STATUS {injuryBadge ? injuryBadge.toUpperCase() : "ACTIVE"}
-        </span>
-        <span className="ml-auto flex items-center gap-1">
-          <span className="hud-pulse-dot" style={{ background: "#4ade80" }} />
-          <span className="hud-mono jarvis-flicker text-[9px] uppercase tracking-[0.18em] text-[#4ade80]">
-            LIVE
-          </span>
-        </span>
-      </div>
-
       {/* ── Search bar — team-colored ── */}
       <div className="relative flex justify-center mb-5 gap-2">
         {/* Team page button */}
