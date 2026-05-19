@@ -319,6 +319,7 @@ function AutoRotateIntro({ controlsRef, active }: { controlsRef: React.RefObject
 export default function Shot3DScene({ shots, themeColor = "#C9A84C", flip = false }: Shot3DSceneProps) {
   const [freePan, setFreePan] = useState(false);
   const [autoRotate, setAutoRotate] = useState(true);
+  const [legendOpen, setLegendOpen] = useState(false);
   const controlsRef = useRef<OrbitControlsProps & { autoRotate?: boolean; autoRotateSpeed?: number } | null>(null);
   const dpr = typeof window !== "undefined" ? Math.min(window.devicePixelRatio, 1.5) : 1;
 
@@ -388,32 +389,50 @@ export default function Shot3DScene({ shots, themeColor = "#C9A84C", flip = fals
         </span>
       </div>
 
-      {/* Glossary panel — legend for the 3D shot rendering */}
-      <div className="absolute bottom-2 left-2 hud-mono text-[8px] uppercase tracking-[0.16em] rounded border px-2 py-1.5 pointer-events-none"
-        style={{
-          color: "var(--text-secondary)",
-          borderColor: `${themeColor}33`,
-          background: "rgba(0,0,0,0.65)",
-          backdropFilter: "blur(6px)",
-        }}>
-        <div className="flex items-center gap-1 mb-1" style={{ color: themeColor }}>◢ LEGEND</div>
-        <div className="flex items-center gap-1.5">
-          <span className="inline-block rounded-full" style={{ width: 8, height: 8, background: themeColor, boxShadow: `0 0 6px ${themeColor}` }} />
-          <span>shot · miss</span>
-        </div>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          <span className="inline-block rounded-full"
-            style={{ width: 10, height: 10, background: "#fff", boxShadow: `0 0 10px ${themeColor}, inset 0 0 4px ${themeColor}` }} />
-          <span>goal · scored</span>
-        </div>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          <span className="inline-block" style={{ width: 8, height: 3, background: "#ff3030", borderRadius: 1, boxShadow: "0 0 4px rgba(255,48,48,0.6)" }} />
-          <span>net · 6ft × 4ft</span>
-        </div>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          <span className="inline-block" style={{ width: 8, height: 1.5, background: "#3b8fd0" }} />
-          <span>blue line · OZ entry</span>
-        </div>
+      {/* Glossary panel — collapsible, mobile-friendly */}
+      <div className="absolute bottom-2 left-2 max-w-[80%]">
+        <button
+          type="button"
+          onClick={() => setLegendOpen(v => !v)}
+          aria-expanded={legendOpen}
+          className="hud-mono text-[9px] uppercase tracking-[0.18em] px-2 py-1 rounded border flex items-center gap-1.5"
+          style={{
+            color: themeColor,
+            borderColor: `${themeColor}55`,
+            background: "rgba(0,0,0,0.65)",
+            backdropFilter: "blur(6px)",
+          }}
+        >
+          ◢ LEGEND
+          <span className="opacity-60" aria-hidden>{legendOpen ? "▾" : "▸"}</span>
+        </button>
+        {legendOpen && (
+          <div className="mt-1 hud-mono text-[8px] uppercase tracking-[0.16em] rounded border px-2 py-1.5"
+            style={{
+              color: "var(--text-secondary)",
+              borderColor: `${themeColor}33`,
+              background: "rgba(0,0,0,0.78)",
+              backdropFilter: "blur(6px)",
+            }}>
+            <div className="flex items-center gap-1.5">
+              <span className="inline-block rounded-full shrink-0" style={{ width: 8, height: 8, background: themeColor, boxShadow: `0 0 6px ${themeColor}` }} />
+              <span>shot · miss</span>
+            </div>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="inline-block rounded-full shrink-0"
+                style={{ width: 10, height: 10, background: "#fff", boxShadow: `0 0 10px ${themeColor}, inset 0 0 4px ${themeColor}` }} />
+              <span>goal · scored</span>
+            </div>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="inline-block shrink-0" style={{ width: 8, height: 3, background: "#ff3030", borderRadius: 1, boxShadow: "0 0 4px rgba(255,48,48,0.6)" }} />
+              <span>net · 6ft × 4ft</span>
+            </div>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="inline-block shrink-0" style={{ width: 8, height: 1.5, background: "#3b8fd0" }} />
+              <span>blue line · OZ entry</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

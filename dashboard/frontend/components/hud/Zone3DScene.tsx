@@ -297,6 +297,7 @@ export default function Zone3DScene({ activations, themeColor = "#C9A84C" }: Zon
   const [hover, setHover] = useState<keyof ZoneActivation | null>(null);
   const [freePan, setFreePan] = useState(false);
   const [autoRotate, setAutoRotate] = useState(true);
+  const [legendOpen, setLegendOpen] = useState(false);
   const controlsRef = useRef<unknown>(null);
   const dpr = typeof window !== "undefined" ? Math.min(window.devicePixelRatio, 1.5) : 1;
 
@@ -412,35 +413,53 @@ export default function Zone3DScene({ activations, themeColor = "#C9A84C" }: Zon
         </div>
       )}
 
-      {/* Glossary panel — zone color legend */}
-      <div className="absolute bottom-2 left-2 hud-mono text-[8px] uppercase tracking-[0.16em] rounded border px-2 py-1.5 pointer-events-none"
-        style={{
-          color: "var(--text-secondary)",
-          borderColor: `${themeColor}33`,
-          background: "rgba(0,0,0,0.65)",
-          backdropFilter: "blur(6px)",
-        }}>
-        <div className="flex items-center gap-1 mb-1" style={{ color: themeColor }}>◢ LEGEND</div>
-        <div className="flex items-center gap-1.5">
-          <span className="inline-block rounded-sm" style={{ width: 8, height: 8, background: themeColor, opacity: 0.5 }} />
-          <span>slot · perim · base</span>
-        </div>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          <span className="inline-block rounded-sm" style={{ width: 8, height: 8, background: "#38bdf8", opacity: 0.5 }} />
-          <span>corner · cycle zones</span>
-        </div>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          <span className="inline-block rounded-sm" style={{ width: 8, height: 8, background: "#fbbf24", opacity: 0.65 }} />
-          <span>net-front · &gt;15% activity</span>
-        </div>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          <span className="inline-block rounded-sm" style={{ width: 8, height: 8, background: "#f87171", opacity: 0.75 }} />
-          <span>hot · &gt;25% activity</span>
-        </div>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          <span className="hud-mono" style={{ color: themeColor }}>%</span>
-          <span>floating · share of OZ touches</span>
-        </div>
+      {/* Glossary panel — collapsible, mobile-friendly */}
+      <div className="absolute bottom-2 left-2 max-w-[80%]">
+        <button
+          type="button"
+          onClick={() => setLegendOpen(v => !v)}
+          aria-expanded={legendOpen}
+          className="hud-mono text-[9px] uppercase tracking-[0.18em] px-2 py-1 rounded border flex items-center gap-1.5"
+          style={{
+            color: themeColor,
+            borderColor: `${themeColor}55`,
+            background: "rgba(0,0,0,0.65)",
+            backdropFilter: "blur(6px)",
+          }}
+        >
+          ◢ LEGEND
+          <span className="opacity-60" aria-hidden>{legendOpen ? "▾" : "▸"}</span>
+        </button>
+        {legendOpen && (
+          <div className="mt-1 hud-mono text-[8px] uppercase tracking-[0.16em] rounded border px-2 py-1.5"
+            style={{
+              color: "var(--text-secondary)",
+              borderColor: `${themeColor}33`,
+              background: "rgba(0,0,0,0.78)",
+              backdropFilter: "blur(6px)",
+            }}>
+            <div className="flex items-center gap-1.5">
+              <span className="inline-block rounded-sm shrink-0" style={{ width: 8, height: 8, background: themeColor, opacity: 0.5 }} />
+              <span>slot · perim · base</span>
+            </div>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="inline-block rounded-sm shrink-0" style={{ width: 8, height: 8, background: "#38bdf8", opacity: 0.5 }} />
+              <span>corner · cycle zones</span>
+            </div>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="inline-block rounded-sm shrink-0" style={{ width: 8, height: 8, background: "#fbbf24", opacity: 0.65 }} />
+              <span>net-front · &gt;15% activity</span>
+            </div>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="inline-block rounded-sm shrink-0" style={{ width: 8, height: 8, background: "#f87171", opacity: 0.75 }} />
+              <span>hot · &gt;25% activity</span>
+            </div>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="hud-mono shrink-0" style={{ color: themeColor }}>%</span>
+              <span>floating · share of OZ touches</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
