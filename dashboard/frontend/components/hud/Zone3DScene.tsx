@@ -383,7 +383,7 @@ export default function Zone3DScene({ activations, themeColor = "#C9A84C" }: Zon
       <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
         <button
           type="button"
-          onClick={() => setFreePan((v) => !v)}
+          onClick={() => { setFreePan((v) => !v); setAutoRotate(false); }}
           className="hud-mono text-[9px] uppercase tracking-[0.18em] px-2 py-1 rounded border"
           style={{
             color: freePan ? "#4ade80" : themeColor,
