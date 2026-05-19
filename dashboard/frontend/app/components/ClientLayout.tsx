@@ -742,10 +742,12 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                     {/* Dropdown — JARVIS chrome with corner brackets + scan line */}
                     {statsDropOpen && (
                       <div
-                        className="absolute top-full right-0 mt-1.5 z-50 hud-panel hud-panel--all-corners jarvis-shimmer"
+                        className="absolute top-full right-0 mt-2 z-[100] hud-panel hud-panel--all-corners jarvis-shimmer"
                         style={{
-                          minWidth: "150px",
-                          padding: "4px",
+                          minWidth: "180px",
+                          padding: "8px 6px",
+                          background: "rgba(10,12,16,0.98)",
+                          boxShadow: "0 16px 40px rgba(0,0,0,0.85), 0 4px 12px rgba(0,0,0,0.6), inset 0 1px 0 rgba(220,228,240,0.10)",
                         }}
                       >
                         <span className="hud-panel__corner-tr" />

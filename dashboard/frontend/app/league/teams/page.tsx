@@ -181,16 +181,17 @@ export default function LeagueTeamsPage() {
         </span>
       </div>
 
-      {/* Header */}
+      {/* Header — JARVIS dossier */}
       <div className="mb-6 sm:mb-8 relative z-10">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-white/20 mb-1">
-          NHL · 2025–26
+        <p className="hud-mono text-[10px] uppercase tracking-[0.28em] text-white/30 mb-1">
+          NHL · 2025–26 · ◢ LEAGUE INDEX
         </p>
-        <h1 className="text-2xl sm:text-3xl font-black uppercase tracking-wider text-white/90">
-          League
+        <h1 className="text-2xl sm:text-3xl font-black uppercase tracking-[0.10em] leading-none bg-clip-text text-transparent"
+          style={{ backgroundImage: "linear-gradient(180deg, #ffffff 0%, #E8D090 38%, #C9A84C 58%, #6a5728 78%, #E8D090 100%)", filter: "drop-shadow(0 1px 0 rgba(0,0,0,0.85))" }}>
+          ◢ LEAGUE ◣
         </h1>
-        <p className="mt-1 text-[11px] text-white/30">
-          Select a team to view their roster, cap, and injuries.
+        <p className="hud-mono mt-2 text-[10px] uppercase tracking-[0.16em] text-white/35">
+          ▸ select a franchise to view roster · cap · injuries
         </p>
         {fatigueMeta?.window_end && (
           <p className="mt-2 text-[9px] font-mono text-white/30">

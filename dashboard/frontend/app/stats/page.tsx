@@ -358,48 +358,81 @@ export default function StatsPage() {
         </span>
       </div>
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-5 relative z-10">
+      {/* Header — JARVIS dossier */}
+      <div className="flex items-end justify-between mb-4 relative z-10">
         <div>
-          <Link href="/" className="text-[9px] font-black uppercase tracking-[0.3em] text-white/20 hover:text-white/40 transition-colors mb-1.5 block">
+          <Link href="/" className="hud-mono text-[9px] uppercase tracking-[0.28em] text-white/30 hover:text-[var(--brand-hex)] transition-colors mb-1.5 block">
             ← GRTZKY
           </Link>
-          <h1 className="text-[34px] font-black tracking-[0.08em] uppercase text-white leading-none">Stats Leaders</h1>
+          <h1 className="text-[28px] sm:text-[34px] font-black tracking-[0.10em] uppercase leading-none bg-clip-text text-transparent"
+            style={{ backgroundImage: "linear-gradient(180deg, #ffffff 0%, #E8D090 38%, #C9A84C 58%, #6a5728 78%, #E8D090 100%)", filter: "drop-shadow(0 1px 0 rgba(0,0,0,0.85))" }}>
+            ◢ STATS LEADERS ◣
+          </h1>
         </div>
         <button onClick={() => playerTab === "skaters" ? fetchSkaters() : playerTab === "goalies" ? fetchGoalies() : fetchCalder()}
-          className="text-[14px] font-bold text-white/38 hover:text-white/50 transition-colors px-1.5 py-1">
-          ↻
+          title="Refresh"
+          className="hud-mono text-[10px] uppercase tracking-[0.18em] px-2.5 py-1.5 rounded border transition-all"
+          style={{
+            color: "var(--brand-hex)",
+            borderColor: "rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.40)",
+            background: "linear-gradient(180deg, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.20) 0%, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.06) 100%)",
+            boxShadow: "inset 0 1px 0 rgba(255,228,170,0.18), inset 0 -1px 0 rgba(0,0,0,0.45)",
+          }}>
+          ↻ SYNC
         </button>
       </div>
 
-      {/* Season-type toggle (regular ↔ playoffs) — right under header, before player-type tabs */}
-      <div className="flex gap-1 mb-3 flex-wrap">
-        <button onClick={() => { setSeasonType("playoffs"); setPosFilter(new Set()); }}
-          className={`px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wide transition-all ${
-            seasonType === "playoffs" ? "bg-[#fbbf24]/10 text-[#fbbf24] border border-[#fbbf24]/30" : "text-white/30 hover:text-white/50 border border-transparent"
-          }`}>Playoffs</button>
-        <button onClick={() => { setSeasonType("regular"); setPosFilter(new Set()); }}
-          className={`px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wide transition-all ${
-            seasonType === "regular" ? "bg-white/[0.08] text-white/80 border border-white/[0.20]" : "text-white/30 hover:text-white/50 border border-transparent"
-          }`}>2025–26 NHL Season</button>
+      {/* Season-type toggle — segmented metallic */}
+      <div className="flex gap-1 mb-3 flex-wrap relative z-10">
+        {([
+          { id: "playoffs", label: "PLAYOFFS", color: "#fbbf24" },
+          { id: "regular",  label: "2025–26 SEASON", color: "#a78bfa" },
+        ] as const).map(opt => {
+          const active = seasonType === opt.id;
+          return (
+            <button key={opt.id} onClick={() => { setSeasonType(opt.id); setPosFilter(new Set()); }}
+              className="hud-mono px-4 py-1.5 rounded text-[11px] uppercase tracking-[0.18em] transition-all border"
+              style={active ? {
+                color: opt.color,
+                borderColor: `${opt.color}88`,
+                background: `linear-gradient(180deg, ${opt.color}30 0%, ${opt.color}12 100%)`,
+                boxShadow: `inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -1px 0 rgba(0,0,0,0.45), 0 0 12px ${opt.color}33`,
+              } : {
+                color: "rgba(255,255,255,0.40)",
+                borderColor: "rgba(255,255,255,0.08)",
+                background: "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(0,0,0,0.25) 100%)",
+              }}>
+              {opt.label}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Player-type tabs (Skaters / Goalies / Calder) */}
-      <div className="flex gap-1 mb-4 flex-wrap">
-        <button onClick={() => { setPlayerTab("skaters"); setPosFilter(new Set()); }}
-          className={`px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wide transition-all ${
-            playerTab === "skaters" ? "bg-white/[0.08] text-white/80 border border-white/[0.20]" : "text-white/30 hover:text-white/50 border border-transparent"
-          }`}>Skaters</button>
-        <button onClick={() => { setPlayerTab("goalies"); setPosFilter(new Set()); }}
-          className={`px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wide transition-all ${
-            playerTab === "goalies" ? "bg-[#C9A84C]/10 text-[#C9A84C] border border-[#C9A84C]/25" : "text-white/30 hover:text-white/50 border border-transparent"
-          }`}>Goalies</button>
-        {seasonType === "regular" && (
-          <button onClick={() => { setPlayerTab("calder"); setPosFilter(new Set()); }}
-            className={`px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wide transition-all ${
-              playerTab === "calder" ? "bg-[#fbbf24]/10 text-[#fbbf24] border border-[#fbbf24]/30" : "text-white/30 hover:text-white/50 border border-transparent"
-            }`}>Calder Race</button>
-        )}
+      {/* Player-type tabs — metallic segmented */}
+      <div className="flex gap-1 mb-4 flex-wrap relative z-10">
+        {([
+          { id: "skaters", label: "SKATERS",     color: "#C9A84C" },
+          { id: "goalies", label: "GOALIES",      color: "#38bdf8" },
+          ...(seasonType === "regular" ? [{ id: "calder" as const, label: "CALDER RACE", color: "#fbbf24" }] : []),
+        ] as const).map(opt => {
+          const active = playerTab === opt.id;
+          return (
+            <button key={opt.id} onClick={() => { setPlayerTab(opt.id); setPosFilter(new Set()); }}
+              className="hud-mono px-4 py-1.5 rounded text-[11px] uppercase tracking-[0.18em] transition-all border"
+              style={active ? {
+                color: opt.color,
+                borderColor: `${opt.color}88`,
+                background: `linear-gradient(180deg, ${opt.color}28 0%, ${opt.color}10 100%)`,
+                boxShadow: `inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -1px 0 rgba(0,0,0,0.45), 0 0 10px ${opt.color}33`,
+              } : {
+                color: "rgba(255,255,255,0.40)",
+                borderColor: "rgba(255,255,255,0.08)",
+                background: "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(0,0,0,0.25) 100%)",
+              }}>
+              {opt.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Category tabs */}

@@ -872,22 +872,53 @@ function StandingsPageInner() {
         </span>
       </div>
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-5 relative z-10">
+      {/* Header — JARVIS dossier */}
+      <div className="flex items-end justify-between mb-4 relative z-10 flex-wrap gap-3">
         <div>
-          <Link href="/" className="text-[9px] font-black uppercase tracking-[0.3em] text-white/20 hover:text-white/40 transition-colors mb-1.5 block">
+          <Link href="/" className="hud-mono text-[9px] uppercase tracking-[0.28em] text-white/30 hover:text-[var(--brand-hex)] transition-colors mb-1.5 block">
             ← GRTZKY
           </Link>
-          <h1 className="text-[22px] sm:text-[34px] font-black tracking-[0.08em] uppercase text-white leading-none">Standings</h1>
-          <p className="text-[10px] text-white/38 mt-1">2025–26 NHL Season</p>
+          <h1 className="text-[22px] sm:text-[34px] font-black tracking-[0.10em] uppercase leading-none bg-clip-text text-transparent"
+            style={{ backgroundImage: "linear-gradient(180deg, #ffffff 0%, #E8D090 38%, #C9A84C 58%, #6a5728 78%, #E8D090 100%)", filter: "drop-shadow(0 1px 0 rgba(0,0,0,0.85))" }}>
+            ◢ STANDINGS ◣
+          </h1>
+          <p className="hud-mono text-[10px] uppercase tracking-[0.22em] text-white/45 mt-1.5">2025–26 NHL SEASON</p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex rounded-lg border border-white/[0.07] overflow-hidden">
-            <button onClick={() => setView("tree")}  className={`px-2 py-1 text-[9px] font-bold uppercase tracking-wide transition-colors ${view === "tree"  ? "bg-[#C9A84C]/10 text-[#C9A84C]/80" : "text-white/30 hover:text-white/50"}`}>Bracket</button>
-            <button onClick={() => setView("hunt")}  className={`px-2 py-1 text-[9px] font-bold uppercase tracking-wide transition-colors border-l border-white/[0.07] ${view === "hunt"  ? "bg-white/[0.08] text-white/80"    : "text-white/30 hover:text-white/50"}`}>Race</button>
-            <button onClick={() => setView("table")} className={`px-2 py-1 text-[9px] font-bold uppercase tracking-wide transition-colors border-l border-white/[0.07] ${view === "table" ? "bg-white/[0.08] text-white/80"    : "text-white/30 hover:text-white/50"}`}>Table</button>
+          {/* Segmented view toggle — metallic */}
+          <div className="flex rounded overflow-hidden border" style={{ borderColor: "rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.30)" }}>
+            {([
+              { id: "tree", label: "BRACKET", color: "#C9A84C" },
+              { id: "hunt", label: "RACE", color: "#a78bfa" },
+              { id: "table", label: "TABLE", color: "#38bdf8" },
+            ] as const).map((opt, idx) => {
+              const active = view === opt.id;
+              return (
+                <button key={opt.id} onClick={() => setView(opt.id)}
+                  className="hud-mono px-3 py-1.5 text-[10px] uppercase tracking-[0.18em] transition-all"
+                  style={{
+                    color: active ? opt.color : "rgba(255,255,255,0.40)",
+                    background: active
+                      ? `linear-gradient(180deg, ${opt.color}28 0%, ${opt.color}10 100%)`
+                      : "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(0,0,0,0.25) 100%)",
+                    borderLeft: idx === 0 ? undefined : "1px solid rgba(255,255,255,0.06)",
+                    boxShadow: active ? `inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -1px 0 rgba(0,0,0,0.45), 0 0 10px ${opt.color}33` : undefined,
+                  }}>
+                  {opt.label}
+                </button>
+              );
+            })}
           </div>
-          <button onClick={fetchStandings} className="text-[13px] font-bold text-white/38 hover:text-white/50 transition-colors px-1.5 py-1">↻</button>
+          <button onClick={fetchStandings} title="Refresh"
+            className="hud-mono text-[10px] uppercase tracking-[0.18em] px-2.5 py-1.5 rounded border transition-all"
+            style={{
+              color: "var(--brand-hex)",
+              borderColor: "rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.40)",
+              background: "linear-gradient(180deg, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.20) 0%, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.06) 100%)",
+              boxShadow: "inset 0 1px 0 rgba(255,228,170,0.18), inset 0 -1px 0 rgba(0,0,0,0.45)",
+            }}>
+            ↻ SYNC
+          </button>
         </div>
       </div>
 
