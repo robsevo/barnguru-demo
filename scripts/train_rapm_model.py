@@ -96,19 +96,27 @@ def _load_season(
         return pl.DataFrame(), pl.DataFrame()
 
     print(f"  Loading season {season} ({season_type}): {shifts_path.name}, {shots_path.name}")
-    shifts_df = pl.read_parquet(shifts_path)
-    shots_df  = pl.read_parquet(shots_path)
+    # Streaming + filter pushdown — game-type and is_playoff filters drop the
+    # bulk of rows before materialisation when running a single season-type.
+    shifts_lf = pl.scan_parquet(shifts_path)
+    shots_lf  = pl.scan_parquet(shots_path)
+
+    shifts_cols = shifts_lf.collect_schema().names()
+    shots_cols  = shots_lf.collect_schema().names()
 
     if season_type == "playoffs":
-        if "game_id" in shifts_df.columns:
-            shifts_df = shifts_df.filter(_game_type_from_id() == 3)
-        if "is_playoff" in shots_df.columns:
-            shots_df = shots_df.filter(pl.col("is_playoff") == True)  # noqa: E712
+        if "game_id" in shifts_cols:
+            shifts_lf = shifts_lf.filter(_game_type_from_id() == 3)
+        if "is_playoff" in shots_cols:
+            shots_lf = shots_lf.filter(pl.col("is_playoff") == True)  # noqa: E712
     elif season_type == "regular":
-        if "game_id" in shifts_df.columns:
-            shifts_df = shifts_df.filter(_game_type_from_id() == 2)
-        if "is_playoff" in shots_df.columns:
-            shots_df = shots_df.filter(pl.col("is_playoff") == False)  # noqa: E712
+        if "game_id" in shifts_cols:
+            shifts_lf = shifts_lf.filter(_game_type_from_id() == 2)
+        if "is_playoff" in shots_cols:
+            shots_lf = shots_lf.filter(pl.col("is_playoff") == False)  # noqa: E712
+
+    shifts_df = shifts_lf.collect(streaming=True)
+    shots_df  = shots_lf.collect(streaming=True)
 
     return shifts_df, shots_df
 
@@ -252,12 +260,21 @@ def main() -> None:
     #   4. MoneyPuck shot data — shooters only fallback
     name_fallback: dict[int, str] = {}
 
-    # Layer 1: shots (cheapest, load first so higher-quality sources overwrite)
+    # Layer 1: shots (cheapest, load first so higher-quality sources overwrite).
+    # scan_parquet + .unique() inside the lazy plan keeps only distinct ids per
+    # season — the per-season DataFrame is rows-of-distinct-shooters, not the
+    # full shots table.
     for _ns in (2023, 2024, 2025):
         _shots_path = data_dir / "shots" / f"shots_{_ns}.parquet"
         if _shots_path.exists():
-            _s = pl.read_parquet(_shots_path, columns=["shooter_id", "shooter_name"])
-            for _r in _s.drop_nulls("shooter_id").unique("shooter_id").to_dicts():
+            _s = (
+                pl.scan_parquet(_shots_path)
+                .select(["shooter_id", "shooter_name"])
+                .drop_nulls("shooter_id")
+                .unique("shooter_id")
+                .collect(streaming=True)
+            )
+            for _r in _s.to_dicts():
                 name_fallback[int(_r["shooter_id"])] = str(_r["shooter_name"])
 
     # Layer 2: EDGE skating
@@ -265,8 +282,14 @@ def main() -> None:
     if edge_dir.exists():
         for _ep in sorted(edge_dir.glob("edge_skating_*.parquet")):
             try:
-                _e = pl.read_parquet(_ep, columns=["player_id", "player_name"])
-                for _r in _e.drop_nulls("player_id").unique("player_id").to_dicts():
+                _e = (
+                    pl.scan_parquet(_ep)
+                    .select(["player_id", "player_name"])
+                    .drop_nulls("player_id")
+                    .unique("player_id")
+                    .collect(streaming=True)
+                )
+                for _r in _e.to_dicts():
                     if _r["player_name"]:
                         name_fallback[int(_r["player_id"])] = str(_r["player_name"])
             except Exception:
@@ -277,8 +300,14 @@ def main() -> None:
     if goalie_dir.exists():
         for _gp in sorted(goalie_dir.glob("goalie_ratings_*.parquet")):
             try:
-                _g = pl.read_parquet(_gp, columns=["player_id", "player_name"])
-                for _r in _g.drop_nulls("player_id").unique("player_id").to_dicts():
+                _g = (
+                    pl.scan_parquet(_gp)
+                    .select(["player_id", "player_name"])
+                    .drop_nulls("player_id")
+                    .unique("player_id")
+                    .collect(streaming=True)
+                )
+                for _r in _g.to_dicts():
                     if _r["player_name"]:
                         name_fallback[int(_r["player_id"])] = str(_r["player_name"])
             except Exception:

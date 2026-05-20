@@ -198,17 +198,32 @@ def _load_st_with_date(args) -> pl.DataFrame:
     print(f"[st-load] Loading schedule: {sched_path}")
     schedule = pl.read_parquet(sched_path).select(["game_id", "game_date"])
 
-    with DataStore(args.data_dir) as store:
-        if args.seasons:
-            pbp_frames    = [store.pbp(season=s)    for s in args.seasons]
-            shift_frames  = [store.shifts(season=s) for s in args.seasons]
-            pbp_frames    = [df for df in pbp_frames    if len(df) > 0]
-            shift_frames  = [df for df in shift_frames  if len(df) > 0]
-            pbp_df    = pl.concat(pbp_frames)   if pbp_frames    else store.pbp()
-            shifts_df = pl.concat(shift_frames) if shift_frames  else store.shifts()
-        else:
-            pbp_df    = store.pbp()
-            shifts_df = store.shifts()
+    # Lazy + column-projected loads. Avoids materialising ~40 PBP columns and
+    # the full shift schema when _per_game_pptoi_shtoi only needs 6 + 5
+    # respectively. On the 2 GB VPS this is the single biggest peak-memory
+    # reduction in the Phase 3 pipeline (~600-900 MB drop, multi-season).
+    raw = args.data_dir / "raw"
+    if args.seasons:
+        seasons = args.seasons
+    else:
+        seasons = sorted(int(p.stem.split("_", 1)[1]) for p in raw.glob("pbp_*.parquet"))
+    pbp_paths    = [raw / f"pbp_{s}.parquet"    for s in seasons]
+    shift_paths  = [raw / f"shifts_{s}.parquet" for s in seasons]
+    pbp_paths   = [p for p in pbp_paths   if p.exists()]
+    shift_paths = [p for p in shift_paths if p.exists()]
+    if not pbp_paths or not shift_paths:
+        print("[st-load] DataStore has no PBP or shifts. Run `ingest` first.")
+        sys.exit(1)
+    pbp_df = (
+        pl.scan_parquet(pbp_paths)
+        .select(["game_id", "home_team_id", "away_team_id", "strength", "period", "time_in_period_secs"])
+        .collect(streaming=True)
+    )
+    shifts_df = (
+        pl.scan_parquet(shift_paths)
+        .select(["game_id", "player_id", "team_id", "game_seconds_start", "game_seconds_end"])
+        .collect(streaming=True)
+    )
 
     if len(pbp_df) == 0 or len(shifts_df) == 0:
         print("[st-load] DataStore has no PBP or shifts. Run `ingest` first.")

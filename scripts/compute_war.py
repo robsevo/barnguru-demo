@@ -118,32 +118,40 @@ def _load_penalties_from_pbp(
         if not has_event or not (has_committed or has_drawn):
             continue
 
-        # Include game_id so we can filter by playoff/regular game type.
+        # Lazy + filter-pushdown: penalty rows are <1% of PBP, so collecting
+        # only those rows cuts peak from ~250 MB/season to a few MB per season.
+        event_col = "event_type" if "event_type" in schema else ("event" if "event" in schema else None)
+        if event_col is None:
+            continue
+
         want = [c for c in (
-            "event_type", "event",
+            event_col,
             "committed_by_id", "drawn_by_id",
             "duration_minutes",
             "game_id",
         ) if c in schema]
 
         try:
-            df = pl.read_parquet(path, columns=want)
+            lf = pl.scan_parquet(path).select(want)
         except Exception:
             continue
 
-        # Filter by game type (game_id encodes it as the TT digits).
-        if "game_id" in df.columns:
+        # Filter by game type (game_id encodes it as the TT digits) — pushed into scan.
+        if "game_id" in want:
             gt = (pl.col("game_id") % 1_000_000) // 10_000
             if season_type == "playoffs":
-                df = df.filter(gt == 3)
+                lf = lf.filter(gt == 3)
             elif season_type == "regular":
-                df = df.filter(gt == 2)
+                lf = lf.filter(gt == 2)
 
-        event_col = next((c for c in ("event_type", "event") if c in df.columns), None)
-        if not event_col:
+        # Penalty-only filter — pushed into scan so non-penalty rows never materialise.
+        lf = lf.filter(pl.col(event_col).str.to_lowercase() == "penalty")
+
+        try:
+            pen_df = lf.collect(streaming=True)
+        except Exception:
             continue
 
-        pen_df = df.filter(pl.col(event_col).str.to_lowercase() == "penalty")
         if pen_df.is_empty():
             continue
 
@@ -295,6 +303,12 @@ def main() -> None:
         print(f"  Excluded {before - len(rapm_df)} goalie-season rows ({len(goalie_ids)} unique goalies)")
     else:
         print("  [warn] No goalie_ratings data found; goalies may inflate WAR leaderboard.")
+
+    # Drop prior-season RAPM rows — model.fit() only operates on target_season,
+    # and _compute_replacement_level computes from the frame passed to fit().
+    # Frees ~100-200 MB on multi-season runs. No-op on single-season nightly runs.
+    if "season" in rapm_df.columns:
+        rapm_df = rapm_df.filter(pl.col("season") == target_season)
 
     # ── Load finishing (optional) ─────────────────────────────────────────
     finishing_dir = data_dir / FINISHING_SUBDIR

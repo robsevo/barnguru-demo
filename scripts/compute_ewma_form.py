@@ -54,13 +54,16 @@ def _load_shots(data_dir: Path, season: int, season_type: str = "regular") -> pl
             stacklevel=2,
         )
         return pl.DataFrame()
-    df = pl.read_parquet(path)
-    if "is_playoff" in df.columns:
+    # Streaming + filter pushdown: regular-season runs drop ~10% playoff rows
+    # before materialisation; playoff runs drop ~90% regular rows. Either way,
+    # peak per-season RSS is meaningfully lower than the eager read_parquet.
+    lf = pl.scan_parquet(path)
+    if "is_playoff" in lf.collect_schema().names():
         if season_type == "playoffs":
-            df = df.filter(pl.col("is_playoff") == True)  # noqa: E712
+            lf = lf.filter(pl.col("is_playoff") == True)  # noqa: E712
         elif season_type == "regular":
-            df = df.filter(pl.col("is_playoff") == False)  # noqa: E712
-    return df
+            lf = lf.filter(pl.col("is_playoff") == False)  # noqa: E712
+    return lf.collect(streaming=True)
 
 
 def _build_player_game_df(shots_df: pl.DataFrame, season: int) -> pl.DataFrame:
