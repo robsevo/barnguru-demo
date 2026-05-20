@@ -19,6 +19,8 @@ export type Shot3DProps = {
   shots: Shot[];
   themeColor?: string;
   flip?: boolean;
+  /** Render a goalie figure in each crease + improved net + hide goal lines. */
+  goalie?: boolean;
   /** 2D fallback to render before the user opts in (or while bundle loads, or under prefers-reduced-motion). */
   fallback: ReactNode;
   /** Default false: user must opt in via the toggle. Reduces perf cost on first page visit. */
@@ -32,7 +34,7 @@ export type Shot3DProps = {
  *   (c) prefers-reduced-motion is not set.
  * Three.js bundle (~150KB gz) only downloads when conditions are met.
  */
-export function Shot3D({ shots, themeColor, flip, fallback, defaultEnabled = true }: Shot3DProps) {
+export function Shot3D({ shots, themeColor, flip, goalie = false, fallback, defaultEnabled = true }: Shot3DProps) {
   const reduced = useReducedMotion();
   const [enabled, setEnabled] = useState(defaultEnabled && !reduced);
   const [inView, setInView] = useState(false);
@@ -62,7 +64,7 @@ export function Shot3D({ shots, themeColor, flip, fallback, defaultEnabled = tru
   return (
     <div ref={wrapRef} className="relative">
       {show3D ? (
-        <Shot3DSceneLazy shots={shots} themeColor={themeColor} flip={flip} />
+        <Shot3DSceneLazy shots={shots} themeColor={themeColor} flip={flip} goalie={goalie} />
       ) : (
         fallback
       )}

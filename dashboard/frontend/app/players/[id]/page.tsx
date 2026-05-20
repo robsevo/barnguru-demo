@@ -2606,6 +2606,260 @@ function HologramScanner({
 }
 
 // ---------------------------------------------------------------------------
+// Predicted Play — top-down zone schematic with arrows showing the most
+// likely entry + in-zone action sequence given the Behavioral NN weights.
+// Adds a "predicted decision" layer on top of the raw matrix so the page
+// actually shows what the model expects this player to *do*, not just the
+// raw input features.
+// ---------------------------------------------------------------------------
+
+type PredPlayLabel =
+  | "Slot Shot"
+  | "Drive Net"
+  | "Perimeter"
+  | "Battle Corner"
+  | "Hold Corner";
+
+interface PredAction {
+  id: string;
+  label: string;
+  pct: number;            // raw model % (0-100)
+}
+
+function PredictedPlay({
+  carry, dump, slot, perim, drive, battleC, holdC, themeColor,
+}: {
+  carry?: number | null;
+  dump?: number | null;
+  slot?: number | null;
+  perim?: number | null;
+  drive?: number | null;
+  battleC?: number | null;
+  holdC?: number | null;
+  themeColor: string;
+}) {
+  const entryActions: PredAction[] = [
+    { id: "carry", label: "Carry-in", pct: carry ?? 0 },
+    { id: "dump",  label: "Dump-in",  pct: dump  ?? 0 },
+  ].filter(a => a.pct > 0).sort((a, b) => b.pct - a.pct);
+  const inZoneActions: PredAction[] = [
+    { id: "slot",   label: "Slot Shot",     pct: slot    ?? 0 },
+    { id: "drive",  label: "Drive Net",     pct: drive   ?? 0 },
+    { id: "perim",  label: "Perimeter",     pct: perim   ?? 0 },
+    { id: "battle", label: "Battle Corner", pct: battleC ?? 0 },
+    { id: "hold",   label: "Hold Corner",   pct: holdC   ?? 0 },
+  ].filter(a => a.pct > 0).sort((a, b) => b.pct - a.pct);
+
+  if (entryActions.length === 0 && inZoneActions.length === 0) return null;
+
+  const topEntry  = entryActions[0]  ?? null;
+  const topInZone = inZoneActions[0] ?? null;
+  // Top 3 in-zone actions for the ranked list under the schematic
+  const top3 = inZoneActions.slice(0, 3);
+
+  // ── SVG geometry ──────────────────────────────────────────────────────
+  // Top-down view of the offensive zone. Player enters at the top (above
+  // the blue line); net sits at the bottom.
+  const VB = { w: 280, h: 180 };
+  const NET = { cx: 140, y: 160, w: 36 };
+  const BLUE = 20;       // blue-line y
+  const SLOT = { cx: 140, cy: 118 };
+  const PERIM_L = { cx: 75, cy: 95 };
+  const PERIM_R = { cx: 205, cy: 95 };
+  const CORNER_L = { cx: 30, cy: 165 };
+  const CORNER_R = { cx: 250, cy: 165 };
+
+  // ── Arrow path builder ────────────────────────────────────────────────
+  // Returns an SVG path string + endpoint for arrowhead orientation.
+  function entryPath(id: string): string {
+    if (id === "carry") {
+      // Smooth S-curve from above blue line in toward the slot
+      return `M 140 -5 Q 110 30 130 60 T 140 90`;
+    }
+    // dump — straight down to corner then chip to slot
+    return `M 140 -5 L 145 50 L 245 150`;
+  }
+  function inZonePath(id: string): string {
+    if (id === "slot")   return `M 140 90  L ${SLOT.cx} ${SLOT.cy} L ${NET.cx} ${NET.y - 4}`;
+    if (id === "drive")  return `M 140 80  Q 145 110 ${NET.cx} ${NET.y - 4}`;
+    if (id === "perim")  return `M 140 80  L ${PERIM_R.cx} ${PERIM_R.cy} L ${NET.cx + 4} ${NET.y - 4}`;
+    if (id === "battle") return `M 140 80  Q 60 120 ${CORNER_L.cx + 5} ${CORNER_L.cy - 5} L ${SLOT.cx - 10} ${SLOT.cy + 5}`;
+    /* hold */            return `M 140 80  Q 220 120 ${CORNER_R.cx - 5} ${CORNER_R.cy - 5} Q 245 175 230 165`;
+  }
+
+  // ── Sequence label ───────────────────────────────────────────────────
+  const sequenceLabel = [topEntry?.label, topInZone?.label]
+    .filter(Boolean).join(" → ");
+
+  return (
+    <div className="mt-2 mb-1 rounded border px-2 py-2"
+      style={{ borderColor: `${themeColor}33`, background: "rgba(0,0,0,0.30)" }}>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="hud-mono text-[9px] uppercase tracking-[0.18em]" style={{ color: themeColor }}>
+          ▸ PREDICTED PLAY
+        </span>
+        <span className="hud-mono text-[8px] uppercase tracking-[0.14em] text-[var(--text-muted)]">
+          bnn projection
+        </span>
+      </div>
+
+      <svg viewBox={`0 0 ${VB.w} ${VB.h}`} className="w-full" style={{ height: 130 }}>
+        <defs>
+          <marker id="ppArrow" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill={themeColor} />
+          </marker>
+          <marker id="ppArrowGhost" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill={themeColor} fillOpacity="0.45" />
+          </marker>
+        </defs>
+
+        {/* Boards (rounded rect) */}
+        <rect x="2" y="-2" width={VB.w - 4} height={VB.h + 2}
+          fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="1" rx="14" ry="14" />
+
+        {/* Blue line — bold, blue */}
+        <line x1="4" y1={BLUE} x2={VB.w - 4} y2={BLUE} stroke="#3b8fd0" strokeWidth="3" opacity="0.55" />
+
+        {/* Faceoff circles */}
+        <circle cx={PERIM_L.cx} cy={PERIM_L.cy} r="22"
+          fill="none" stroke="#e63a3a" strokeOpacity="0.20" strokeWidth="1.2" />
+        <circle cx={PERIM_R.cx} cy={PERIM_R.cy} r="22"
+          fill="none" stroke="#e63a3a" strokeOpacity="0.20" strokeWidth="1.2" />
+        <circle cx={PERIM_L.cx} cy={PERIM_L.cy} r="2" fill="#e63a3a" opacity="0.35" />
+        <circle cx={PERIM_R.cx} cy={PERIM_R.cy} r="2" fill="#e63a3a" opacity="0.35" />
+
+        {/* Goal crease — half-disc opening upward */}
+        <path d={`M ${NET.cx - 22} ${NET.y} A 22 22 0 0 1 ${NET.cx + 22} ${NET.y}`}
+          fill="rgba(59,143,208,0.10)" stroke="#3b8fd0" strokeOpacity="0.45" strokeWidth="0.8" />
+
+        {/* Goal line (red) */}
+        <line x1="40" y1={NET.y} x2={VB.w - 40} y2={NET.y} stroke="#e63a3a" strokeOpacity="0.55" strokeWidth="0.8" />
+
+        {/* Net rectangle (red posts) */}
+        <rect x={NET.cx - NET.w / 2} y={NET.y} width={NET.w} height="14"
+          fill="rgba(255,255,255,0.04)" stroke="#ff3030" strokeOpacity="0.85" strokeWidth="1.4" />
+        {/* Net mesh diagonals — quick visual texture */}
+        {[0.25, 0.5, 0.75].map((t, i) => (
+          <line key={i}
+            x1={NET.cx - NET.w / 2 + t * NET.w} y1={NET.y}
+            x2={NET.cx - NET.w / 2 + t * NET.w} y2={NET.y + 14}
+            stroke="#ff8080" strokeOpacity="0.30" strokeWidth="0.6" />
+        ))}
+
+        {/* Ghosted secondary in-zone paths (rank 2, 3) */}
+        {inZoneActions.slice(1, 3).map((a, i) => (
+          <path key={a.id}
+            d={inZonePath(a.id)}
+            fill="none"
+            stroke={themeColor}
+            strokeOpacity={0.22 - i * 0.06}
+            strokeWidth="1.4"
+            strokeDasharray="3 5"
+            markerEnd="url(#ppArrowGhost)" />
+        ))}
+
+        {/* Primary entry path */}
+        {topEntry && (
+          <path
+            d={entryPath(topEntry.id)}
+            fill="none"
+            stroke={themeColor}
+            strokeWidth="2.2"
+            strokeOpacity="0.85"
+            strokeLinecap="round"
+            markerEnd="url(#ppArrow)"
+            style={{
+              filter: `drop-shadow(0 0 4px ${themeColor})`,
+              strokeDasharray: 320,
+              strokeDashoffset: 320,
+              animation: "ppDraw 1100ms ease-out 80ms forwards",
+            }} />
+        )}
+        {/* Primary in-zone path */}
+        {topInZone && (
+          <path
+            d={inZonePath(topInZone.id)}
+            fill="none"
+            stroke={themeColor}
+            strokeWidth="2.2"
+            strokeOpacity="0.95"
+            strokeLinecap="round"
+            markerEnd="url(#ppArrow)"
+            style={{
+              filter: `drop-shadow(0 0 5px ${themeColor})`,
+              strokeDasharray: 240,
+              strokeDashoffset: 240,
+              animation: "ppDraw 1100ms ease-out 900ms forwards",
+            }} />
+        )}
+
+        {/* Origin marker — small triangle at the top of the zone */}
+        <polygon points={`${140 - 4},-3 ${140 + 4},-3 140,7`} fill={themeColor} opacity="0.85" />
+
+        <style>{`
+          @keyframes ppDraw { to { stroke-dashoffset: 0; } }
+          @media (prefers-reduced-motion: reduce) {
+            path { animation: none !important; stroke-dashoffset: 0 !important; }
+          }
+        `}</style>
+      </svg>
+
+      {sequenceLabel && (
+        <div className="mt-1.5 px-1 flex items-center gap-2 flex-wrap">
+          <span className="hud-mono text-[9px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">SEQ ·</span>
+          <span className="hud-mono text-[10px] uppercase tracking-[0.18em] font-semibold"
+            style={{ color: themeColor, textShadow: `0 0 6px ${themeColor}55` }}>
+            {sequenceLabel}
+          </span>
+        </div>
+      )}
+
+      {/* Top-3 ranked in-zone decisions */}
+      {top3.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-white/[0.05] space-y-1">
+          {top3.map((a, i) => (
+            <div key={a.id} className="flex items-center gap-2">
+              <span className="hud-mono text-[8px] uppercase tracking-[0.16em] w-3 text-right shrink-0"
+                style={{ color: i === 0 ? themeColor : "rgba(255,255,255,0.30)" }}>
+                {i + 1}
+              </span>
+              <span className="hud-mono text-[9px] uppercase tracking-[0.14em] text-white/65 w-20 shrink-0 truncate">
+                {a.label}
+              </span>
+              <div className="flex-1 h-1.5 rounded-sm overflow-hidden relative"
+                style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${themeColor}22` }}>
+                <div className="h-full" style={{
+                  width: `${Math.min(100, a.pct)}%`,
+                  background: `linear-gradient(90deg, ${themeColor}aa 0%, ${themeColor} 100%)`,
+                  boxShadow: `0 0 6px ${themeColor}55`,
+                  animation: `ppBar 900ms cubic-bezier(0.22,1,0.36,1) ${i * 90}ms backwards`,
+                  transformOrigin: "left center",
+                }} />
+              </div>
+              <span className="hud-mono text-[10px] tabular-nums w-10 text-right font-semibold"
+                style={{ color: themeColor }}>
+                {a.pct.toFixed(1)}%
+              </span>
+            </div>
+          ))}
+          <style jsx>{`
+            @keyframes ppBar {
+              from { transform: scaleX(0); opacity: 0; }
+              to   { transform: scaleX(1); opacity: 1; }
+            }
+            @media (prefers-reduced-motion: reduce) {
+              div { animation: none !important; }
+            }
+          `}</style>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Profile Page
 // ---------------------------------------------------------------------------
 
@@ -4135,6 +4389,23 @@ export default function PlayerProfilePage() {
               );
             })()}
 
+            {/* PREDICTED PLAY — top-down zone schematic with the most likely
+                entry + in-zone action sequence given current NN weights.
+                Skaters only — the goalie's neural axes are save-related and
+                don't map to ice positions. */}
+            {!isGoalie && (
+              <PredictedPlay
+                carry={data.nn_carry_in_pct}
+                dump={data.nn_dump_pct}
+                slot={data.nn_shoot_slot_pct}
+                perim={data.nn_shoot_perimeter_pct}
+                drive={data.nn_drive_net_pct}
+                battleC={data.nn_battle_corner_pct}
+                holdC={data.nn_hold_corner_pct}
+                themeColor={teamColor}
+              />
+            )}
+
             {/* DECISION MATRIX — animated bars per NN dimension (skater + goalie) */}
             {(() => {
               const goalieNodes: NeuralNode[] = isGoalie ? [
@@ -5208,6 +5479,7 @@ export default function PlayerProfilePage() {
               <Shot3D
                 shots={goalieShots3D}
                 themeColor={teamColor}
+                goalie
                 fallback={<GoalieShotMapViz shots={goalieShots} />}
               />
             </Card>
