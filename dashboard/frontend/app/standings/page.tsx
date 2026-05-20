@@ -663,15 +663,79 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
 
   // Stanley Cup centerpiece — sits between East CF and West CF so the bracket
   // reads top-to-bottom: East R1 → East R2 → East CF → Cup → West CF → West R2 → West R1.
-  // Kept quiet so it tones with the surrounding bracket cards instead of dominating them.
+  // Smooth halo + soft labels — refined, not stripped.
   function StanleyCupCenter() {
+    const [hovered, setHovered] = useState(false);
     return (
       <div className="flex items-center justify-center pt-1 pb-1">
-        <div className="relative px-6 py-3 text-center">
-          {/* Cup SVG — silver, low opacity, no glow */}
-          <div className="relative flex justify-center mb-2">
-            <svg width="56" height="78" viewBox="0 0 60 82" fill="none" xmlns="http://www.w3.org/2000/svg"
-              style={{ opacity: 0.55 }}>
+        <div
+          className="relative px-8 py-5 text-center cursor-default transition-all duration-700"
+          style={{ transform: hovered ? "translateY(-1px)" : "translateY(0)" }}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+        >
+          {/* Smooth rotating halo — two soft arcs counter-rotating, no harsh tick spokes */}
+          <svg
+            viewBox="0 0 240 240"
+            aria-hidden
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none w-[170%] max-w-none h-[170%]"
+            style={{
+              zIndex: 0,
+              opacity: hovered ? 0.55 : 0.30,
+              transition: "opacity 600ms ease",
+            }}
+          >
+            <defs>
+              <linearGradient id="cupArc" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%"  stopColor="#fbbf24" stopOpacity="0" />
+                <stop offset="50%" stopColor="#fbbf24" stopOpacity="0.85" />
+                <stop offset="100%" stopColor="#fbbf24" stopOpacity="0" />
+              </linearGradient>
+              <linearGradient id="cupArc2" x1="1" y1="0" x2="0" y2="1">
+                <stop offset="0%"  stopColor="#E8D090" stopOpacity="0" />
+                <stop offset="60%" stopColor="#E8D090" stopOpacity="0.45" />
+                <stop offset="100%" stopColor="#E8D090" stopOpacity="0" />
+              </linearGradient>
+            </defs>
+
+            {/* Outer slow halo */}
+            <g style={{ transformOrigin: "120px 120px", animation: `cupRotateSlow ${hovered ? 18 : 48}s linear infinite` }}>
+              <circle cx={120} cy={120} r={102} fill="none" stroke="url(#cupArc)" strokeWidth={1.4} strokeDasharray="70 160" strokeLinecap="round" />
+            </g>
+
+            {/* Counter-rotating inner arc */}
+            <g style={{ transformOrigin: "120px 120px", animation: `cupRotateRev ${hovered ? 12 : 30}s linear infinite` }}>
+              <circle cx={120} cy={120} r={78} fill="none" stroke="url(#cupArc2)" strokeWidth={1.2} strokeDasharray="40 110" strokeLinecap="round" />
+            </g>
+
+            {/* Subtle pulse */}
+            <circle cx={120} cy={120} r={50} fill="none" stroke="#fbbf24" strokeWidth={1}
+              style={{ animation: "cupPulse 6.2s ease-out infinite" }} />
+          </svg>
+
+          {/* Top label — STANLEY CUP, softer gradient + tighter tracking */}
+          <div className="relative z-[3] mb-2">
+            <div className="hud-mono text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.32em] bg-clip-text text-transparent"
+              style={{
+                backgroundImage: "linear-gradient(180deg, #ffffff 0%, #E8D090 50%, #C9A84C 100%)",
+                filter: hovered ? "drop-shadow(0 0 4px rgba(251,191,36,0.35))" : "drop-shadow(0 0 2px rgba(251,191,36,0.18))",
+                transition: "filter 500ms ease",
+              }}>
+              Stanley Cup
+            </div>
+          </div>
+
+          {/* Cup SVG — small glow, gentle hover scale */}
+          <div className="relative z-[3] flex justify-center mb-2">
+            <svg width="64" height="88" viewBox="0 0 60 82" fill="none" xmlns="http://www.w3.org/2000/svg"
+              style={{
+                opacity: 0.88,
+                filter: hovered
+                  ? "drop-shadow(0 0 10px rgba(251,191,36,0.45)) drop-shadow(0 0 20px rgba(251,191,36,0.18))"
+                  : "drop-shadow(0 0 6px rgba(251,191,36,0.28)) drop-shadow(0 0 12px rgba(251,191,36,0.10))",
+                transform: hovered ? "scale(1.06) translateY(-1px)" : "scale(1) translateY(0)",
+                transition: "transform 500ms cubic-bezier(0.22,1,0.36,1), filter 500ms ease",
+              }}>
               <ellipse cx="30" cy="80" rx="18" ry="2" fill="#cbd5e1" opacity="0.18"/>
               <rect x="4"  y="74" width="52" height="5"   rx="1.5" fill="#e2e8f0" opacity="0.78"/>
               <rect x="8"  y="70" width="44" height="4.5" rx="1"   fill="#d1d5db" opacity="0.68"/>
@@ -699,10 +763,22 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
             </svg>
           </div>
 
-          {/* Caption — matches the muted treatment of "WESTERN CONFERENCE FINAL" above */}
-          <div className="hud-mono text-[10px] uppercase tracking-[0.22em] text-white/40">
-            Stanley Cup Final
+          {/* Bottom caption — soft white, matches surrounding subtitles */}
+          <div className="relative z-[3] hud-mono text-[10px] uppercase tracking-[0.22em] text-white/45">
+            Finals
           </div>
+
+          <style jsx>{`
+            @keyframes cupRotateSlow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+            @keyframes cupRotateRev  { from { transform: rotate(360deg); } to { transform: rotate(0deg); } }
+            @keyframes cupPulse {
+              0%   { r: 50; stroke-opacity: 0.45; }
+              100% { r: 110; stroke-opacity: 0; }
+            }
+            @media (prefers-reduced-motion: reduce) {
+              svg g, circle { animation: none !important; }
+            }
+          `}</style>
         </div>
       </div>
     );
