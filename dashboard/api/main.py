@@ -671,11 +671,21 @@ async def scoreboard() -> dict:
 
     _PERIOD_LABELS = {1: "1ST", 2: "2ND", 3: "3RD", 4: "OT", 5: "SO"}
 
+    from datetime import date, timedelta
+    _today_local = date.today()
+    # /schedule/{date} returns a 7-day gameWeek starting from `date`. To cover
+    # ~14 days forward (the ECF/Cup window can span multiple rounds with sparse
+    # scheduling), we fetch the current week plus the next two weeks.
+    week_anchor_1 = _today_local.isoformat()
+    week_anchor_2 = (_today_local + timedelta(days=7)).isoformat()
+    week_anchor_3 = (_today_local + timedelta(days=14)).isoformat()
     try:
         async with NHLClient() as client:
-            raw, sched_raw = await asyncio.gather(
+            raw, sched_raw, sched_next, sched_next2 = await asyncio.gather(
                 client.get_scoreboard(),
-                client.get_schedule("now"),
+                client.get_schedule(week_anchor_1),
+                client.get_schedule(week_anchor_2),
+                client.get_schedule(week_anchor_3),
                 return_exceptions=True,
             )
             if isinstance(raw, Exception):
@@ -685,43 +695,46 @@ async def scoreboard() -> dict:
     except Exception as exc:  # noqa: BLE001
         return {"games": [], "error": f"Unexpected error: {exc}"}
 
-    # NHL's /score/now omits seriesStatus entirely. /schedule/now has it for every
+    # Merge the three weekly schedules into a single iterable of gameWeek
+    # buckets — duplicate dates will be deduped by game_id below.
+    schedule_buckets: list[dict] = []
+    for s in (sched_raw, sched_next, sched_next2):
+        if isinstance(s, dict):
+            schedule_buckets.extend(s.get("gameWeek") or [])
+
+    # NHL's /score/now omits seriesStatus entirely. /schedule has it for every
     # playoff game going forward — match by game_id first, then fall back to the
-    # team-pair (yesterday's FINAL won't be in schedule/now, but tomorrow's game 2
+    # team-pair (yesterday's FINAL won't be in schedule, but tomorrow's game 2
     # in the same series carries the post-game-1 series score).
     series_by_id: dict[int, dict] = {}
     series_by_pair: dict[frozenset, dict] = {}
-    if isinstance(sched_raw, dict):
-        for bucket in sched_raw.get("gameWeek") or []:
-            for g in bucket.get("games") or []:
-                ss = g.get("seriesStatus")
-                if not ss:
-                    continue
-                gid = g.get("id")
-                if gid:
-                    series_by_id[gid] = ss
-                away_abbrev = (g.get("awayTeam") or {}).get("abbrev", "")
-                home_abbrev = (g.get("homeTeam") or {}).get("abbrev", "")
-                if away_abbrev and home_abbrev:
-                    series_by_pair.setdefault(frozenset({away_abbrev, home_abbrev}), ss)
+    for bucket in schedule_buckets:
+        for g in bucket.get("games") or []:
+            ss = g.get("seriesStatus")
+            if not ss:
+                continue
+            gid = g.get("id")
+            if gid:
+                series_by_id[gid] = ss
+            away_abbrev = (g.get("awayTeam") or {}).get("abbrev", "")
+            home_abbrev = (g.get("homeTeam") or {}).get("abbrev", "")
+            if away_abbrev and home_abbrev:
+                series_by_pair.setdefault(frozenset({away_abbrev, home_abbrev}), ss)
 
     games_by_date = raw.get("gamesByDate") or []
-    if not games_by_date:
+    if not games_by_date and not schedule_buckets:
         return {"games": []}
 
-    from datetime import date, timedelta
     # Use NHL's focusedDate to avoid UTC midnight / ET timezone mismatch
-    today_str          = raw.get("focusedDate") or date.today().isoformat()
+    today_str          = raw.get("focusedDate") or _today_local.isoformat()
     _today             = date.fromisoformat(today_str)
     yesterday_str      = (_today - timedelta(days=1)).isoformat()
     two_days_ago_str   = (_today - timedelta(days=2)).isoformat()
-    # Look 6 days forward — playoff rounds with only 4 teams left have very
-    # few games per day, so the strip needs a deeper future window to stay
-    # useful.
-    forward_dates = [(_today + timedelta(days=i)).isoformat() for i in range(1, 7)]
+    # Look 14 days forward so the ECF / Cup Final window stays populated even
+    # when only one game per series is scheduled at a time.
+    forward_dates = [(_today + timedelta(days=i)).isoformat() for i in range(1, 15)]
     keep_dates    = {today_str, yesterday_str, two_days_ago_str, *forward_dates}
 
-    # Flatten last 2 days + today + up to 6 days forward
     all_games: list[dict] = []
     date_labels: dict = {}
     seen_game_ids: set[int] = set()
@@ -736,11 +749,9 @@ async def scoreboard() -> dict:
                 date_labels[gid] = date_str
                 seen_game_ids.add(gid)
 
-    # NHL's /score/now usually only covers ~2 days. Supplement future dates
-    # from /schedule/now's gameWeek so the ECF schedule shows multiple days
-    # forward even though those games aren't live yet.
-    if isinstance(sched_raw, dict):
-        for bucket in sched_raw.get("gameWeek") or []:
+    # Supplement future dates from the merged schedule weeks so the strip can
+    # carry up to ~14 days forward even when /score/now only covers ~2 days.
+    for bucket in schedule_buckets:
             date_str = bucket.get("date", "")
             if date_str not in keep_dates:
                 continue

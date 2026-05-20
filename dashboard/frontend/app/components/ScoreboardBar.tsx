@@ -184,6 +184,31 @@ function GameCard({ g }: { g: Game }) {
   const label        = statusLabel(g);
   const overlayText  = hoverLabel(g);
   const countdown    = useCountdown(g);
+
+  // Score-change flash — track previous scores and flag the row whose
+  // value just incremented so the new number flares briefly.
+  const prevAway = useRef<number | null | undefined>(g.away_score);
+  const prevHome = useRef<number | null | undefined>(g.home_score);
+  const [awayFlash, setAwayFlash] = useState(false);
+  const [homeFlash, setHomeFlash] = useState(false);
+  useEffect(() => {
+    if (prevAway.current != null && g.away_score != null && g.away_score > prevAway.current) {
+      setAwayFlash(true);
+      const t = setTimeout(() => setAwayFlash(false), 1300);
+      prevAway.current = g.away_score;
+      return () => clearTimeout(t);
+    }
+    prevAway.current = g.away_score;
+  }, [g.away_score]);
+  useEffect(() => {
+    if (prevHome.current != null && g.home_score != null && g.home_score > prevHome.current) {
+      setHomeFlash(true);
+      const t = setTimeout(() => setHomeFlash(false), 1300);
+      prevHome.current = g.home_score;
+      return () => clearTimeout(t);
+    }
+    prevHome.current = g.home_score;
+  }, [g.home_score]);
   const isFinal      = g.game_state === "FINAL" || g.game_state === "OFF";
   const isLive       = g.game_state === "LIVE"  || g.game_state === "CRIT";
   const isPre        = g.game_state === "PRE"   || g.game_state === "FUT";
@@ -261,7 +286,12 @@ function GameCard({ g }: { g: Game }) {
             )}
           </span>
         </div>
-        <span className={`ml-auto text-[15px] font-black font-mono tabular-nums ${isLosing ? "text-white/20" : "text-white"}`}>
+        <span
+          className={`ml-auto text-[15px] font-black font-mono tabular-nums ${isLosing ? "text-white/20" : "text-white"} ${
+            (isHome ? homeFlash : awayFlash) ? "score-flash" : ""
+          }`}
+          style={{ color: (isHome ? homeFlash : awayFlash) ? clr : undefined }}
+        >
           {hideScores ? <span className="text-[11px] text-white/20">•</span> : (isScored ? score : "–")}
         </span>
       </div>

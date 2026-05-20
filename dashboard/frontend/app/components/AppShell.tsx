@@ -48,7 +48,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <ScoreboardBar />
       <GoalFeed />
       <HideScoresToggle />
-      {children}
+      {/* Keyed wrapper re-mounts on route change so .page-enter fires a
+          fresh fade-in transition between pages. */}
+      <div key={pathname} className="page-enter">
+        {children}
+      </div>
     </ClientLayout>
   );
 }

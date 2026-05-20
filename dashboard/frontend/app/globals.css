@@ -452,6 +452,62 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   animation: hudGridDrift 36s linear infinite;
 }
 
+/* Ambient particle field — slow upward drift of glowing dots. Cheap because
+   it's a single repeating radial-gradient that animates background-position
+   instead of N individual DOM nodes. */
+@keyframes hudParticleDrift {
+  0%   { background-position: 0px 0px,    50px 200px, 100px 80px; }
+  100% { background-position: 0px -600px, 50px -440px, 100px -560px; }
+}
+.hud-particles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    radial-gradient(circle 1px at 12% 35%,  rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.55) 0%, transparent 70%),
+    radial-gradient(circle 1px at 78% 18%,  rgba(232,208,144,0.50) 0%, transparent 70%),
+    radial-gradient(circle 1.4px at 50% 88%, rgba(255,255,255,0.40) 0%, transparent 70%);
+  background-size: 220px 320px, 240px 360px, 260px 300px;
+  background-repeat: repeat;
+  opacity: 0.55;
+  mask-image: radial-gradient(ellipse 85% 85% at 50% 50%, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 90%);
+  -webkit-mask-image: radial-gradient(ellipse 85% 85% at 50% 50%, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 90%);
+  animation: hudParticleDrift 26s linear infinite;
+}
+
+/* Score flash — used to briefly highlight a number when it changes. The
+   keyframe widens the brightness + shadow, then settles back to normal. */
+@keyframes scoreFlash {
+  0%   { filter: brightness(1.0); text-shadow: none; }
+  20%  { filter: brightness(1.45); text-shadow: 0 0 12px currentColor, 0 0 24px currentColor; }
+  100% { filter: brightness(1.0); text-shadow: none; }
+}
+.score-flash {
+  animation: scoreFlash 1.2s ease-out 1 both;
+}
+
+/* Page transition fade — full-screen mount fade for /app/(routes). The
+   ClientLayout wrapper applies this to the main outlet, keyed by pathname
+   in AppShell so route changes re-trigger the animation. */
+@keyframes pageEnter {
+  0%   { opacity: 0; transform: translateY(8px) scale(0.985); filter: blur(2px); }
+  100% { opacity: 1; transform: translateY(0)   scale(1);     filter: blur(0); }
+}
+.page-enter {
+  animation: pageEnter 360ms cubic-bezier(0.22, 1, 0.36, 1) 1 both;
+}
+
+/* Scoreboard strip live-region pulse — runs while any game is LIVE so the
+   strip's left edge breathes softly to signal "live data on this page". */
+@keyframes livePulse {
+  0%, 100% { box-shadow: inset 4px 0 0 -2px rgba(74,222,128,0.45), inset 0 0 24px -6px rgba(74,222,128,0.18); }
+  50%      { box-shadow: inset 4px 0 0 -2px rgba(74,222,128,0.85), inset 0 0 36px -6px rgba(74,222,128,0.32); }
+}
+.live-pulse {
+  animation: livePulse 3.2s ease-in-out infinite;
+}
+
 /* ─── JARVIS micro-interactions ────────────────────────────────────────────
    Reusable text/element effects for that "interacting with a futuristic
    intelligence" feel. All cheap CSS — no JS, no perf cost on video pages. */
@@ -624,6 +680,10 @@ img[src*="assets.nhle.com/mugs"]:hover {
   .hud-pulse-dot,
   .hud-row,
   .hud-grid-bg,
+  .hud-particles,
+  .live-pulse,
+  .page-enter,
+  .score-flash,
   .jarvis-type,
   .jarvis-glitch-hover,
   .jarvis-flicker,
