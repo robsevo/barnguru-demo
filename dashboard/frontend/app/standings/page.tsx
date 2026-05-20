@@ -415,19 +415,56 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
       }
     }
 
+    // HUD chrome — corner brackets + scanline + boot-in fade. Renders the
+    // matchup card as a holographic dossier rather than a flat panel.
+    const liveSeries = !!series && series.winningTeamId == null && (typeof topWins === "number" || typeof bottomWins === "number") && (topWins ?? 0) + (bottomWins ?? 0) > 0;
     return (
-      <div className="rounded-xl border border-[#C9A84C]/[0.18] bg-gradient-to-b from-white/[0.018] via-white/[0.006] to-transparent overflow-hidden shadow-[0_8px_28px_rgba(0,0,0,0.72),inset_0_1px_0_rgba(220,228,240,0.07)]">
+      <div className="relative jarvis-boot jarvis-shimmer rounded-xl border border-[#C9A84C]/[0.22] bg-gradient-to-b from-white/[0.020] via-white/[0.006] to-transparent overflow-hidden shadow-[0_8px_28px_rgba(0,0,0,0.72),inset_0_1px_0_rgba(220,228,240,0.07)] hover:border-[#C9A84C]/[0.42] hover:shadow-[0_8px_28px_rgba(0,0,0,0.72),0_0_22px_rgba(201,168,76,0.18),inset_0_1px_0_rgba(220,228,240,0.07)] transition-shadow duration-300">
+        {/* HUD corner brackets — four corners */}
+        <span aria-hidden className="absolute pointer-events-none" style={{ top: 5, left: 5, width: 9, height: 9, borderTop: "1px solid #C9A84C99", borderLeft: "1px solid #C9A84C99" }} />
+        <span aria-hidden className="absolute pointer-events-none" style={{ top: 5, right: 5, width: 9, height: 9, borderTop: "1px solid #C9A84C99", borderRight: "1px solid #C9A84C99" }} />
+        <span aria-hidden className="absolute pointer-events-none" style={{ bottom: 5, left: 5, width: 9, height: 9, borderBottom: "1px solid #C9A84C99", borderLeft: "1px solid #C9A84C99" }} />
+        <span aria-hidden className="absolute pointer-events-none" style={{ bottom: 5, right: 5, width: 9, height: 9, borderBottom: "1px solid #C9A84C99", borderRight: "1px solid #C9A84C99" }} />
+
+        {/* Scanline drift overlay — only when a series is live (in progress, no winner yet) */}
+        {liveSeries && (
+          <div
+            aria-hidden
+            className="absolute inset-x-0 top-0 h-px pointer-events-none z-[1]"
+            style={{
+              background: "linear-gradient(90deg, transparent, rgba(201,168,76,0.85), transparent)",
+              boxShadow: "0 0 10px rgba(201,168,76,0.55)",
+              animation: "matchupScan 5.5s linear infinite",
+            }}
+          />
+        )}
+
         <BracketTeamRow row={top} seed={topSeed} divider wins={topWins} neededToWin={needed} clinched={topClinched} eliminated={topOut} />
-        <div className="flex items-center gap-2 px-3 py-1">
-          <div className="flex-1 h-px bg-white/[0.04]" />
+        <div className="flex items-center gap-2 px-3 py-1 relative">
+          <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[#C9A84C]/[0.18] to-transparent" />
           {statusText ? (
-            <span className="text-[9px] font-black tracking-[0.18em] text-[#C9A84C]/70 uppercase whitespace-nowrap">{statusText}</span>
+            <span className="hud-mono text-[9px] font-black tracking-[0.20em] text-[#C9A84C]/85 uppercase whitespace-nowrap"
+              style={{ textShadow: "0 0 6px rgba(201,168,76,0.45)" }}>
+              ◢ {statusText} ◣
+            </span>
           ) : (
-            <span className="text-[7px] font-black tracking-[0.3em] text-white/10 uppercase">vs</span>
+            <span className="hud-mono text-[7px] font-black tracking-[0.30em] text-white/15 uppercase">vs</span>
           )}
-          <div className="flex-1 h-px bg-white/[0.04]" />
+          <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[#C9A84C]/[0.18] to-transparent" />
         </div>
         <BracketTeamRow row={bottom} seed={bottomSeed} wins={bottomWins} neededToWin={needed} clinched={botClinched} eliminated={botOut} />
+
+        <style jsx>{`
+          @keyframes matchupScan {
+            0%   { transform: translateX(-100%); opacity: 0; }
+            10%  { opacity: 1; }
+            90%  { opacity: 1; }
+            100% { transform: translateX(100%);  opacity: 0; }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            div { animation: none !important; }
+          }
+        `}</style>
       </div>
     );
   }
@@ -539,10 +576,16 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
 
     const header = (
       <div className="flex items-center gap-3 mb-5">
-        <div className="w-0.5 h-4 rounded-full bg-white/25" />
-        <h2 className="text-[13px] font-black uppercase tracking-[0.22em] text-white/55">{name}ern Conference</h2>
-        <div className="flex-1 h-px bg-white/[0.06]" />
-        <span className="hidden sm:inline-block text-[7px] font-black uppercase tracking-[0.22em] text-white/18 border border-white/[0.07] px-2 py-0.5 rounded-full">{roundLabel}</span>
+        <span className="hud-pulse-dot" style={{ background: name === "East" ? "#60a5fa" : "#f87171" }} />
+        <h2 className="hud-mono text-[13px] font-black uppercase tracking-[0.24em] text-white/70"
+          style={{ textShadow: name === "East" ? "0 0 6px rgba(96,165,250,0.30)" : "0 0 6px rgba(248,113,113,0.30)" }}>
+          ◢ {name}ern Conference
+        </h2>
+        <div className="flex-1 h-px bg-gradient-to-r from-[#C9A84C]/[0.20] via-[#C9A84C]/[0.06] to-transparent" />
+        <span className="hidden sm:inline-flex items-center gap-1 hud-mono text-[8px] font-black uppercase tracking-[0.24em] text-[#C9A84C]/75 border border-[#C9A84C]/[0.30] bg-[#C9A84C]/[0.05] px-2 py-0.5 rounded-full">
+          <span className="hud-pulse-dot" style={{ background: "#C9A84C" }} />
+          {roundLabel}
+        </span>
       </div>
     );
 
@@ -572,18 +615,26 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
       <div>
         {confFinal ? (
           <div className="max-w-xl mx-auto">
-            <div className="text-[8px] font-black uppercase tracking-[0.28em] text-[#C9A84C]/55 mb-2 text-center">{name}ern Conference Final</div>
+            <div className="flex items-center gap-2 mb-2 justify-center">
+              <span aria-hidden className="text-[10px] text-[#C9A84C]/70">◢</span>
+              <span className="hud-mono text-[9px] font-black uppercase tracking-[0.30em] text-[#C9A84C]/85"
+                style={{ textShadow: "0 0 6px rgba(201,168,76,0.40)" }}>
+                {name}ern Conference Final
+              </span>
+              <span aria-hidden className="text-[10px] text-[#C9A84C]/70">◣</span>
+            </div>
             <MatchupCard top={rowFor(confFinal.topSeed.team)} bottom={rowFor(confFinal.bottomSeed.team)} />
           </div>
         ) : (
           <div className="flex items-center gap-3">
-            <div className="flex-1 h-px bg-white/[0.05]" />
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#C9A84C]/[0.15] bg-white/[0.015]">
-              <span className="text-[7px] font-black uppercase tracking-[0.25em] text-white/18">Conf Final</span>
+            <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[#C9A84C]/[0.15] to-transparent" />
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#C9A84C]/[0.22] bg-[#C9A84C]/[0.04]">
+              <span className="hud-pulse-dot" style={{ background: "#C9A84C" }} />
+              <span className="hud-mono text-[8px] font-black uppercase tracking-[0.25em] text-[#C9A84C]/65">Conf Final</span>
               <span className="text-white/10 text-[10px]">·</span>
-              <span className="text-[8px] text-white/12 italic">Winner advances to SCF</span>
+              <span className="text-[8px] text-white/30 italic">Winner advances to SCF</span>
             </div>
-            <div className="flex-1 h-px bg-white/[0.05]" />
+            <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[#C9A84C]/[0.15] to-transparent" />
           </div>
         )}
       </div>
@@ -617,37 +668,160 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
   function StanleyCupCenter() {
     return (
       <div className="flex items-center justify-center pt-1 pb-1">
-        <div className="rounded-2xl border border-[#fbbf24]/18 bg-[#fbbf24]/[0.025] px-6 py-4 text-center shadow-[0_0_40px_rgba(251,191,36,0.06)]">
-          <div className="flex justify-center mb-2">
-            <svg width="60" height="82" viewBox="0 0 60 82" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <ellipse cx="30" cy="80" rx="18" ry="2" fill="#cbd5e1" opacity="0.18"/>
-              <rect x="4"  y="74" width="52" height="5"   rx="1.5" fill="#e2e8f0" opacity="0.65"/>
-              <rect x="8"  y="70" width="44" height="4.5" rx="1"   fill="#d1d5db" opacity="0.55"/>
-              <rect x="4"  y="74" width="52" height="1.5" rx="0.5" fill="white"   opacity="0.18"/>
-              <rect x="9"  y="62" width="42" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.52"/>
-              <rect x="9"  y="53" width="42" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.47"/>
-              <rect x="9"  y="44" width="42" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.42"/>
-              <rect x="10" y="35" width="40" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.38"/>
-              <rect x="11" y="26" width="38" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.33"/>
-              <line x1="9"  y1="62" x2="51" y2="62" stroke="white" strokeWidth="0.8" opacity="0.30"/>
-              <line x1="9"  y1="53" x2="51" y2="53" stroke="white" strokeWidth="0.8" opacity="0.26"/>
-              <line x1="9"  y1="44" x2="51" y2="44" stroke="white" strokeWidth="0.8" opacity="0.22"/>
-              <line x1="10" y1="35" x2="50" y2="35" stroke="white" strokeWidth="0.8" opacity="0.20"/>
-              <rect x="9"  y="62" width="42" height="2.5" rx="0.3" fill="white" opacity="0.12"/>
-              <rect x="9"  y="53" width="42" height="2.5" rx="0.3" fill="white" opacity="0.10"/>
-              <rect x="9"  y="44" width="42" height="2.5" rx="0.3" fill="white" opacity="0.09"/>
-              <rect x="10" y="35" width="40" height="2.5" rx="0.3" fill="white" opacity="0.08"/>
-              <rect x="11" y="26" width="38" height="2.5" rx="0.3" fill="white" opacity="0.07"/>
-              <rect x="22" y="18" width="16" height="9"   rx="1"   fill="#cbd5e1" opacity="0.55"/>
-              <line x1="22" y1="22.5" x2="38" y2="22.5"  stroke="white" strokeWidth="0.6" opacity="0.22"/>
-              <path d="M13 5 C11 5 9 18 30 18 C51 18 49 5 47 5 Z" fill="#cbd5e1" opacity="0.42"/>
-              <path d="M18 7 C16 7 15 17 30 17 C45 17 44 7 42 7 Z" fill="white"   opacity="0.08"/>
-              <rect x="11" y="2" width="38" height="5"   rx="2"   fill="#e2e8f0" opacity="0.78"/>
-              <rect x="14" y="2.5" width="32" height="2" rx="0.8" fill="white"   opacity="0.22"/>
-            </svg>
+        <div
+          className="relative jarvis-boot rounded-2xl border border-[#fbbf24]/30 bg-gradient-to-b from-[#fbbf24]/[0.04] via-[#fbbf24]/[0.015] to-transparent px-8 py-6 text-center"
+          style={{
+            boxShadow: "0 0 60px rgba(251,191,36,0.10), 0 0 24px rgba(251,191,36,0.18) inset, 0 1px 0 rgba(232,208,144,0.12) inset",
+          }}
+        >
+          {/* HUD corner brackets */}
+          {([
+            { t: 6,  l: 6  },
+            { t: 6,  r: 6  },
+            { b: 6,  l: 6  },
+            { b: 6,  r: 6  },
+          ] as { t?: number; b?: number; l?: number; r?: number }[]).map((p, i) => (
+            <span key={i} aria-hidden className="absolute pointer-events-none z-[2]" style={{
+              width: 11, height: 11,
+              top: p.t, bottom: p.b, left: p.l, right: p.r,
+              borderTop:    p.t != null ? "1px solid #fbbf24cc" : undefined,
+              borderBottom: p.b != null ? "1px solid #fbbf24cc" : undefined,
+              borderLeft:   p.l != null ? "1px solid #fbbf24cc" : undefined,
+              borderRight:  p.r != null ? "1px solid #fbbf24cc" : undefined,
+            }} />
+          ))}
+
+          {/* Halo rings — rotating Iron Man chrome around the cup */}
+          <svg
+            viewBox="0 0 240 240"
+            aria-hidden
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none w-[180%] max-w-none h-[180%]"
+            style={{ zIndex: 0, opacity: 0.55 }}
+          >
+            <defs>
+              <linearGradient id="cupArc" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%"  stopColor="#fbbf24" stopOpacity="0" />
+                <stop offset="50%" stopColor="#fbbf24" stopOpacity="0.95" />
+                <stop offset="100%" stopColor="#fbbf24" stopOpacity="0" />
+              </linearGradient>
+              <linearGradient id="cupArc2" x1="1" y1="0" x2="0" y2="1">
+                <stop offset="0%"  stopColor="#E8D090" stopOpacity="0" />
+                <stop offset="60%" stopColor="#E8D090" stopOpacity="0.55" />
+                <stop offset="100%" stopColor="#E8D090" stopOpacity="0" />
+              </linearGradient>
+            </defs>
+
+            {/* Outer slow ring — dashed */}
+            <g style={{ transformOrigin: "120px 120px", animation: "cupRotateSlow 36s linear infinite" }}>
+              <circle cx={120} cy={120} r={110} fill="none" stroke="#fbbf24" strokeOpacity={0.18} strokeDasharray="2 8" />
+              {[0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330].map((deg, i) => {
+                const rad = (deg * Math.PI) / 180;
+                return (
+                  <line key={i}
+                    x1={120 + Math.cos(rad) * 105} y1={120 + Math.sin(rad) * 105}
+                    x2={120 + Math.cos(rad) * 115} y2={120 + Math.sin(rad) * 115}
+                    stroke="#fbbf24" strokeOpacity={0.55} strokeWidth={1.2}
+                  />
+                );
+              })}
+            </g>
+
+            {/* Middle counter-rotating arc */}
+            <g style={{ transformOrigin: "120px 120px", animation: "cupRotateRev 22s linear infinite" }}>
+              <circle cx={120} cy={120} r={90} fill="none" stroke="url(#cupArc)" strokeWidth={1.6} strokeDasharray="100 60 40 60" strokeLinecap="round" />
+            </g>
+
+            {/* Inner fast arc */}
+            <g style={{ transformOrigin: "120px 120px", animation: "cupRotateFast 12s linear infinite" }}>
+              <circle cx={120} cy={120} r={70} fill="none" stroke="url(#cupArc2)" strokeWidth={1.4} strokeDasharray="30 120" strokeLinecap="round" />
+            </g>
+
+            {/* Pulse rings */}
+            <circle cx={120} cy={120} r={50} fill="none" stroke="#fbbf24" strokeWidth={1}
+              style={{ animation: "cupPulse 5.2s ease-out infinite" }} />
+            <circle cx={120} cy={120} r={50} fill="none" stroke="#fbbf24" strokeWidth={1}
+              style={{ animation: "cupPulse 5.2s ease-out infinite 2.6s" }} />
+          </svg>
+
+          {/* TARGET strip at top */}
+          <div className="relative z-[3] flex items-center justify-center gap-2 mb-2">
+            <span className="hud-pulse-dot" style={{ background: "#fbbf24" }} />
+            <span className="hud-mono jarvis-flicker text-[8px] font-black uppercase tracking-[0.30em]"
+              style={{ color: "#fbbf24", textShadow: "0 0 6px rgba(251,191,36,0.55)" }}>
+              ◢ ULTIMATE PRIZE ◣
+            </span>
           </div>
-          <div className="text-[7px] font-black uppercase tracking-[0.35em] text-[#fbbf24]/50 mb-1">Stanley Cup Final</div>
-          <div className="text-[11px] font-bold text-white/25 italic">East Champion vs West Champion</div>
+
+          {/* Cup SVG with vertical scanline */}
+          <div className="relative z-[3] flex justify-center mb-3">
+            <svg width="70" height="96" viewBox="0 0 60 82" fill="none" xmlns="http://www.w3.org/2000/svg"
+              style={{ filter: "drop-shadow(0 0 8px rgba(251,191,36,0.45)) drop-shadow(0 0 16px rgba(251,191,36,0.20))" }}>
+              <ellipse cx="30" cy="80" rx="18" ry="2" fill="#cbd5e1" opacity="0.18"/>
+              <rect x="4"  y="74" width="52" height="5"   rx="1.5" fill="#e2e8f0" opacity="0.78"/>
+              <rect x="8"  y="70" width="44" height="4.5" rx="1"   fill="#d1d5db" opacity="0.68"/>
+              <rect x="4"  y="74" width="52" height="1.5" rx="0.5" fill="white"   opacity="0.22"/>
+              <rect x="9"  y="62" width="42" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.62"/>
+              <rect x="9"  y="53" width="42" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.57"/>
+              <rect x="9"  y="44" width="42" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.52"/>
+              <rect x="10" y="35" width="40" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.48"/>
+              <rect x="11" y="26" width="38" height="8.5" rx="0.5" fill="#cbd5e1" opacity="0.43"/>
+              <line x1="9"  y1="62" x2="51" y2="62" stroke="white" strokeWidth="0.8" opacity="0.40"/>
+              <line x1="9"  y1="53" x2="51" y2="53" stroke="white" strokeWidth="0.8" opacity="0.36"/>
+              <line x1="9"  y1="44" x2="51" y2="44" stroke="white" strokeWidth="0.8" opacity="0.32"/>
+              <line x1="10" y1="35" x2="50" y2="35" stroke="white" strokeWidth="0.8" opacity="0.30"/>
+              <rect x="9"  y="62" width="42" height="2.5" rx="0.3" fill="white" opacity="0.16"/>
+              <rect x="9"  y="53" width="42" height="2.5" rx="0.3" fill="white" opacity="0.14"/>
+              <rect x="9"  y="44" width="42" height="2.5" rx="0.3" fill="white" opacity="0.12"/>
+              <rect x="10" y="35" width="40" height="2.5" rx="0.3" fill="white" opacity="0.10"/>
+              <rect x="11" y="26" width="38" height="2.5" rx="0.3" fill="white" opacity="0.09"/>
+              <rect x="22" y="18" width="16" height="9"   rx="1"   fill="#cbd5e1" opacity="0.65"/>
+              <line x1="22" y1="22.5" x2="38" y2="22.5"  stroke="white" strokeWidth="0.6" opacity="0.28"/>
+              <path d="M13 5 C11 5 9 18 30 18 C51 18 49 5 47 5 Z" fill="#cbd5e1" opacity="0.52"/>
+              <path d="M18 7 C16 7 15 17 30 17 C45 17 44 7 42 7 Z" fill="white"   opacity="0.10"/>
+              <rect x="11" y="2" width="38" height="5"   rx="2"   fill="#e2e8f0" opacity="0.85"/>
+              <rect x="14" y="2.5" width="32" height="2" rx="0.8" fill="white"   opacity="0.30"/>
+            </svg>
+            {/* Sweeping scanline over the cup */}
+            <div
+              aria-hidden
+              className="absolute left-0 right-0 top-0 h-px pointer-events-none"
+              style={{
+                background: "linear-gradient(90deg, transparent, rgba(232,208,144,0.95), transparent)",
+                boxShadow: "0 0 10px rgba(232,208,144,0.65)",
+                animation: "cupScan 6s linear infinite",
+              }}
+            />
+          </div>
+
+          {/* Title with gradient + glow */}
+          <div className="relative z-[3]">
+            <div className="hud-mono text-[8px] font-black uppercase tracking-[0.38em] mb-1.5 bg-clip-text text-transparent"
+              style={{ backgroundImage: "linear-gradient(180deg, #ffffff 0%, #E8D090 38%, #fbbf24 58%, #6a5728 78%, #E8D090 100%)" }}>
+              ◢ Stanley Cup Final ◣
+            </div>
+            <div className="text-[11px] font-bold text-white/45 italic" style={{ textShadow: "0 0 6px rgba(251,191,36,0.18)" }}>
+              East Champion vs West Champion
+            </div>
+          </div>
+
+          <style jsx>{`
+            @keyframes cupRotateSlow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+            @keyframes cupRotateRev  { from { transform: rotate(360deg); } to { transform: rotate(0deg); } }
+            @keyframes cupRotateFast { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+            @keyframes cupPulse {
+              0%   { r: 50; stroke-opacity: 0.55; }
+              100% { r: 115; stroke-opacity: 0; }
+            }
+            @keyframes cupScan {
+              0%   { transform: translateY(0);    opacity: 0; }
+              10%  { opacity: 1; }
+              90%  { opacity: 1; }
+              100% { transform: translateY(96px); opacity: 0; }
+            }
+            @media (prefers-reduced-motion: reduce) {
+              svg g, circle, div { animation: none !important; }
+            }
+          `}</style>
         </div>
       </div>
     );
