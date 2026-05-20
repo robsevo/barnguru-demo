@@ -2362,6 +2362,8 @@ interface HoloCallout {
   label: string;
   val: string | null;
   target: HoloZone;
+  /** Hover-info copy. Shown via title attribute on the callout. */
+  tip?: string;
 }
 
 function HologramScanner({
@@ -2505,18 +2507,23 @@ function HologramScanner({
                 <button
                   key={c.id}
                   type="button"
+                  title={c.tip}
                   onMouseEnter={() => setActive(c.target)}
                   onMouseLeave={() => setActive(null)}
-                  className="flex flex-col items-end gap-0.5 px-2 py-1 rounded backdrop-blur transition-all duration-200 group cursor-pointer"
+                  className="flex flex-col items-end gap-0.5 px-2 py-1 rounded backdrop-blur transition-all duration-200 group cursor-help"
                   style={{
                     background: isActive ? `${teamColor}1a` : "rgba(0,0,0,0.40)",
                     border: `1px solid ${isActive ? teamColor : `${teamColor}28`}`,
                     boxShadow: isActive ? `0 0 14px ${teamColor}55` : "none",
                   }}
                 >
-                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em]"
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em] flex items-center gap-0.5"
                     style={{ color: isActive ? teamColor : "var(--text-secondary)" }}>
                     ▸ {c.label}
+                    {c.tip && (
+                      <span className="ml-0.5 inline-flex items-center justify-center w-3 h-3 rounded-full text-[7px] font-black"
+                        style={{ color: "#38bdf8", background: "rgba(56,189,248,0.15)", border: "1px solid rgba(56,189,248,0.40)" }}>i</span>
+                    )}
                   </span>
                   <span className="hud-mono text-[11px] tabular-nums font-semibold" style={{ color: teamColor }}>
                     {c.val}
@@ -2536,17 +2543,22 @@ function HologramScanner({
                 <button
                   key={c.id}
                   type="button"
+                  title={c.tip}
                   onMouseEnter={() => setActive(c.target)}
                   onMouseLeave={() => setActive(null)}
-                  className="flex flex-col items-start gap-0.5 px-2 py-1 rounded backdrop-blur transition-all duration-200 cursor-pointer"
+                  className="flex flex-col items-start gap-0.5 px-2 py-1 rounded backdrop-blur transition-all duration-200 cursor-help"
                   style={{
                     background: isActive ? `${teamColor}1a` : "rgba(0,0,0,0.40)",
                     border: `1px solid ${isActive ? teamColor : `${teamColor}28`}`,
                     boxShadow: isActive ? `0 0 14px ${teamColor}55` : "none",
                   }}
                 >
-                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em]"
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em] flex items-center gap-0.5"
                     style={{ color: isActive ? teamColor : "var(--text-secondary)" }}>
+                    {c.tip && (
+                      <span className="mr-0.5 inline-flex items-center justify-center w-3 h-3 rounded-full text-[7px] font-black"
+                        style={{ color: "#38bdf8", background: "rgba(56,189,248,0.15)", border: "1px solid rgba(56,189,248,0.40)" }}>i</span>
+                    )}
                     {c.label} ◂
                   </span>
                   <span className="hud-mono text-[11px] tabular-nums font-semibold" style={{ color: teamColor }}>
@@ -3986,23 +3998,47 @@ export default function PlayerProfilePage() {
           <HudPanel title="Vitals" themeColor={teamColor} scanline allCorners className="w-full flex flex-col">
             <div className="grid grid-cols-2 gap-3 place-items-center">
               {fi != null && (
-                <RingGauge value={fi} label="Fatigue" sublabel="FI" themeColor={teamColor} invert decimals={2} size={96} />
+                <div className="relative">
+                  <RingGauge value={fi} label="Fatigue" sublabel="FI" themeColor={teamColor} invert decimals={2} size={96} />
+                  <div className="absolute top-0 right-0">
+                    <StatInfoTip label="Fatigue Index (FI)"
+                      tip="Composite 0–1 fatigue score for the latest game. Weighs schedule (B2B, 3-in-4), travel + circadian, TOI spikes, contact load, recovery days. Lower is better — green = fresh, red = gassed." />
+                  </div>
+                </div>
               )}
               {ci != null && (
-                <RingGauge value={Math.min(1, (ci + 0.1) / 0.2)} centerText={`${ci >= 0 ? "+" : ""}${ci.toFixed(2)}`} label="Confidence" sublabel="CI" themeColor={teamColor} size={96} />
+                <div className="relative">
+                  <RingGauge value={Math.min(1, (ci + 0.1) / 0.2)} centerText={`${ci >= 0 ? "+" : ""}${ci.toFixed(2)}`} label="Confidence" sublabel="CI" themeColor={teamColor} size={96} />
+                  <div className="absolute top-0 right-0">
+                    <StatInfoTip label="Confidence Index (CI)"
+                      tip="Signed [-1, +1] decision-bias score. Positive = aggressive (shoots, pinches, takes risks). Negative = passive. Blends player signals (form, hot hand, role usage) with team signals (streak, coach tendencies). Distinct from fatigue — fatigue degrades execution, confidence biases decisions." />
+                  </div>
+                </div>
               )}
               {hhs != null && (
-                <RingGauge value={Math.min(1, Math.max(0, (hhs + 2) / 4))} centerText={`${hhs >= 0 ? "+" : ""}${hhs.toFixed(1)}`} label="Hot Hand" sublabel="HHS" themeColor={teamColor} size={96} />
+                <div className="relative">
+                  <RingGauge value={Math.min(1, Math.max(0, (hhs + 2) / 4))} centerText={`${hhs >= 0 ? "+" : ""}${hhs.toFixed(1)}`} label="Hot Hand" sublabel="HHS" themeColor={teamColor} size={96} />
+                  <div className="absolute top-0 right-0">
+                    <StatInfoTip label="Hot Hand Score (HHS)"
+                      tip="Standardized streak detector over last 5 games — measures goals + xG above expected output. Above +0.7 = meaningfully running hot. Above +1.5 = serious heater. Negative = ice-cold. Feeds straight into the Rust simulator's shot resolution." />
+                  </div>
+                </div>
               )}
               {warVal != null && (
-                <RingGauge
-                  value={warRankPct ?? Math.min(1, Math.max(0, (warVal + 1) / 4))}
-                  centerText={`${warVal >= 0 ? "+" : ""}${warVal.toFixed(2)}`}
-                  label="WAR"
-                  sublabel={data.war_rank ? `#${data.war_rank}` : "rating"}
-                  themeColor={teamColor}
-                  size={96}
-                />
+                <div className="relative">
+                  <RingGauge
+                    value={warRankPct ?? Math.min(1, Math.max(0, (warVal + 1) / 4))}
+                    centerText={`${warVal >= 0 ? "+" : ""}${warVal.toFixed(2)}`}
+                    label="WAR"
+                    sublabel={data.war_rank ? `#${data.war_rank}` : "rating"}
+                    themeColor={teamColor}
+                    size={96}
+                  />
+                  <div className="absolute top-0 right-0">
+                    <StatInfoTip label="Wins Above Replacement (WAR)"
+                      tip="Single-number value vs a freely available AHL callup, summed across offense, defense and special teams. +2.5 is elite. The ring fill is the rank-percentile across qualified skaters when available, else a normalized scale around 0." />
+                  </div>
+                </div>
               )}
             </div>
 
@@ -4079,14 +4115,20 @@ export default function PlayerProfilePage() {
               teamColor={teamColor}
               bodyIntensity={bodyIntensity}
               telemetryLeft={!isGoalie ? [
-                { id: "speed",    label: "MAX SPEED",  val: data.skating_max_speed_kmh != null ? `${data.skating_max_speed_kmh.toFixed(1)} km/h` : null, target: "legs" as const },
-                { id: "hits",     label: "HITS/60",    val: data.hits_per60 != null ? data.hits_per60.toFixed(1) : null, target: "arms" as const },
-                { id: "blocks",   label: "BLOCKS/60",  val: data.blocks_per60 != null ? data.blocks_per60.toFixed(1) : null, target: "torso" as const },
+                { id: "speed",    label: "MAX SPEED",  val: data.skating_max_speed_kmh != null ? `${data.skating_max_speed_kmh.toFixed(1)} km/h` : null, target: "legs" as const,
+                  tip: "Peak skating speed from NHL EDGE puck-and-player tracking, averaged across this season's games. NHL average tops out around 32–34 km/h; elite skaters hit 36+." },
+                { id: "hits",     label: "HITS/60",    val: data.hits_per60 != null ? data.hits_per60.toFixed(1) : null, target: "arms" as const,
+                  tip: "Hits thrown per 60 minutes of even-strength play. 3+ is a clear physical role; below 1 is a finesse profile." },
+                { id: "blocks",   label: "BLOCKS/60",  val: data.blocks_per60 != null ? data.blocks_per60.toFixed(1) : null, target: "torso" as const,
+                  tip: "Shots blocked per 60 minutes — proxy for shot-lane defending. Defensemen routinely 4+; forwards rarely above 2." },
               ].filter(c => c.val !== null) : []}
               telemetryRight={!isGoalie ? [
-                { id: "battle",   label: "BATTLE",     val: data.battle_percentile != null ? `${data.battle_percentile.toFixed(0)}th` : null, target: "torso" as const },
-                { id: "toi",      label: "EV TOI",     val: data.toi_ev != null ? `${data.toi_ev.toFixed(0)}m` : null, target: "head" as const },
-                { id: "edge",     label: "EDGE Δ",     val: phase3?.edge_load != null ? `${phase3.edge_load >= 0 ? "+" : ""}${(phase3.edge_load * 100).toFixed(1)}%` : null, target: "legs" as const },
+                { id: "battle",   label: "BATTLE",     val: data.battle_percentile != null ? `${data.battle_percentile.toFixed(0)}th` : null, target: "torso" as const,
+                  tip: "Puck-battle percentile across hits, blocks, and contested zone battles combined. 85th pct = wins more pucks than 85% of skaters." },
+                { id: "toi",      label: "EV TOI",     val: data.toi_ev != null ? `${data.toi_ev.toFixed(0)}m` : null, target: "head" as const,
+                  tip: "Total 5v5 even-strength minutes this season. Higher = more coach trust. All per-60 metrics on the page normalize against this." },
+                { id: "edge",     label: "EDGE Δ",     val: phase3?.edge_load != null ? `${phase3.edge_load >= 0 ? "+" : ""}${(phase3.edge_load * 100).toFixed(1)}%` : null, target: "legs" as const,
+                  tip: "EDGE skating-load degradation vs the player's own baseline. Negative = moving slower/shorter distance than their norm — fatigue showing in the legs." },
               ].filter(c => c.val !== null) : []}
               tickerLine={[
                 fi != null ? `FI ${fi.toFixed(2)}` : null,
@@ -4506,10 +4548,30 @@ export default function PlayerProfilePage() {
                     weight 0 → 1
                   </span>
                 </div>
-                {matrixNodes.slice(0, 6).map((n, i) => (
+                {matrixNodes.slice(0, 6).map((n, i) => {
+                  const NN_TIPS: Record<string, string> = {
+                    carry:   "Probability the player carries the puck in across the offensive blue line on entries.",
+                    dump:    "Probability the player dumps + chases on zone entries instead of carrying in.",
+                    slot:    "Probability the player's next shot comes from the slot (high-danger area).",
+                    drive:   "Probability the player drives the net rather than circling back or passing out.",
+                    perim:   "Probability the player's next shot comes from the perimeter (outside the slot).",
+                    battle:  "Probability the player engages in a corner board battle in the offensive zone.",
+                    hold:    "Probability the player retains possession in a corner cycle rather than forcing a play.",
+                    hd:      "High-danger save % normalized to 0–1. League avg HDsv% ≈ 80%.",
+                    md:      "Mid-danger save % normalized to 0–1. League avg ≈ 87%.",
+                    ld:      "Low-danger save % normalized to 0–1. NHL starters typically 96%+.",
+                    ov:      "Overall save % normalized to 0–1 (range 0.880–0.925).",
+                    gsax:    "Goals Saved Above Expected — net positive saves vs an average goalie on the same shots.",
+                    vol:     "Workload index — expected goals against this goalie has faced (proxy for starter usage).",
+                  };
+                  const tip = NN_TIPS[n.id];
+                  return (
                   <div key={n.id} className="flex items-center gap-2">
-                    <span className="hud-mono text-[9px] uppercase tracking-[0.14em] text-[var(--text-secondary)] w-16 shrink-0 truncate">
+                    <span className="hud-mono text-[9px] uppercase tracking-[0.14em] text-[var(--text-secondary)] w-16 shrink-0 truncate flex items-center gap-1">
                       {n.label}
+                      {tip && (
+                        <span className="ml-0.5"><StatInfoTip label={n.label} tip={tip} /></span>
+                      )}
                     </span>
                     <div className="flex-1 h-2 rounded-sm overflow-hidden relative"
                       style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${teamColor}22` }}>
@@ -4538,7 +4600,8 @@ export default function PlayerProfilePage() {
                       {n.weight.toFixed(2)}
                     </span>
                   </div>
-                ))}
+                  );
+                })}
                 <style jsx>{`
                   @keyframes decMatrix {
                     from { transform: scaleX(0); opacity: 0; }

@@ -81,23 +81,42 @@ export function NeuralGraph({
           </radialGradient>
         </defs>
 
-        {/* Edges */}
-        {positions.map((p) => (
-          <line
-            key={`e-${p.id}`}
-            x1={width / 2}
-            y1={height / 2}
-            x2={p.x}
-            y2={p.y}
-            stroke={accent}
-            strokeOpacity={0.35 + p.weight * 0.35}
-            strokeWidth={1}
-            strokeDasharray="4 6"
-            style={{
-              animation: animate ? `dashflow ${2.4 + p.weight}s linear infinite` : "none",
-            }}
-          />
-        ))}
+        {/* Edges — start at the edge of the center hub and stop just outside
+            each satellite so the line never visually pierces either node. */}
+        {positions.map((p) => {
+          const cx = width / 2;
+          const cy = height / 2;
+          const dx = p.x - cx;
+          const dy = p.y - cy;
+          const dist = Math.hypot(dx, dy) || 1;
+          const ux = dx / dist;
+          const uy = dy / dist;
+          // Center hub visible radius is 14 (stroked dark disc); start just outside it.
+          const CENTER_R = 15;
+          // Outer halo of each satellite is 8 + weight*14 → stop short of that.
+          const rOuter = 8 + p.weight * 14;
+          const x1 = cx + ux * CENTER_R;
+          const y1 = cy + uy * CENTER_R;
+          const x2 = p.x - ux * (rOuter + 1);
+          const y2 = p.y - uy * (rOuter + 1);
+          return (
+            <line
+              key={`e-${p.id}`}
+              x1={x1}
+              y1={y1}
+              x2={x2}
+              y2={y2}
+              stroke={accent}
+              strokeOpacity={0.35 + p.weight * 0.35}
+              strokeWidth={1}
+              strokeDasharray="4 6"
+              strokeLinecap="round"
+              style={{
+                animation: animate ? `dashflow ${2.4 + p.weight}s linear infinite` : "none",
+              }}
+            />
+          );
+        })}
 
         {/* Center hub */}
         <circle cx={width / 2} cy={height / 2} r={22} fill="url(#hud-neural-glow)" />
