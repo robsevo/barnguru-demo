@@ -231,11 +231,17 @@ def _apply_context_rules(
 def _build_base_profile(
     player_row: dict[str, Any],
     positional_row: dict[str, Any] | None,
+    skating_row: dict[str, Any] | None = None,
+    position: str | None = None,
 ) -> np.ndarray:
     """Construct a 7-element action probability vector for one player.
 
     Sources:
-        carry_in / dump      ← carry_entry_pct (puck battle model)
+        carry_in / dump      ← carry_entry_pct (puck battle model). When NaN
+                               (no EDGE data, the common case in the public
+                               feeds), fall back to a position-aware prior so
+                               centers carry, wingers are middling, and Ds
+                               dump. Modulated by skating burst if available.
         shoot_slot           ← off_net_front_pct + off_slot_pct (positional)
         shoot_perimeter      ← off_circle_pct + off_half_wall_pct + off_point_pct
         battle_corner        ← battle_score (normalised via sigmoid)
@@ -245,10 +251,34 @@ def _build_base_profile(
     All raw signals are combined into a raw non-negative weight vector then
     normalised to sum to 1 via softmax.
     """
-    # Carry entry / dump — guard against NaN (no EDGE data) and None
+    # Carry entry / dump.
+    # When carry_entry_pct is missing (the typical case — EDGE controlled-entry
+    # data is unavailable for ~all public-feed skaters), default per position:
+    # centers ~62%, wingers ~55%, defensemen ~38%. Then nudge by skating burst
+    # so a fast-skating D still carries more than a plodding one. Without this,
+    # every player collapses to 0.50 / 0.50 and the entry side has zero signal.
     _cep = player_row.get("carry_entry_pct")
-    carry_pct = 0.50 if (_cep is None or (isinstance(_cep, float) and np.isnan(_cep))) else float(_cep)
-    carry_pct = np.clip(carry_pct, 0.05, 0.95)
+    carry_missing = _cep is None or (isinstance(_cep, float) and np.isnan(_cep))
+    if carry_missing:
+        pos = (position or "").upper()
+        if pos == "C":
+            carry_pct = 0.62
+        elif pos in ("L", "R", "LW", "RW"):
+            carry_pct = 0.55
+        elif pos == "D":
+            carry_pct = 0.38
+        else:
+            carry_pct = 0.50
+
+        if skating_row:
+            _ms = skating_row.get("baseline_max_speed_kmh")
+            if _ms is not None and not (isinstance(_ms, float) and np.isnan(_ms)):
+                # League max_speed ≈ N(35.7, 1.3) — see skating_baseline_2025.
+                speed_z = (float(_ms) - 35.7) / 1.3
+                carry_pct += float(np.clip(speed_z * 0.05, -0.10, 0.12))
+    else:
+        carry_pct = float(_cep)
+    carry_pct = float(np.clip(carry_pct, 0.05, 0.95))
 
     # Positional
     if positional_row:
@@ -356,6 +386,7 @@ class PlayerBehaviorNet:
         positional_df: pl.DataFrame | None = None,
         skating_baseline_df: pl.DataFrame | None = None,
         cv_observations_df: pl.DataFrame | None = None,
+        position_lookup: dict[int, str] | None = None,
     ) -> "PlayerBehaviorNet":
         """Fit the behavioral network from player season stats.
 
@@ -426,7 +457,9 @@ class PlayerBehaviorNet:
                 continue
             pid = int(pid)
             pos_row = pos_lookup.get(pid)
-            base_probs = _build_base_profile(row, pos_row)
+            skate_row = skate_lookup.get(pid)
+            position = (position_lookup or {}).get(pid) or row.get("position")
+            base_probs = _build_base_profile(row, pos_row, skate_row, position)
             self._base_profiles[pid] = base_probs
             self._player_meta[pid] = {
                 "player_name": str(row.get("player_name") or ""),

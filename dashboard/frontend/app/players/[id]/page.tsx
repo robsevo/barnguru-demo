@@ -124,6 +124,13 @@ interface ProfileData {
   nn_battle_corner_pct?: number | null;
   nn_hold_corner_pct?: number | null;
   nn_fi_score?: number | null;
+  // League-mean action % (one per behavior action) — used to render deltas
+  // so the Predicted Play card surfaces what's distinct about *this* player.
+  nn_league_avg?: {
+    carry_in?: number; dump?: number;
+    shoot_slot?: number; shoot_perimeter?: number;
+    drive_net?: number; battle_corner?: number; hold_corner?: number;
+  } | null;
   // In-Season Blend
   inseason_mu_blend?: number | null;
   inseason_ci_lower?: number | null;
@@ -2654,7 +2661,7 @@ const ACTION_THEME: Record<string, { color: string; dash: string; kind: "shot" |
 };
 
 function PredictedPlay({
-  carry, dump, slot, perim, drive, battleC, holdC, themeColor,
+  carry, dump, slot, perim, drive, battleC, holdC, themeColor, leagueAvg,
 }: {
   carry?: number | null;
   dump?: number | null;
@@ -2664,7 +2671,30 @@ function PredictedPlay({
   battleC?: number | null;
   holdC?: number | null;
   themeColor: string;
+  leagueAvg?: {
+    carry_in?: number; dump?: number;
+    shoot_slot?: number; shoot_perimeter?: number;
+    drive_net?: number; battle_corner?: number; hold_corner?: number;
+  } | null;
 }) {
+  // Resolve league averages per action id (matches the ACTION_THEME keys).
+  // When the backend hasn't shipped them yet, we leave deltas null and the
+  // UI silently falls back to raw-probability ranking.
+  const avgFor = (id: string): number | null => {
+    if (!leagueAvg) return null;
+    const map: Record<string, number | undefined> = {
+      carry:  leagueAvg.carry_in,
+      dump:   leagueAvg.dump,
+      slot:   leagueAvg.shoot_slot,
+      perim:  leagueAvg.shoot_perimeter,
+      drive:  leagueAvg.drive_net,
+      battle: leagueAvg.battle_corner,
+      hold:   leagueAvg.hold_corner,
+    };
+    const v = map[id];
+    return typeof v === "number" ? v : null;
+  };
+
   const entryActions: PredAction[] = [
     { id: "carry", label: "Carry-in", pct: carry ?? 0 },
     { id: "dump",  label: "Dump-in",  pct: dump  ?? 0 },
@@ -2679,9 +2709,39 @@ function PredictedPlay({
 
   if (entryActions.length === 0 && inZoneActions.length === 0) return null;
 
-  const topEntry  = entryActions[0]  ?? null;
-  const topInZone = inZoneActions[0] ?? null;
-  // Top 3 in-zone actions for the ranked list under the schematic
+  // Entry: if carry and dump are essentially tied (≤ 5pp gap and both > 0),
+  // the model has no real entry signal — usually because carry_entry_pct
+  // was missing for this player. Collapse to a "Mixed Entry" indicator
+  // rather than picking a fake winner that looks the same for everyone.
+  const entryGap = entryActions.length === 2
+    ? Math.abs(entryActions[0].pct - entryActions[1].pct)
+    : Infinity;
+  const entryMixed = entryActions.length === 2 && entryGap < 5;
+  const topEntry  = entryMixed ? null : (entryActions[0] ?? null);
+
+  // In-zone primary: when league averages are available, pick the action
+  // whose probability deviates *most positively* from league — that's what
+  // makes this player distinct. Otherwise fall back to highest raw %.
+  const primaryByDelta = (() => {
+    if (!leagueAvg || inZoneActions.length === 0) return null;
+    let best: PredAction | null = null;
+    let bestDelta = -Infinity;
+    for (const a of inZoneActions) {
+      const avg = avgFor(a.id);
+      if (avg == null) continue;
+      const d = a.pct - avg;
+      if (d > bestDelta) { bestDelta = d; best = a; }
+    }
+    return bestDelta > 1 ? best : null;
+  })();
+  const topInZone = primaryByDelta ?? inZoneActions[0] ?? null;
+  const topInZoneDelta = topInZone ? (() => {
+    const avg = avgFor(topInZone.id);
+    return avg == null ? null : topInZone.pct - avg;
+  })() : null;
+  // Top 3 in-zone actions for the ranked list under the schematic.
+  // Sorted by raw probability so the bars still read most→least likely,
+  // but each row carries its own delta-vs-avg chip.
   const top3 = inZoneActions.slice(0, 3);
 
   // ── SVG geometry ──────────────────────────────────────────────────────
@@ -2713,10 +2773,6 @@ function PredictedPlay({
     if (id === "battle") return `M 140 80  Q 60 120 ${CORNER_L.cx + 5} ${CORNER_L.cy - 5} L ${SLOT.cx - 10} ${SLOT.cy + 5}`;
     /* hold */            return `M 140 80  Q 220 120 ${CORNER_R.cx - 5} ${CORNER_R.cy - 5} Q 245 175 230 165`;
   }
-
-  // ── Sequence label ───────────────────────────────────────────────────
-  const sequenceLabel = [topEntry?.label, topInZone?.label]
-    .filter(Boolean).join(" → ");
 
   return (
     <div className="mt-2 mb-1 rounded border px-2 py-2"
@@ -2849,10 +2905,14 @@ function PredictedPlay({
         `}</style>
       </svg>
 
-      {sequenceLabel && (
+      {(topEntry || topInZone || entryMixed) && (
         <div className="mt-1.5 px-1 flex items-center gap-2 flex-wrap">
           <span className="hud-mono text-[9px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">SEQ ·</span>
-          {topEntry && (() => {
+          {entryMixed ? (
+            <span className="hud-mono text-[10px] uppercase tracking-[0.18em] font-semibold text-white/55">
+              Mixed Entry
+            </span>
+          ) : topEntry && (() => {
             const t = ACTION_THEME[topEntry.id];
             return (
               <span className="hud-mono text-[10px] uppercase tracking-[0.18em] font-semibold"
@@ -2864,11 +2924,26 @@ function PredictedPlay({
           <span className="hud-mono text-[10px] text-[var(--text-muted)]">→</span>
           {topInZone && (() => {
             const t = ACTION_THEME[topInZone.id];
+            const c = t?.color ?? themeColor;
+            const dPos = topInZoneDelta != null && topInZoneDelta > 0.5;
+            const dNeg = topInZoneDelta != null && topInZoneDelta < -0.5;
             return (
-              <span className="hud-mono text-[10px] uppercase tracking-[0.18em] font-semibold"
-                style={{ color: t?.color ?? themeColor, textShadow: `0 0 6px ${(t?.color ?? themeColor)}55` }}>
-                {topInZone.label}
-              </span>
+              <>
+                <span className="hud-mono text-[10px] uppercase tracking-[0.18em] font-semibold"
+                  style={{ color: c, textShadow: `0 0 6px ${c}55` }}>
+                  {topInZone.label}
+                </span>
+                {topInZoneDelta != null && (
+                  <span className="hud-mono text-[9px] uppercase tracking-[0.14em] tabular-nums px-1.5 py-0.5 rounded border"
+                    style={{
+                      color: dPos ? "#5ee08a" : dNeg ? "#f87b7b" : "rgba(255,255,255,0.45)",
+                      borderColor: dPos ? "#5ee08a55" : dNeg ? "#f87b7b55" : "rgba(255,255,255,0.18)",
+                      background: dPos ? "rgba(94,224,138,0.06)" : dNeg ? "rgba(248,123,123,0.06)" : "transparent",
+                    }}>
+                    {topInZoneDelta > 0 ? "+" : ""}{topInZoneDelta.toFixed(1)}% vs avg
+                  </span>
+                )}
+              </>
             );
           })()}
         </div>
@@ -2902,12 +2977,19 @@ function PredictedPlay({
       </div>
 
       {/* Top-3 ranked in-zone decisions — each bar uses its action colour so
-          the row directly matches its arrow on the rink above. */}
+          the row directly matches its arrow on the rink above. Each row also
+          carries a small +/- vs-avg chip so identical-looking probabilities
+          (e.g. perimeter 19.8%) read very differently for a slot-finisher
+          who's *under* the league mean vs a perimeter shooter who's over it. */}
       {top3.length > 0 && (
         <div className="mt-2 pt-2 border-t border-white/[0.05] space-y-1">
           {top3.map((a, i) => {
             const t = ACTION_THEME[a.id];
             const c = t?.color ?? themeColor;
+            const avg = avgFor(a.id);
+            const delta = avg != null ? a.pct - avg : null;
+            const dPos = delta != null && delta > 0.5;
+            const dNeg = delta != null && delta < -0.5;
             return (
             <div key={a.id} className="flex items-center gap-2">
               <span className="hud-mono text-[8px] uppercase tracking-[0.16em] w-3 text-right shrink-0"
@@ -2926,11 +3008,22 @@ function PredictedPlay({
                   animation: `ppBar 900ms cubic-bezier(0.22,1,0.36,1) ${i * 90}ms backwards`,
                   transformOrigin: "left center",
                 }} />
+                {avg != null && (
+                  <div className="absolute top-[-1px] bottom-[-1px] pointer-events-none"
+                    style={{ left: `${Math.min(100, avg)}%`, width: 1, background: "rgba(255,255,255,0.35)" }}
+                    aria-hidden />
+                )}
               </div>
               <span className="hud-mono text-[10px] tabular-nums w-10 text-right font-semibold"
                 style={{ color: c }}>
                 {a.pct.toFixed(1)}%
               </span>
+              {delta != null && (
+                <span className="hud-mono text-[8px] uppercase tracking-[0.10em] tabular-nums w-12 text-right shrink-0"
+                  style={{ color: dPos ? "#5ee08a" : dNeg ? "#f87b7b" : "rgba(255,255,255,0.30)" }}>
+                  {delta > 0 ? "+" : ""}{delta.toFixed(1)}
+                </span>
+              )}
             </div>
             );
           })}
@@ -4523,6 +4616,7 @@ export default function PlayerProfilePage() {
                 battleC={data.nn_battle_corner_pct}
                 holdC={data.nn_hold_corner_pct}
                 themeColor={teamColor}
+                leagueAvg={data.nn_league_avg ?? null}
               />
             )}
 

@@ -117,6 +117,37 @@ _TEAM_KEYWORDS: dict[str, list[str]] = {
 }
 
 
+_BEHAVIOR_LEAGUE_AVG_CACHE: dict[tuple[str, int], dict[str, float]] = {}
+
+
+def _behavior_league_avg(beh_path: Path) -> dict[str, float] | None:
+    """League-mean action probabilities (as percentages) from a behavior parquet.
+
+    Cached on (path, mtime_ns) so the parquet is only scanned once per
+    process unless a fresh training run replaces the file. The UI uses this
+    to render per-player deltas vs league — without it the raw probabilities
+    look near-identical across players because the entry signal is flat.
+    """
+    try:
+        mtime = beh_path.stat().st_mtime_ns
+    except OSError:
+        return None
+    key = (str(beh_path), mtime)
+    if key in _BEHAVIOR_LEAGUE_AVG_CACHE:
+        return _BEHAVIOR_LEAGUE_AVG_CACHE[key]
+    try:
+        import polars as pl
+        cols = ["carry_in", "dump", "shoot_slot", "shoot_perimeter", "drive_net", "battle_corner", "hold_corner"]
+        df = pl.read_parquet(beh_path, columns=cols)
+        if df.is_empty():
+            return None
+        avg = {c: round(float(df[c].drop_nulls().mean() or 0.0) * 100, 1) for c in cols}
+    except Exception:
+        return None
+    _BEHAVIOR_LEAGUE_AVG_CACHE[key] = avg
+    return avg
+
+
 def _shots_name_position_map() -> dict[str, str]:
     """Return {shooter_name: player_position} from the most recent shots parquet."""
     import polars as pl
@@ -2207,11 +2238,13 @@ async def phase2_player(
     nn_drive_net_pct_val:       float | None = None
     nn_battle_corner_pct_val:   float | None = None
     nn_hold_corner_pct_val:     float | None = None
+    nn_league_avg_payload:      dict[str, float] | None = None
     try:
         beh_dir = _GRETZKY_DATA_DIR / "behavior_net"
         beh_parquets = sorted(beh_dir.glob("behavior_predictions_*.parquet")) if beh_dir.exists() else []
         if beh_parquets and player_id_val is not None:
-            beh_df = pl.read_parquet(beh_parquets[-1])
+            beh_path = beh_parquets[-1]
+            beh_df = pl.read_parquet(beh_path)
             beh_row = beh_df.filter(pl.col("player_id") == player_id_val) if "player_id" in beh_df.columns else pl.DataFrame()
             if not beh_row.is_empty():
                 beh = beh_row.to_dicts()[0]
@@ -2222,6 +2255,7 @@ async def phase2_player(
                 nn_drive_net_pct_val       = round(float(beh["drive_net"]) * 100, 1)         if beh.get("drive_net")        is not None else None
                 nn_battle_corner_pct_val   = round(float(beh["battle_corner"]) * 100, 1)     if beh.get("battle_corner")    is not None else None
                 nn_hold_corner_pct_val     = round(float(beh["hold_corner"]) * 100, 1)       if beh.get("hold_corner")      is not None else None
+            nn_league_avg_payload = _behavior_league_avg(beh_path)
     except Exception:
         pass
 
@@ -2351,7 +2385,8 @@ async def phase2_player(
         "nn_shoot_perimeter_pct":    nn_shoot_perimeter_pct_val,
         "nn_drive_net_pct":          nn_drive_net_pct_val,
         "nn_battle_corner_pct":      nn_battle_corner_pct_val,
-        "nn_hold_corner_pct":           nn_hold_corner_pct_val,
+        "nn_hold_corner_pct":        nn_hold_corner_pct_val,
+        "nn_league_avg":             nn_league_avg_payload,
         "skating_zone_time_oz_pct":     skating_zone_oz_val,
         "skating_zone_time_dz_pct":     skating_zone_dz_val,
         "skating_avg_speed_kmh":        skating_avg_speed_val,

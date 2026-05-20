@@ -512,21 +512,7 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
             <span aria-hidden className="absolute top-0 left-0 right-0 h-px pointer-events-none z-10"
               style={{ background: "linear-gradient(90deg, transparent, rgba(220,228,240,0.18), transparent)" }} />
 
-            {/* HUD corner brackets — top-left + top-right (subtle steel) */}
-            <span aria-hidden className="absolute pointer-events-none z-10"
-              style={{
-                top: 3, left: 3, width: 10, height: 10,
-                borderTop: `1px solid rgba(220,228,240,0.28)`,
-                borderLeft: `1px solid rgba(220,228,240,0.28)`,
-              }} />
-            <span aria-hidden className="absolute pointer-events-none z-10"
-              style={{
-                top: 3, right: 3, width: 10, height: 10,
-                borderTop: `1px solid rgba(220,228,240,0.28)`,
-                borderRight: `1px solid rgba(220,228,240,0.28)`,
-              }} />
-
-            {/* Hamburger — metallic JARVIS button with corner brackets */}
+            {/* Hamburger — metallic JARVIS button */}
             <button
               onClick={() => setOpen((o) => !o)}
               className="relative flex flex-col justify-center items-center gap-[3px] w-6 h-6 rounded-md shrink-0 transition-all duration-200 active:scale-[0.92] group"
@@ -541,19 +527,6 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
               }}
               aria-label="Toggle navigation"
             >
-              {/* HUD corner brackets — top-left + bottom-right */}
-              <span aria-hidden className="absolute pointer-events-none"
-                style={{
-                  top: 2, left: 2, width: 5, height: 5,
-                  borderTop: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.70)`,
-                  borderLeft: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.70)`,
-                }} />
-              <span aria-hidden className="absolute pointer-events-none"
-                style={{
-                  bottom: 2, right: 2, width: 5, height: 5,
-                  borderBottom: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.70)`,
-                  borderRight: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.70)`,
-                }} />
               {(["rotate(45deg) translateY(5px)", undefined, "rotate(-45deg) translateY(-5px)"] as const).map((transform, i) => (
                 <span key={i} className="block h-[1.5px] w-[12px] rounded-full transition-all duration-200 origin-center"
                   style={{

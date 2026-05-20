@@ -359,22 +359,28 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
     const color = TEAM_COLORS[row.team] ?? "#666";
     const hasSeries = typeof wins === "number";
     return (
-      <div className={`flex items-center gap-2.5 px-3 py-2.5 min-h-[52px] ${divider ? "border-b border-[#C9A84C]/[0.15]" : ""} ${eliminated ? "opacity-50" : ""}`}>
+      <div className={`flex items-center gap-2.5 px-3 py-2.5 min-h-[52px] relative ${divider ? "border-b border-[#C9A84C]/[0.15]" : ""} ${eliminated ? "opacity-30" : ""}`}
+        style={clinched ? {
+          background: "linear-gradient(90deg, rgba(74,222,128,0.07) 0%, rgba(74,222,128,0.02) 55%, transparent 100%)",
+        } : undefined}>
         {seed !== undefined && seed !== "" && <SeedBadge seed={seed} />}
         <div className="w-0.5 h-7 rounded-full shrink-0" style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}bb` }} />
         <TeamLogoImg abbrev={row.team} size={32} smSize={42} linkToTeam />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="text-[13px] font-bold text-white/90 leading-none">{row.team}</span>
+            <span className={`text-[13px] font-bold leading-none ${clinched ? "text-white" : "text-white/90"}`}>{row.team}</span>
             {clinched && <span className="text-[7px] font-black uppercase px-1 py-0.5 rounded border border-[#4ade80]/30 bg-[#4ade80]/10 text-[#4ade80]">Won</span>}
             {eliminated && <span className="text-[7px] font-black uppercase px-1 py-0.5 rounded border border-white/15 bg-white/[0.04] text-white/35">Out</span>}
           </div>
-          <div className="text-[9px] text-white/30 font-mono mt-0.5">{row.w}-{row.l}-{row.otl}</div>
+          <div className={`text-[9px] font-mono mt-0.5 ${clinched ? "text-white/55" : "text-white/30"}`}>{row.w}-{row.l}-{row.otl}</div>
         </div>
         <div className="text-right shrink-0">
           {hasSeries ? (
             <>
-              <div className={`text-[22px] font-black tabular-nums leading-none ${clinched ? "text-[#fbbf24]" : "text-white"}`}>{wins}</div>
+              <div className={`text-[22px] font-black tabular-nums leading-none ${clinched ? "text-[#fbbf24]" : "text-white"}`}
+                style={clinched ? { textShadow: "0 0 10px rgba(251,191,36,0.45)" } : undefined}>
+                {wins}
+              </div>
               <div className="text-[7px] text-white/25 font-mono mt-0.5">of {neededToWin ?? 4}</div>
             </>
           ) : (

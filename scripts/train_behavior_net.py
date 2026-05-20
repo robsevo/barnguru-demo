@@ -40,6 +40,7 @@ DEFAULT_SEASONS       = [2023, 2024, 2025]
 BATTLE_SUBDIR         = "battles"
 HEATMAP_SUBDIR        = "positional_heatmap"
 SKATING_SUBDIR        = "skating_baseline"
+SHOTS_SUBDIR          = "shots"
 BEHAVIOR_SUBDIR       = "behavior_net"
 
 
@@ -75,6 +76,30 @@ def _load_skating_baseline(skating_dir: Path, season: int) -> pl.DataFrame | Non
         print(f"  Loaded skating baseline: {f.name}")
         return pl.read_parquet(f)
     return None
+
+
+def _load_position_lookup(shots_dir: Path, seasons: list[int]) -> dict[int, str]:
+    """Build a player_id → position map from the shots parquet(s).
+
+    Position isn't carried in the puck-battle output, but every shot row has
+    a `player_position` tagged by the NHL feed. We take the most-frequent
+    position per shooter — robust to occasional mis-tags on situational shifts.
+    """
+    frames: list[pl.DataFrame] = []
+    for season in seasons:
+        f = shots_dir / f"shots_{season}.parquet"
+        if f.exists():
+            frames.append(pl.read_parquet(f, columns=["shooter_id", "player_position"]))
+    if not frames:
+        return {}
+    df = pl.concat(frames, how="diagonal").drop_nulls(["shooter_id", "player_position"])
+    if df.is_empty():
+        return {}
+    modes = (
+        df.group_by("shooter_id")
+          .agg(pl.col("player_position").mode().first().alias("position"))
+    )
+    return {int(r["shooter_id"]): str(r["position"]) for r in modes.iter_rows(named=True) if r["position"]}
 
 
 def main() -> None:
@@ -143,6 +168,16 @@ def main() -> None:
     if skating_df is None:
         print("  Skating baseline not available — speed priors will use defaults.")
 
+    # ── Build position lookup from shots ─────────────────────────────────
+    # Puck-battle output omits position; pull it from shots so the carry/dump
+    # fallback can be position-aware when carry_entry_pct is NaN (the norm).
+    print(f"[behavior-net] Building position lookup from shots for {seasons}…")
+    position_lookup = _load_position_lookup(data_dir / SHOTS_SUBDIR, seasons)
+    if position_lookup:
+        print(f"  Position resolved for {len(position_lookup):,} player(s).")
+    else:
+        print("  No shots parquet found — entry priors will be position-agnostic.")
+
     # ── Train model ───────────────────────────────────────────────────────
     # CV observations are the Phase 16 input and are temporarily unavailable;
     # PlayerBehaviorNet.fit() already handles cv_observations_df=None.
@@ -153,6 +188,7 @@ def main() -> None:
         positional_df       = positional_df,
         skating_baseline_df = skating_df,
         cv_observations_df  = None,
+        position_lookup     = position_lookup or None,
     )
 
     n_players = len(net.player_ids())
