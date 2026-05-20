@@ -662,105 +662,16 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
   }
 
   // Stanley Cup centerpiece — sits between East CF and West CF so the bracket
-  // reads top-to-bottom: East R1 → East R2 → East CF → ⌘ Cup ⌘ → West CF → West R2 → West R1.
+  // reads top-to-bottom: East R1 → East R2 → East CF → Cup → West CF → West R2 → West R1.
+  // Kept quiet so it tones with the surrounding bracket cards instead of dominating them.
   function StanleyCupCenter() {
-    const [hovered, setHovered] = useState(false);
     return (
       <div className="flex items-center justify-center pt-1 pb-1">
-        <div
-          className="relative jarvis-boot rounded-2xl px-8 py-6 text-center cursor-default transition-all duration-500"
-          style={{
-            // See-through container — let the rotating halo + cup + labels
-            // do all the visual work. No fill, no border, no inset glows.
-            // The outer hover glow stays as an ambient lift.
-            boxShadow: hovered
-              ? "0 0 90px rgba(251,191,36,0.22)"
-              : "0 0 60px rgba(251,191,36,0.08)",
-            transform: hovered ? "translateY(-2px)" : "translateY(0)",
-          }}
-          onMouseEnter={() => setHovered(true)}
-          onMouseLeave={() => setHovered(false)}
-        >
-          {/* Halo rings — rotating Iron Man chrome around the cup. Spin faster
-              + brighter on hover so the centerpiece feels alive when you reach it. */}
-          <svg
-            viewBox="0 0 240 240"
-            aria-hidden
-            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none w-[180%] max-w-none h-[180%]"
-            style={{
-              zIndex: 0,
-              opacity: hovered ? 0.85 : 0.55,
-              transition: "opacity 400ms ease",
-              animationDuration: hovered ? "14s" : "36s",
-            }}
-          >
-            <defs>
-              <linearGradient id="cupArc" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%"  stopColor="#fbbf24" stopOpacity="0" />
-                <stop offset="50%" stopColor="#fbbf24" stopOpacity="0.95" />
-                <stop offset="100%" stopColor="#fbbf24" stopOpacity="0" />
-              </linearGradient>
-              <linearGradient id="cupArc2" x1="1" y1="0" x2="0" y2="1">
-                <stop offset="0%"  stopColor="#E8D090" stopOpacity="0" />
-                <stop offset="60%" stopColor="#E8D090" stopOpacity="0.55" />
-                <stop offset="100%" stopColor="#E8D090" stopOpacity="0" />
-              </linearGradient>
-            </defs>
-
-            {/* Outer slow ring — dashed. Spin faster on hover. */}
-            <g style={{ transformOrigin: "120px 120px", animation: `cupRotateSlow ${hovered ? 14 : 36}s linear infinite` }}>
-              <circle cx={120} cy={120} r={110} fill="none" stroke="#fbbf24" strokeOpacity={hovered ? 0.35 : 0.18} strokeDasharray="2 8" />
-              {[0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330].map((deg, i) => {
-                const rad = (deg * Math.PI) / 180;
-                return (
-                  <line key={i}
-                    x1={120 + Math.cos(rad) * 105} y1={120 + Math.sin(rad) * 105}
-                    x2={120 + Math.cos(rad) * 115} y2={120 + Math.sin(rad) * 115}
-                    stroke="#fbbf24" strokeOpacity={hovered ? 0.85 : 0.55} strokeWidth={1.2}
-                  />
-                );
-              })}
-            </g>
-
-            {/* Middle counter-rotating arc */}
-            <g style={{ transformOrigin: "120px 120px", animation: `cupRotateRev ${hovered ? 9 : 22}s linear infinite` }}>
-              <circle cx={120} cy={120} r={90} fill="none" stroke="url(#cupArc)" strokeWidth={1.6} strokeDasharray="100 60 40 60" strokeLinecap="round" />
-            </g>
-
-            {/* Inner fast arc */}
-            <g style={{ transformOrigin: "120px 120px", animation: `cupRotateFast ${hovered ? 5 : 12}s linear infinite` }}>
-              <circle cx={120} cy={120} r={70} fill="none" stroke="url(#cupArc2)" strokeWidth={1.4} strokeDasharray="30 120" strokeLinecap="round" />
-            </g>
-
-            {/* Pulse rings */}
-            <circle cx={120} cy={120} r={50} fill="none" stroke="#fbbf24" strokeWidth={1}
-              style={{ animation: "cupPulse 5.2s ease-out infinite" }} />
-            <circle cx={120} cy={120} r={50} fill="none" stroke="#fbbf24" strokeWidth={1}
-              style={{ animation: "cupPulse 5.2s ease-out infinite 2.6s" }} />
-          </svg>
-
-          {/* Top label — STANLEY in gold gradient, sits above the cup */}
-          <div className="relative z-[3] mb-2">
-            <div className="hud-mono text-[11px] sm:text-[13px] font-black uppercase tracking-[0.42em] bg-clip-text text-transparent"
-              style={{
-                backgroundImage: "linear-gradient(180deg, #ffffff 0%, #E8D090 38%, #fbbf24 58%, #6a5728 78%, #E8D090 100%)",
-                filter: hovered ? "drop-shadow(0 0 6px rgba(251,191,36,0.55))" : "drop-shadow(0 0 3px rgba(251,191,36,0.30))",
-                transition: "filter 400ms ease",
-              }}>
-              Stanley Cup
-            </div>
-          </div>
-
-          {/* Cup SVG with vertical scanline. Scales up + brightens on hover. */}
-          <div className="relative z-[3] flex justify-center mb-2">
-            <svg width="70" height="96" viewBox="0 0 60 82" fill="none" xmlns="http://www.w3.org/2000/svg"
-              style={{
-                filter: hovered
-                  ? "drop-shadow(0 0 14px rgba(251,191,36,0.75)) drop-shadow(0 0 28px rgba(251,191,36,0.35))"
-                  : "drop-shadow(0 0 8px rgba(251,191,36,0.45)) drop-shadow(0 0 16px rgba(251,191,36,0.20))",
-                transform: hovered ? "scale(1.10) translateY(-2px)" : "scale(1) translateY(0)",
-                transition: "transform 420ms cubic-bezier(0.22,1,0.36,1), filter 420ms ease",
-              }}>
+        <div className="relative px-6 py-3 text-center">
+          {/* Cup SVG — silver, low opacity, no glow */}
+          <div className="relative flex justify-center mb-2">
+            <svg width="56" height="78" viewBox="0 0 60 82" fill="none" xmlns="http://www.w3.org/2000/svg"
+              style={{ opacity: 0.55 }}>
               <ellipse cx="30" cy="80" rx="18" ry="2" fill="#cbd5e1" opacity="0.18"/>
               <rect x="4"  y="74" width="52" height="5"   rx="1.5" fill="#e2e8f0" opacity="0.78"/>
               <rect x="8"  y="70" width="44" height="4.5" rx="1"   fill="#d1d5db" opacity="0.68"/>
@@ -786,51 +697,12 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
               <rect x="11" y="2" width="38" height="5"   rx="2"   fill="#e2e8f0" opacity="0.85"/>
               <rect x="14" y="2.5" width="32" height="2" rx="0.8" fill="white"   opacity="0.30"/>
             </svg>
-            {/* Sweeping scanline over the cup */}
-            <div
-              aria-hidden
-              className="absolute left-0 right-0 top-0 h-px pointer-events-none"
-              style={{
-                background: "linear-gradient(90deg, transparent, rgba(232,208,144,0.95), transparent)",
-                boxShadow: "0 0 10px rgba(232,208,144,0.65)",
-                animation: "cupScan 6s linear infinite",
-              }}
-            />
           </div>
 
-          {/* Bottom label — FINALS sits beneath the cup */}
-          <div className="relative z-[3]">
-            <div className="hud-mono text-[11px] sm:text-[13px] font-black uppercase tracking-[0.42em] mb-1.5 bg-clip-text text-transparent"
-              style={{
-                backgroundImage: "linear-gradient(180deg, #ffffff 0%, #E8D090 38%, #fbbf24 58%, #6a5728 78%, #E8D090 100%)",
-                filter: hovered ? "drop-shadow(0 0 6px rgba(251,191,36,0.55))" : "drop-shadow(0 0 3px rgba(251,191,36,0.30))",
-                transition: "filter 400ms ease",
-              }}>
-              Finals
-            </div>
-            <div className="text-[11px] font-bold text-white/45 italic" style={{ textShadow: "0 0 6px rgba(251,191,36,0.18)" }}>
-              East Champion vs West Champion
-            </div>
+          {/* Caption — matches the muted treatment of "WESTERN CONFERENCE FINAL" above */}
+          <div className="hud-mono text-[10px] uppercase tracking-[0.22em] text-white/40">
+            Stanley Cup Final
           </div>
-
-          <style jsx>{`
-            @keyframes cupRotateSlow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-            @keyframes cupRotateRev  { from { transform: rotate(360deg); } to { transform: rotate(0deg); } }
-            @keyframes cupRotateFast { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-            @keyframes cupPulse {
-              0%   { r: 50; stroke-opacity: 0.55; }
-              100% { r: 115; stroke-opacity: 0; }
-            }
-            @keyframes cupScan {
-              0%   { transform: translateY(0);    opacity: 0; }
-              10%  { opacity: 1; }
-              90%  { opacity: 1; }
-              100% { transform: translateY(96px); opacity: 0; }
-            }
-            @media (prefers-reduced-motion: reduce) {
-              svg g, circle, div { animation: none !important; }
-            }
-          `}</style>
         </div>
       </div>
     );

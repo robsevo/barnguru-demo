@@ -439,7 +439,6 @@ function DateSep({ date }: { date: string }) {
   });
   return (
     <div className="flex flex-col items-center justify-center px-2 shrink-0 relative">
-      <span className="absolute -left-0.5 top-1/2 -translate-y-1/2 hud-mono text-[7px]" style={{ color: "var(--brand-hex)", opacity: 0.5 }}>▶</span>
       <span className="hud-mono text-[8px] tracking-[0.22em] uppercase whitespace-nowrap"
         style={{ color: "rgba(255,255,255,0.40)", textShadow: "0 0 6px rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.25)" }}>
         {label}
@@ -571,7 +570,7 @@ export default function ScoreboardBar() {
         }`} />
         <span className="hud-mono text-[10px] tracking-[0.25em] uppercase"
           style={{ color: hasLive ? "rgba(74,222,128,0.85)" : "rgba(200,205,210,0.50)" }}>
-          ◢ LIVE GAMES
+          LIVE GAMES
         </span>
         {hasLive && (
           <button

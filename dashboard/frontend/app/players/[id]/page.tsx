@@ -4566,13 +4566,18 @@ export default function PlayerProfilePage() {
                   };
                   const tip = NN_TIPS[n.id];
                   return (
-                  <div key={n.id} className="flex items-center gap-2">
-                    <span className="hud-mono text-[9px] uppercase tracking-[0.14em] text-[var(--text-secondary)] w-16 shrink-0 truncate flex items-center gap-1">
-                      {n.label}
-                      {tip && (
-                        <span className="ml-0.5"><StatInfoTip label={n.label} tip={tip} /></span>
-                      )}
-                    </span>
+                  <div key={n.id} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+                    <div className="flex items-center justify-between gap-2 sm:justify-start sm:w-16 sm:shrink-0">
+                      <span className="hud-mono text-[10px] sm:text-[9px] uppercase tracking-[0.10em] sm:tracking-[0.14em] text-[var(--text-secondary)] flex items-center gap-1 min-w-0 sm:truncate">
+                        <span className="truncate">{n.label}</span>
+                        {tip && (
+                          <span className="ml-0.5"><StatInfoTip label={n.label} tip={tip} /></span>
+                        )}
+                      </span>
+                      <span className="sm:hidden hud-mono text-[11px] tabular-nums font-semibold shrink-0" style={{ color: teamColor }}>
+                        {n.weight.toFixed(2)}
+                      </span>
+                    </div>
                     <div className="flex-1 h-2 rounded-sm overflow-hidden relative"
                       style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${teamColor}22` }}>
                       <div
@@ -4596,7 +4601,7 @@ export default function PlayerProfilePage() {
                         }}
                       />
                     </div>
-                    <span className="hud-mono text-[10px] tabular-nums w-10 text-right font-semibold" style={{ color: teamColor }}>
+                    <span className="hidden sm:inline hud-mono text-[10px] tabular-nums w-10 text-right font-semibold" style={{ color: teamColor }}>
                       {n.weight.toFixed(2)}
                     </span>
                   </div>
