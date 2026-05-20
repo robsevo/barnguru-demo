@@ -18,7 +18,9 @@ function AboutDisclaimer() {
         className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-white/[0.03] transition-colors duration-150"
       >
         <span className="text-[9px] font-semibold uppercase tracking-[0.22em] text-white/15">About</span>
-        <span className="text-[8px] text-white/15">{open ? "▼" : "▶"}</span>
+        <svg width="8" height="5" viewBox="0 0 8 5" fill="none" className={`transition-transform duration-150 ${open ? "" : "-rotate-90"}`}>
+          <path d="M0.5 0.5L4 4L7.5 0.5" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round" className="text-white/25" />
+        </svg>
       </button>
       {open && (
         <div className="px-4 pb-3 space-y-2.5">
@@ -493,38 +495,37 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
           <header
             className="relative sticky top-0 z-30 flex items-center gap-2 px-2 sm:px-3 h-11 backdrop-blur-2xl select-none"
             style={{
-              // Always navy regardless of team theme — team color stays on accents only
+              // Always navy regardless of team theme — team color stays on accents only.
+              // Structural borders use neutral steel so the chrome looks unified
+              // regardless of theme; brand color only shows through the ambient
+              // glow + the bottom sweep animation.
               background: "rgba(10,12,16,0.97)",
-              borderBottom: `1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.35)`,
+              borderBottom: `1px solid rgba(220,228,240,0.08)`,
               boxShadow: `
-                0 1px 0 rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.22),
                 0 6px 36px rgba(0,0,0,0.80),
-                0 0 60px rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.06),
-                inset 0 2px 0 rgba(220,228,240,0.18),
-                inset 0 1px 0 rgba(255,255,255,0.10),
+                0 0 60px rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.05),
+                inset 0 1px 0 rgba(220,228,240,0.10),
                 inset 0 -1px 0 rgba(0,0,0,0.45),
-                inset 0 -8px 12px -8px rgba(0,0,0,0.50),
-                inset 1px 0 0 rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.10),
-                inset -1px 0 0 rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.10)
+                inset 0 -8px 12px -8px rgba(0,0,0,0.50)
               `,
             }}
           >
             {/* metallic top-edge highlight */}
             <span aria-hidden className="absolute top-0 left-0 right-0 h-px pointer-events-none z-10"
-              style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent)" }} />
+              style={{ background: "linear-gradient(90deg, transparent, rgba(220,228,240,0.18), transparent)" }} />
 
-            {/* HUD corner brackets — top-left + top-right */}
+            {/* HUD corner brackets — top-left + top-right (subtle steel) */}
             <span aria-hidden className="absolute pointer-events-none z-10"
               style={{
                 top: 3, left: 3, width: 10, height: 10,
-                borderTop: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.65)`,
-                borderLeft: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.65)`,
+                borderTop: `1px solid rgba(220,228,240,0.28)`,
+                borderLeft: `1px solid rgba(220,228,240,0.28)`,
               }} />
             <span aria-hidden className="absolute pointer-events-none z-10"
               style={{
                 top: 3, right: 3, width: 10, height: 10,
-                borderTop: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.65)`,
-                borderRight: `1px solid rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.65)`,
+                borderTop: `1px solid rgba(220,228,240,0.28)`,
+                borderRight: `1px solid rgba(220,228,240,0.28)`,
               }} />
 
             {/* Hamburger — metallic JARVIS button with corner brackets */}
@@ -776,7 +777,6 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                             <path d="M4.8 9 C4.8 7.3 5.8 6.5 7 6.5 C8.2 6.5 9.2 7.3 9.2 9" stroke="currentColor" strokeWidth="1.1" fill="none" strokeLinecap="round"/>
                           </svg>
                           Teams
-                          <span className="ml-auto text-[8px] opacity-50">▸</span>
                         </Link>
                         <Link
                           href="/standings"
@@ -790,7 +790,6 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                             <rect x="7.5" y="0.5" width="2" height="9" rx="0.5" fill="currentColor" opacity="0.9"/>
                           </svg>
                           Standings
-                          <span className="ml-auto text-[8px] opacity-50">▸</span>
                         </Link>
                         <Link
                           href="/stats"
@@ -803,7 +802,6 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                             <circle cx="5" cy="5" r="1.2" fill="currentColor"/>
                           </svg>
                           Player Stats
-                          <span className="ml-auto text-[8px] opacity-50">▸</span>
                         </Link>
                       </div>
                     )}
@@ -875,7 +873,7 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
             <span
               aria-hidden
               className="absolute bottom-0 left-0 right-0 h-px pointer-events-none overflow-hidden"
-              style={{ background: `linear-gradient(90deg, transparent, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.55), transparent)`, opacity: 0.7 }}
+              style={{ background: `linear-gradient(90deg, transparent, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.28), transparent)`, opacity: 0.6 }}
             />
             <span
               aria-hidden

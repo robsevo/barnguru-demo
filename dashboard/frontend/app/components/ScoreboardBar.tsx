@@ -478,6 +478,7 @@ export default function ScoreboardBar() {
   const { hideAll, toggleAll: toggleHideAll } = useHideAllScores();
   const { theme, clearTheme } = useTheme();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const didInitialScrollRef = useRef(false);
 
   const updateArrows = () => {
     const el = scrollRef.current;
@@ -492,21 +493,14 @@ export default function ScoreboardBar() {
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el) return;
+    if (!el || games.length === 0) return;
 
-    // Default: today's first game → first live game → nearest game to today
-    // (past or future, whichever is closer in days). Last resort = scrollEnd.
-    const todayStr = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD local
-    const todayEl  = el.querySelector(`[data-date='${todayStr}']`) as HTMLElement | null;
-    const liveEl   = el.querySelector("[data-live='true']")         as HTMLElement | null;
-    if (todayEl) {
-      el.scrollLeft = Math.max(0, todayEl.offsetLeft - 8);
-    } else if (liveEl) {
-      el.scrollLeft = liveEl.offsetLeft;
-    } else {
-      // Walk the games list, pick the date with the smallest absolute day
-      // delta from today, then scroll to its first card.
-      const todayMs = new Date(todayStr + "T12:00:00").getTime();
+    // Default: center the card whose date is closest to today (today=0 wins).
+    // Run once per mount so subsequent /api/scoreboard polls (every 10–30s)
+    // don't snap the user's manual scroll back to default.
+    if (!didInitialScrollRef.current) {
+      const todayStr = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD local
+      const todayMs  = new Date(todayStr + "T12:00:00").getTime();
       let nearestDate: string | null = null;
       let nearestDelta = Infinity;
       for (const g of games) {
@@ -514,13 +508,15 @@ export default function ScoreboardBar() {
         const d = Math.abs(new Date(g.date + "T12:00:00").getTime() - todayMs);
         if (d < nearestDelta) { nearestDelta = d; nearestDate = g.date; }
       }
-      const nearestEl = nearestDate
+      const target = nearestDate
         ? (el.querySelector(`[data-date='${nearestDate}']`) as HTMLElement | null)
         : null;
-      if (nearestEl) {
-        el.scrollLeft = Math.max(0, nearestEl.offsetLeft - 8);
-      } else {
-        el.scrollLeft = el.scrollWidth - 120;
+      if (target) {
+        // Center the card in the viewport (clamped to valid scroll range).
+        const cx     = target.offsetLeft + target.clientWidth / 2;
+        const maxSL  = Math.max(0, el.scrollWidth - el.clientWidth);
+        el.scrollLeft = Math.max(0, Math.min(maxSL, cx - el.clientWidth / 2));
+        didInitialScrollRef.current = true;
       }
     }
 
