@@ -615,6 +615,88 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   animation: jarvisCornerDraw 600ms ease-out 1 both;
 }
 
+/* Generic hover-glow — brightens + gold-tinted outline glow on hover.
+   Drop onto any clickable card/chip that lacks its own hover state. */
+.jarvis-hover-glow {
+  transition: filter 220ms ease, box-shadow 220ms ease, transform 220ms cubic-bezier(0.22,1,0.36,1);
+}
+.jarvis-hover-glow:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 0 22px rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.22);
+  transform: translateY(-1px);
+}
+
+/* Animated underline sweep — used on nav links + tab labels. */
+.jarvis-underline {
+  position: relative;
+  display: inline-block;
+}
+.jarvis-underline::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -3px;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.95), transparent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 320ms cubic-bezier(0.22,1,0.36,1);
+}
+.jarvis-underline:hover::after {
+  transform: scaleX(1);
+}
+
+/* Image fade-in — player headshots fade up smoothly on first paint. */
+@keyframes jarvisImgFade {
+  0%   { opacity: 0; transform: scale(0.92); filter: blur(2px); }
+  100% { opacity: 1; transform: scale(1);    filter: blur(0); }
+}
+img[src*="assets.nhle.com/mugs"],
+img[src*="assets.nhle.com/logos"] {
+  animation: jarvisImgFade 380ms cubic-bezier(0.22, 1, 0.36, 1) 1 both;
+}
+
+/* Smooth-x scroll — used on horizontal strips (scoreboard) so manual scroll
+   nudges + arrow buttons feel buttery. */
+.scroll-smooth-x {
+  scroll-behavior: smooth;
+}
+
+/* Tilt-on-hover — 3D card lift used for big choice/highlight cards. */
+.jarvis-tilt {
+  transform-style: preserve-3d;
+  transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 320ms ease;
+}
+.jarvis-tilt:hover {
+  transform: perspective(1000px) rotateX(2deg) rotateY(-2deg) translateY(-3px) scale(1.012);
+}
+
+/* Soft mount stagger — child elements fade-rise one after another. Add
+   .jarvis-stagger to the parent container; children pick up delays by index. */
+.jarvis-stagger > * {
+  animation: jarvisBoot 480ms cubic-bezier(0.22, 1, 0.36, 1) 1 both;
+}
+.jarvis-stagger > *:nth-child(1)  { animation-delay:   0ms; }
+.jarvis-stagger > *:nth-child(2)  { animation-delay:  60ms; }
+.jarvis-stagger > *:nth-child(3)  { animation-delay: 120ms; }
+.jarvis-stagger > *:nth-child(4)  { animation-delay: 180ms; }
+.jarvis-stagger > *:nth-child(5)  { animation-delay: 240ms; }
+.jarvis-stagger > *:nth-child(6)  { animation-delay: 300ms; }
+.jarvis-stagger > *:nth-child(7)  { animation-delay: 360ms; }
+.jarvis-stagger > *:nth-child(8)  { animation-delay: 420ms; }
+.jarvis-stagger > *:nth-child(9)  { animation-delay: 480ms; }
+.jarvis-stagger > *:nth-child(10) { animation-delay: 540ms; }
+
+/* Soft text glow on hover — for headers + key labels. */
+.jarvis-text-glow {
+  transition: text-shadow 280ms ease, filter 280ms ease;
+}
+.jarvis-text-glow:hover {
+  text-shadow: 0 0 8px rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.55), 0 0 16px rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.30);
+  filter: brightness(1.08);
+}
+
 /* ─── Player headshot treatment ──────────────────────────────────────────────
    Apply globally to every NHL mugshot so player photos read as part of the
    site's holographic dossier theme rather than dropped-in stock images.
@@ -691,7 +773,14 @@ img[src*="assets.nhle.com/mugs"]:hover {
   .jarvis-lift,
   .jarvis-boot,
   .jarvis-live,
-  .jarvis-corner-draw {
+  .jarvis-corner-draw,
+  .jarvis-hover-glow,
+  .jarvis-underline::after,
+  .jarvis-tilt,
+  .jarvis-stagger > *,
+  .jarvis-text-glow,
+  img[src*="assets.nhle.com/mugs"],
+  img[src*="assets.nhle.com/logos"] {
     animation: none !important;
     transition: none !important;
   }

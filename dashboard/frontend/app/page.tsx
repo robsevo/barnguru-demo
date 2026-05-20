@@ -179,7 +179,7 @@ export default function LandingPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl">
 
         {/* GameCentre card */}
-        <Link href="/gamecentre" className="group jarvis-lift jarvis-boot" style={{ animationDelay: "60ms" }}>
+        <Link href="/gamecentre" className="group jarvis-lift jarvis-tilt jarvis-boot" style={{ animationDelay: "60ms" }}>
           <div className="relative h-44 rounded-2xl border border-[#C9A84C]/[0.18] bg-gradient-to-b from-white/[0.015] via-white/[0.005] to-transparent hover:border-white/[0.36] transition-all duration-200 p-6 flex flex-col justify-between overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.80),0_2px_6px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.06),inset_0_-1px_0_rgba(0,0,0,0.35),inset_1px_0_0_rgba(255,255,255,0.01),inset_-1px_0_0_rgba(255,255,255,0.01)]">
             <div className="absolute -top-8 -right-8 w-40 h-40 rounded-full bg-white/[0.04] blur-2xl pointer-events-none group-hover:bg-white/[0.08] transition-all duration-300" />
             <div>
@@ -198,7 +198,7 @@ export default function LandingPage() {
         </Link>
 
         {/* Playoff Tree card — opens standings /tree view with live bracket */}
-        <Link href="/standings?view=tree" className="group jarvis-lift jarvis-boot" style={{ animationDelay: "120ms" }}>
+        <Link href="/standings?view=tree" className="group jarvis-lift jarvis-tilt jarvis-boot" style={{ animationDelay: "120ms" }}>
           <div className="relative h-44 rounded-2xl border border-[#fbbf24]/15 bg-[#fbbf24]/[0.02] hover:bg-[#fbbf24]/[0.05] hover:border-[#fbbf24]/30 transition-all duration-200 p-6 flex flex-col justify-between overflow-hidden shadow-[0_4px_24px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(220,225,230,0.08)]">
             <div className="absolute -top-8 -right-8 w-40 h-40 rounded-full bg-[#fbbf24]/8 blur-2xl pointer-events-none group-hover:bg-[#fbbf24]/15 transition-all duration-300" />
             <div>
@@ -217,7 +217,7 @@ export default function LandingPage() {
         </Link>
 
         {/* Stats Leaders card */}
-        <Link href="/stats" className="group jarvis-lift jarvis-boot" style={{ animationDelay: "180ms" }}>
+        <Link href="/stats" className="group jarvis-lift jarvis-tilt jarvis-boot" style={{ animationDelay: "180ms" }}>
           <div className="relative h-44 rounded-2xl border border-[#C9A84C]/[0.18] bg-gradient-to-b from-white/[0.015] via-white/[0.005] to-transparent hover:border-white/[0.36] transition-all duration-200 p-6 flex flex-col justify-between overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.80),0_2px_6px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.06),inset_0_-1px_0_rgba(0,0,0,0.35),inset_1px_0_0_rgba(255,255,255,0.01),inset_-1px_0_0_rgba(255,255,255,0.01)]">
             <div className="absolute -top-8 -left-8 w-40 h-40 rounded-full bg-white/[0.03] blur-2xl pointer-events-none group-hover:bg-white/[0.07] transition-all duration-300" />
             <div>
@@ -236,7 +236,7 @@ export default function LandingPage() {
         </Link>
 
         {/* Neural Scout card */}
-        <Link href="/players" className="group jarvis-lift jarvis-boot" style={{ animationDelay: "240ms" }}>
+        <Link href="/players" className="group jarvis-lift jarvis-tilt jarvis-boot" style={{ animationDelay: "240ms" }}>
           <div className="relative h-44 rounded-2xl border border-[#a78bfa]/[0.18] bg-gradient-to-b from-[#a78bfa]/[0.03] via-transparent to-transparent hover:border-[#a78bfa]/[0.35] transition-all duration-200 p-6 flex flex-col justify-between overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.80),inset_0_1px_0_rgba(167,139,250,0.08)]">
             <div className="absolute -top-8 -right-8 w-40 h-40 rounded-full bg-[#a78bfa]/[0.06] blur-2xl pointer-events-none group-hover:bg-[#a78bfa]/[0.12] transition-all duration-300" />
             <div>

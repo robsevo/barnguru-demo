@@ -13,6 +13,11 @@ interface SeriesStatus {
   bottomSeedTeamAbbrev?: string;
   bottomSeedWins?: number;
   gameNumberOfSeries?: number;
+  /** Wins needed to clinch (4 for best-of-7). NHL ships this on every playoff series. */
+  neededToWin?: number;
+  /** Set once a team has clinched the series. */
+  winningTeamId?: number;
+  losingTeamId?: number;
 }
 
 interface Game {
@@ -39,6 +44,19 @@ interface Game {
 const NHL_INT_SECS = 18 * 60; // 18-minute intermission
 const PRE_GAME_COUNTDOWN_CAP_SECS = 3 * 3600;
 
+/** A scheduled game with number `n` is "if necessary" — i.e. won't be played
+ *  if the series ends before it — when the trailing team's wins + needed
+ *  wins is less than `n`. Returns false for live/completed games (caller
+ *  filters those out separately). */
+function isUncertainGame(s: SeriesStatus | null | undefined, n: number | undefined): boolean {
+  if (!s || n == null) return false;
+  const needed = s.neededToWin ?? 4;
+  const minWins = Math.min(s.topSeedWins ?? 0, s.bottomSeedWins ?? 0);
+  // G_n requires the leader to have lost enough games that they cannot have
+  // clinched before now — so G_n is uncertain iff n > needed + minWins.
+  return n > needed + minWins;
+}
+
 function formatSeriesScore(s: SeriesStatus | null | undefined): string | null {
   if (!s) return null;
   const tw = s.topSeedWins ?? 0;
@@ -46,7 +64,28 @@ function formatSeriesScore(s: SeriesStatus | null | undefined): string | null {
   const top = s.topSeedTeamAbbrev;
   const bot = s.bottomSeedTeamAbbrev;
   if (!top || !bot) return null;
-  if (tw === 0 && bw === 0) return `G${s.gameNumberOfSeries ?? 1}`;
+  const needed = s.neededToWin ?? 4;
+  const gameNum = s.gameNumberOfSeries;
+  const uncertain = isUncertainGame(s, gameNum);
+  const star = uncertain ? "*" : "";
+
+  // Series already clinched — every game past the decider is canceled.
+  if (s.winningTeamId != null || Math.max(tw, bw) >= needed) {
+    return tw > bw ? `${top} WIN ${tw}-${bw}` : `${bot} WIN ${bw}-${tw}`;
+  }
+
+  // Pre-series — only emit a G_n chip if NHL actually gave us the game
+  // number. Don't fall back to "G1" — that misled callers into showing G1
+  // on every chip for series whose later games arrived without a number.
+  if (tw === 0 && bw === 0) {
+    return gameNum != null ? `G${gameNum}${star}` : null;
+  }
+
+  // Series in progress — for "if necessary" games surface that explicitly
+  // so the eye sees the asterisk; otherwise show the running series score.
+  if (uncertain && gameNum != null) {
+    return `G${gameNum}*`;
+  }
   if (tw === bw) return `TIED ${tw}-${bw}`;
   return tw > bw ? `${top} ${tw}-${bw}` : `${bot} ${bw}-${tw}`;
 }
@@ -455,7 +494,8 @@ export default function ScoreboardBar() {
     const el = scrollRef.current;
     if (!el) return;
 
-    // Default to today's first game; fall back to first live game; last resort = end
+    // Default: today's first game → first live game → nearest game to today
+    // (past or future, whichever is closer in days). Last resort = scrollEnd.
     const todayStr = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD local
     const todayEl  = el.querySelector(`[data-date='${todayStr}']`) as HTMLElement | null;
     const liveEl   = el.querySelector("[data-live='true']")         as HTMLElement | null;
@@ -464,7 +504,24 @@ export default function ScoreboardBar() {
     } else if (liveEl) {
       el.scrollLeft = liveEl.offsetLeft;
     } else {
-      el.scrollLeft = el.scrollWidth - 120;
+      // Walk the games list, pick the date with the smallest absolute day
+      // delta from today, then scroll to its first card.
+      const todayMs = new Date(todayStr + "T12:00:00").getTime();
+      let nearestDate: string | null = null;
+      let nearestDelta = Infinity;
+      for (const g of games) {
+        if (!g.date) continue;
+        const d = Math.abs(new Date(g.date + "T12:00:00").getTime() - todayMs);
+        if (d < nearestDelta) { nearestDelta = d; nearestDate = g.date; }
+      }
+      const nearestEl = nearestDate
+        ? (el.querySelector(`[data-date='${nearestDate}']`) as HTMLElement | null)
+        : null;
+      if (nearestEl) {
+        el.scrollLeft = Math.max(0, nearestEl.offsetLeft - 8);
+      } else {
+        el.scrollLeft = el.scrollWidth - 120;
+      }
     }
 
     el.addEventListener("scroll", updateArrows, { passive: true });
@@ -539,7 +596,7 @@ export default function ScoreboardBar() {
           <Arrow dir="left" onClick={() => scroll("left")} visible={canLeft} />
           <div
             ref={scrollRef}
-            className="flex items-center flex-1 overflow-x-auto justify-center sm:justify-start gap-1.5 px-1"
+            className="scroll-smooth-x flex items-center flex-1 overflow-x-auto justify-center sm:justify-start gap-1.5 px-1"
           >
             {games.map(g => {
               const isNew  = g.date && !seenDates.has(g.date);

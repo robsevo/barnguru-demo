@@ -2626,6 +2626,21 @@ interface PredAction {
   pct: number;            // raw model % (0-100)
 }
 
+/** Per-action colour + line style so each arrow on the rink reads as a
+ *  distinct kind of play. Shots, skating routes and contested zone plays
+ *  each get their own visual treatment.
+ *  kind: shot = puck flight to the goal · skate = player carrying the puck
+ *  · dump = puck flung into zone · battle = contested possession */
+const ACTION_THEME: Record<string, { color: string; dash: string; kind: "shot" | "skate" | "dump" | "battle"; legend: string }> = {
+  carry:  { color: "#38bdf8", dash: "0",       kind: "skate",  legend: "Carry-in · skate" },
+  dump:   { color: "#fb923c", dash: "5 4",     kind: "dump",   legend: "Dump-in · chip" },
+  slot:   { color: "#f87171", dash: "0",       kind: "shot",   legend: "Slot · shot" },
+  drive:  { color: "#a78bfa", dash: "0",       kind: "skate",  legend: "Drive · net rush" },
+  perim:  { color: "#fbbf24", dash: "0",       kind: "shot",   legend: "Perimeter · shot" },
+  battle: { color: "#4ade80", dash: "4 3",     kind: "battle", legend: "Battle · corner" },
+  hold:   { color: "#2dd4bf", dash: "1 3",     kind: "battle", legend: "Hold · possession" },
+};
+
 function PredictedPlay({
   carry, dump, slot, perim, drive, battleC, holdC, themeColor,
 }: {
@@ -2705,14 +2720,14 @@ function PredictedPlay({
 
       <svg viewBox={`0 0 ${VB.w} ${VB.h}`} className="w-full" style={{ height: 130 }}>
         <defs>
-          <marker id="ppArrow" viewBox="0 0 10 10" refX="9" refY="5"
-            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill={themeColor} />
-          </marker>
-          <marker id="ppArrowGhost" viewBox="0 0 10 10" refX="9" refY="5"
-            markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill={themeColor} fillOpacity="0.45" />
-          </marker>
+          {/* One arrowhead per action colour so the tip of each arrow matches
+              its line. Marker fill cascades from the line stroke via context-stroke. */}
+          {Object.entries(ACTION_THEME).map(([id, t]) => (
+            <marker key={id} id={`ppArrow-${id}`} viewBox="0 0 10 10" refX="9" refY="5"
+              markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill={t.color} />
+            </marker>
+          ))}
         </defs>
 
         {/* Boards (rounded rect) */}
@@ -2748,54 +2763,70 @@ function PredictedPlay({
             stroke="#ff8080" strokeOpacity="0.30" strokeWidth="0.6" />
         ))}
 
-        {/* Ghosted secondary in-zone paths (rank 2, 3) */}
-        {inZoneActions.slice(1, 3).map((a, i) => (
-          <path key={a.id}
-            d={inZonePath(a.id)}
-            fill="none"
-            stroke={themeColor}
-            strokeOpacity={0.22 - i * 0.06}
-            strokeWidth="1.4"
-            strokeDasharray="3 5"
-            markerEnd="url(#ppArrowGhost)" />
-        ))}
+        {/* Ghosted secondary in-zone paths (rank 2, 3) — each drawn in its own
+            action colour + dash style so the ranked list below ties visually. */}
+        {inZoneActions.slice(1, 3).map((a, i) => {
+          const t = ACTION_THEME[a.id];
+          if (!t) return null;
+          return (
+            <path key={a.id}
+              d={inZonePath(a.id)}
+              fill="none"
+              stroke={t.color}
+              strokeOpacity={0.28 - i * 0.08}
+              strokeWidth="1.4"
+              strokeDasharray={t.dash !== "0" ? t.dash : "3 5"}
+              markerEnd={`url(#ppArrow-${a.id})`}
+              style={{ filter: `drop-shadow(0 0 3px ${t.color}55)` }} />
+          );
+        })}
 
-        {/* Primary entry path */}
-        {topEntry && (
-          <path
-            d={entryPath(topEntry.id)}
-            fill="none"
-            stroke={themeColor}
-            strokeWidth="2.2"
-            strokeOpacity="0.85"
-            strokeLinecap="round"
-            markerEnd="url(#ppArrow)"
-            style={{
-              filter: `drop-shadow(0 0 4px ${themeColor})`,
-              strokeDasharray: 320,
-              strokeDashoffset: 320,
-              animation: "ppDraw 1100ms ease-out 80ms forwards",
-            }} />
-        )}
-        {/* Primary in-zone path */}
-        {topInZone && (
-          <path
-            d={inZonePath(topInZone.id)}
-            fill="none"
-            stroke={themeColor}
-            strokeWidth="2.2"
-            strokeOpacity="0.95"
-            strokeLinecap="round"
-            markerEnd="url(#ppArrow)"
-            style={{
-              filter: `drop-shadow(0 0 5px ${themeColor})`,
-              strokeDasharray: 240,
-              strokeDashoffset: 240,
-              animation: "ppDraw 1100ms ease-out 900ms forwards",
-            }} />
-        )}
+        {/* Primary entry path — action-coloured, kind-styled */}
+        {topEntry && (() => {
+          const t = ACTION_THEME[topEntry.id];
+          if (!t) return null;
+          return (
+            <path
+              d={entryPath(topEntry.id)}
+              fill="none"
+              stroke={t.color}
+              strokeWidth="2.4"
+              strokeOpacity="0.92"
+              strokeLinecap="round"
+              strokeDasharray={t.dash !== "0" ? t.dash : undefined}
+              markerEnd={`url(#ppArrow-${topEntry.id})`}
+              style={{
+                filter: `drop-shadow(0 0 5px ${t.color})`,
+                strokeDasharray: t.dash !== "0" ? t.dash : "320",
+                strokeDashoffset: t.dash !== "0" ? 0 : 320,
+                animation: t.dash !== "0" ? undefined : "ppDraw 1100ms ease-out 80ms forwards",
+              }} />
+          );
+        })()}
+        {/* Primary in-zone path — same treatment */}
+        {topInZone && (() => {
+          const t = ACTION_THEME[topInZone.id];
+          if (!t) return null;
+          return (
+            <path
+              d={inZonePath(topInZone.id)}
+              fill="none"
+              stroke={t.color}
+              strokeWidth="2.4"
+              strokeOpacity="0.95"
+              strokeLinecap="round"
+              strokeDasharray={t.dash !== "0" ? t.dash : undefined}
+              markerEnd={`url(#ppArrow-${topInZone.id})`}
+              style={{
+                filter: `drop-shadow(0 0 6px ${t.color})`,
+                strokeDasharray: t.dash !== "0" ? t.dash : "240",
+                strokeDashoffset: t.dash !== "0" ? 0 : 240,
+                animation: t.dash !== "0" ? undefined : "ppDraw 1100ms ease-out 900ms forwards",
+              }} />
+          );
+        })()}
 
-        {/* Origin marker — small triangle at the top of the zone */}
+        {/* Origin marker — small triangle at the top of the zone, in team colour */}
         <polygon points={`${140 - 4},-3 ${140 + 4},-3 140,7`} fill={themeColor} opacity="0.85" />
 
         <style>{`
@@ -2809,41 +2840,88 @@ function PredictedPlay({
       {sequenceLabel && (
         <div className="mt-1.5 px-1 flex items-center gap-2 flex-wrap">
           <span className="hud-mono text-[9px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">SEQ ·</span>
-          <span className="hud-mono text-[10px] uppercase tracking-[0.18em] font-semibold"
-            style={{ color: themeColor, textShadow: `0 0 6px ${themeColor}55` }}>
-            {sequenceLabel}
-          </span>
+          {topEntry && (() => {
+            const t = ACTION_THEME[topEntry.id];
+            return (
+              <span className="hud-mono text-[10px] uppercase tracking-[0.18em] font-semibold"
+                style={{ color: t?.color ?? themeColor, textShadow: `0 0 6px ${(t?.color ?? themeColor)}55` }}>
+                {topEntry.label}
+              </span>
+            );
+          })()}
+          <span className="hud-mono text-[10px] text-[var(--text-muted)]">→</span>
+          {topInZone && (() => {
+            const t = ACTION_THEME[topInZone.id];
+            return (
+              <span className="hud-mono text-[10px] uppercase tracking-[0.18em] font-semibold"
+                style={{ color: t?.color ?? themeColor, textShadow: `0 0 6px ${(t?.color ?? themeColor)}55` }}>
+                {topInZone.label}
+              </span>
+            );
+          })()}
         </div>
       )}
 
-      {/* Top-3 ranked in-zone decisions */}
+      {/* Inline legend — one chip per action present in this player's NN
+          weights, with the same colour + dash style as the rink arrow so
+          Bob can tell which line means what. */}
+      <div className="mt-2 flex flex-wrap gap-1.5 px-1">
+        {[
+          ...(entryActions.length ? entryActions.map(a => a.id) : []),
+          ...(inZoneActions.slice(0, 3).map(a => a.id)),
+        ].filter((id, i, arr) => arr.indexOf(id) === i).map((id) => {
+          const t = ACTION_THEME[id];
+          if (!t) return null;
+          return (
+            <div key={id} className="flex items-center gap-1.5 px-1.5 py-0.5 rounded border"
+              style={{ borderColor: `${t.color}33`, background: `${t.color}0e` }}>
+              {/* Mini line swatch — matches stroke style of the SVG path */}
+              <svg width="16" height="6" viewBox="0 0 16 6" aria-hidden>
+                <line x1="1" y1="3" x2="15" y2="3"
+                  stroke={t.color} strokeWidth="1.6" strokeLinecap="round"
+                  strokeDasharray={t.dash !== "0" ? t.dash : undefined} />
+              </svg>
+              <span className="hud-mono text-[8px] uppercase tracking-[0.14em]" style={{ color: `${t.color}cc` }}>
+                {t.legend}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Top-3 ranked in-zone decisions — each bar uses its action colour so
+          the row directly matches its arrow on the rink above. */}
       {top3.length > 0 && (
         <div className="mt-2 pt-2 border-t border-white/[0.05] space-y-1">
-          {top3.map((a, i) => (
+          {top3.map((a, i) => {
+            const t = ACTION_THEME[a.id];
+            const c = t?.color ?? themeColor;
+            return (
             <div key={a.id} className="flex items-center gap-2">
               <span className="hud-mono text-[8px] uppercase tracking-[0.16em] w-3 text-right shrink-0"
-                style={{ color: i === 0 ? themeColor : "rgba(255,255,255,0.30)" }}>
+                style={{ color: i === 0 ? c : "rgba(255,255,255,0.30)" }}>
                 {i + 1}
               </span>
               <span className="hud-mono text-[9px] uppercase tracking-[0.14em] text-white/65 w-20 shrink-0 truncate">
                 {a.label}
               </span>
               <div className="flex-1 h-1.5 rounded-sm overflow-hidden relative"
-                style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${themeColor}22` }}>
+                style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${c}33` }}>
                 <div className="h-full" style={{
                   width: `${Math.min(100, a.pct)}%`,
-                  background: `linear-gradient(90deg, ${themeColor}aa 0%, ${themeColor} 100%)`,
-                  boxShadow: `0 0 6px ${themeColor}55`,
+                  background: `linear-gradient(90deg, ${c}aa 0%, ${c} 100%)`,
+                  boxShadow: `0 0 6px ${c}55`,
                   animation: `ppBar 900ms cubic-bezier(0.22,1,0.36,1) ${i * 90}ms backwards`,
                   transformOrigin: "left center",
                 }} />
               </div>
               <span className="hud-mono text-[10px] tabular-nums w-10 text-right font-semibold"
-                style={{ color: themeColor }}>
+                style={{ color: c }}>
                 {a.pct.toFixed(1)}%
               </span>
             </div>
-          ))}
+            );
+          })}
           <style jsx>{`
             @keyframes ppBar {
               from { transform: scaleX(0); opacity: 0; }

@@ -666,13 +666,20 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
   // Stanley Cup centerpiece — sits between East CF and West CF so the bracket
   // reads top-to-bottom: East R1 → East R2 → East CF → ⌘ Cup ⌘ → West CF → West R2 → West R1.
   function StanleyCupCenter() {
+    const [hovered, setHovered] = useState(false);
     return (
       <div className="flex items-center justify-center pt-1 pb-1">
         <div
-          className="relative jarvis-boot rounded-2xl border border-[#fbbf24]/30 bg-gradient-to-b from-[#fbbf24]/[0.04] via-[#fbbf24]/[0.015] to-transparent px-8 py-6 text-center"
+          className="relative jarvis-boot rounded-2xl border bg-gradient-to-b from-[#fbbf24]/[0.04] via-[#fbbf24]/[0.015] to-transparent px-8 py-6 text-center cursor-default transition-all duration-500"
           style={{
-            boxShadow: "0 0 60px rgba(251,191,36,0.10), 0 0 24px rgba(251,191,36,0.18) inset, 0 1px 0 rgba(232,208,144,0.12) inset",
+            borderColor: hovered ? "rgba(251,191,36,0.65)" : "rgba(251,191,36,0.30)",
+            boxShadow: hovered
+              ? "0 0 90px rgba(251,191,36,0.28), 0 0 32px rgba(251,191,36,0.32) inset, 0 1px 0 rgba(232,208,144,0.22) inset"
+              : "0 0 60px rgba(251,191,36,0.10), 0 0 24px rgba(251,191,36,0.18) inset, 0 1px 0 rgba(232,208,144,0.12) inset",
+            transform: hovered ? "translateY(-2px)" : "translateY(0)",
           }}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
         >
           {/* HUD corner brackets */}
           {([
@@ -691,12 +698,18 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
             }} />
           ))}
 
-          {/* Halo rings — rotating Iron Man chrome around the cup */}
+          {/* Halo rings — rotating Iron Man chrome around the cup. Spin faster
+              + brighter on hover so the centerpiece feels alive when you reach it. */}
           <svg
             viewBox="0 0 240 240"
             aria-hidden
             className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none w-[180%] max-w-none h-[180%]"
-            style={{ zIndex: 0, opacity: 0.55 }}
+            style={{
+              zIndex: 0,
+              opacity: hovered ? 0.85 : 0.55,
+              transition: "opacity 400ms ease",
+              animationDuration: hovered ? "14s" : "36s",
+            }}
           >
             <defs>
               <linearGradient id="cupArc" x1="0" y1="0" x2="1" y2="1">
@@ -711,28 +724,28 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
               </linearGradient>
             </defs>
 
-            {/* Outer slow ring — dashed */}
-            <g style={{ transformOrigin: "120px 120px", animation: "cupRotateSlow 36s linear infinite" }}>
-              <circle cx={120} cy={120} r={110} fill="none" stroke="#fbbf24" strokeOpacity={0.18} strokeDasharray="2 8" />
+            {/* Outer slow ring — dashed. Spin faster on hover. */}
+            <g style={{ transformOrigin: "120px 120px", animation: `cupRotateSlow ${hovered ? 14 : 36}s linear infinite` }}>
+              <circle cx={120} cy={120} r={110} fill="none" stroke="#fbbf24" strokeOpacity={hovered ? 0.35 : 0.18} strokeDasharray="2 8" />
               {[0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330].map((deg, i) => {
                 const rad = (deg * Math.PI) / 180;
                 return (
                   <line key={i}
                     x1={120 + Math.cos(rad) * 105} y1={120 + Math.sin(rad) * 105}
                     x2={120 + Math.cos(rad) * 115} y2={120 + Math.sin(rad) * 115}
-                    stroke="#fbbf24" strokeOpacity={0.55} strokeWidth={1.2}
+                    stroke="#fbbf24" strokeOpacity={hovered ? 0.85 : 0.55} strokeWidth={1.2}
                   />
                 );
               })}
             </g>
 
             {/* Middle counter-rotating arc */}
-            <g style={{ transformOrigin: "120px 120px", animation: "cupRotateRev 22s linear infinite" }}>
+            <g style={{ transformOrigin: "120px 120px", animation: `cupRotateRev ${hovered ? 9 : 22}s linear infinite` }}>
               <circle cx={120} cy={120} r={90} fill="none" stroke="url(#cupArc)" strokeWidth={1.6} strokeDasharray="100 60 40 60" strokeLinecap="round" />
             </g>
 
             {/* Inner fast arc */}
-            <g style={{ transformOrigin: "120px 120px", animation: "cupRotateFast 12s linear infinite" }}>
+            <g style={{ transformOrigin: "120px 120px", animation: `cupRotateFast ${hovered ? 5 : 12}s linear infinite` }}>
               <circle cx={120} cy={120} r={70} fill="none" stroke="url(#cupArc2)" strokeWidth={1.4} strokeDasharray="30 120" strokeLinecap="round" />
             </g>
 
@@ -743,19 +756,28 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
               style={{ animation: "cupPulse 5.2s ease-out infinite 2.6s" }} />
           </svg>
 
-          {/* TARGET strip at top */}
-          <div className="relative z-[3] flex items-center justify-center gap-2 mb-2">
-            <span className="hud-pulse-dot" style={{ background: "#fbbf24" }} />
-            <span className="hud-mono jarvis-flicker text-[8px] font-black uppercase tracking-[0.30em]"
-              style={{ color: "#fbbf24", textShadow: "0 0 6px rgba(251,191,36,0.55)" }}>
-              ◢ ULTIMATE PRIZE ◣
-            </span>
+          {/* Top label — STANLEY in gold gradient, sits above the cup */}
+          <div className="relative z-[3] mb-2">
+            <div className="hud-mono text-[11px] sm:text-[13px] font-black uppercase tracking-[0.42em] bg-clip-text text-transparent"
+              style={{
+                backgroundImage: "linear-gradient(180deg, #ffffff 0%, #E8D090 38%, #fbbf24 58%, #6a5728 78%, #E8D090 100%)",
+                filter: hovered ? "drop-shadow(0 0 6px rgba(251,191,36,0.55))" : "drop-shadow(0 0 3px rgba(251,191,36,0.30))",
+                transition: "filter 400ms ease",
+              }}>
+              ◢ Stanley Cup ◣
+            </div>
           </div>
 
-          {/* Cup SVG with vertical scanline */}
-          <div className="relative z-[3] flex justify-center mb-3">
+          {/* Cup SVG with vertical scanline. Scales up + brightens on hover. */}
+          <div className="relative z-[3] flex justify-center mb-2">
             <svg width="70" height="96" viewBox="0 0 60 82" fill="none" xmlns="http://www.w3.org/2000/svg"
-              style={{ filter: "drop-shadow(0 0 8px rgba(251,191,36,0.45)) drop-shadow(0 0 16px rgba(251,191,36,0.20))" }}>
+              style={{
+                filter: hovered
+                  ? "drop-shadow(0 0 14px rgba(251,191,36,0.75)) drop-shadow(0 0 28px rgba(251,191,36,0.35))"
+                  : "drop-shadow(0 0 8px rgba(251,191,36,0.45)) drop-shadow(0 0 16px rgba(251,191,36,0.20))",
+                transform: hovered ? "scale(1.10) translateY(-2px)" : "scale(1) translateY(0)",
+                transition: "transform 420ms cubic-bezier(0.22,1,0.36,1), filter 420ms ease",
+              }}>
               <ellipse cx="30" cy="80" rx="18" ry="2" fill="#cbd5e1" opacity="0.18"/>
               <rect x="4"  y="74" width="52" height="5"   rx="1.5" fill="#e2e8f0" opacity="0.78"/>
               <rect x="8"  y="70" width="44" height="4.5" rx="1"   fill="#d1d5db" opacity="0.68"/>
@@ -793,11 +815,15 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
             />
           </div>
 
-          {/* Title with gradient + glow */}
+          {/* Bottom label — FINALS sits beneath the cup */}
           <div className="relative z-[3]">
-            <div className="hud-mono text-[8px] font-black uppercase tracking-[0.38em] mb-1.5 bg-clip-text text-transparent"
-              style={{ backgroundImage: "linear-gradient(180deg, #ffffff 0%, #E8D090 38%, #fbbf24 58%, #6a5728 78%, #E8D090 100%)" }}>
-              ◢ Stanley Cup Final ◣
+            <div className="hud-mono text-[11px] sm:text-[13px] font-black uppercase tracking-[0.42em] mb-1.5 bg-clip-text text-transparent"
+              style={{
+                backgroundImage: "linear-gradient(180deg, #ffffff 0%, #E8D090 38%, #fbbf24 58%, #6a5728 78%, #E8D090 100%)",
+                filter: hovered ? "drop-shadow(0 0 6px rgba(251,191,36,0.55))" : "drop-shadow(0 0 3px rgba(251,191,36,0.30))",
+                transition: "filter 400ms ease",
+              }}>
+              ◤ Finals ◥
             </div>
             <div className="text-[11px] font-bold text-white/45 italic" style={{ textShadow: "0 0 6px rgba(251,191,36,0.18)" }}>
               East Champion vs West Champion
