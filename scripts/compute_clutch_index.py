@@ -531,6 +531,11 @@ def main() -> None:
     if out_season_df.is_empty() and career_df.is_empty():
         print("\n[clutch-index] No data produced — check that PBP and TOI parquets exist.")
         print(f"  Expected under: {raw_dir}/")
+        # Playoffs variant is a no-op when playoff PBP hasn't been ingested
+        # yet (pre-playoff regular season, or pbp_*.parquet ingested before
+        # the game_types=2,3 default was set). Don't fail the whole pipeline.
+        if season_type == "playoffs":
+            sys.exit(0)
         sys.exit(1)
 
     # ── Validation gate ───────────────────────────────────────────────────────
