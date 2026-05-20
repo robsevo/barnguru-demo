@@ -681,23 +681,6 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
         >
-          {/* HUD corner brackets */}
-          {([
-            { t: 6,  l: 6  },
-            { t: 6,  r: 6  },
-            { b: 6,  l: 6  },
-            { b: 6,  r: 6  },
-          ] as { t?: number; b?: number; l?: number; r?: number }[]).map((p, i) => (
-            <span key={i} aria-hidden className="absolute pointer-events-none z-[2]" style={{
-              width: 11, height: 11,
-              top: p.t, bottom: p.b, left: p.l, right: p.r,
-              borderTop:    p.t != null ? "1px solid #fbbf24cc" : undefined,
-              borderBottom: p.b != null ? "1px solid #fbbf24cc" : undefined,
-              borderLeft:   p.l != null ? "1px solid #fbbf24cc" : undefined,
-              borderRight:  p.r != null ? "1px solid #fbbf24cc" : undefined,
-            }} />
-          ))}
-
           {/* Halo rings — rotating Iron Man chrome around the cup. Spin faster
               + brighter on hover so the centerpiece feels alive when you reach it. */}
           <svg

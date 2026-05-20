@@ -18,9 +18,7 @@ function AboutDisclaimer() {
         className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-white/[0.03] transition-colors duration-150"
       >
         <span className="text-[9px] font-semibold uppercase tracking-[0.22em] text-white/15">About</span>
-        <svg width="8" height="5" viewBox="0 0 8 5" fill="none" className={`transition-transform duration-150 ${open ? "" : "-rotate-90"}`}>
-          <path d="M0.5 0.5L4 4L7.5 0.5" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round" className="text-white/25" />
-        </svg>
+        <span className="text-[8px] font-semibold tracking-[0.18em] text-white/20">{open ? "HIDE" : "SHOW"}</span>
       </button>
       {open && (
         <div className="px-4 pb-3 space-y-2.5">
@@ -650,7 +648,7 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
               className="hud-mono text-[9px] tracking-[0.20em] uppercase hidden lg:block"
               style={{ color: theme ? "rgba(255,255,255,0.45)" : `rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.45)` }}
             >
-              {theme ? "" : isCortexMode ? "◢ NEURAL CORE · v1.0" : "◢ BAYESIAN ANALYTICS · RATING NETWORK"}
+              {theme ? "" : isCortexMode ? "NEURAL CORE · v1.0" : "BAYESIAN ANALYTICS · RATING NETWORK"}
             </span>
 
             {/* Quick-nav buttons */}
@@ -736,9 +734,6 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                     >
                       <span className="sm:hidden">Stats</span>
                       <span className="hidden sm:inline">Stats</span>
-                      <svg width="8" height="5" viewBox="0 0 8 5" fill="currentColor" className={`transition-transform duration-150 ${statsDropOpen ? "rotate-180" : ""}`}>
-                        <path d="M0.5 0.5L4 4L7.5 0.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-                      </svg>
                     </button>
                     {/* Dropdown — JARVIS chrome with corner brackets + scan line */}
                     {statsDropOpen && (
@@ -760,7 +755,6 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                         <span className="hud-panel__corner-bl" />
                         {/* Top mini dossier label */}
                         <div className="px-2 pt-1.5 pb-1 flex items-center gap-1.5 border-b border-white/[0.06]">
-                          <span className="hud-mono text-[8px] uppercase tracking-[0.20em] text-[var(--brand-hex)]">◢</span>
                           <span className="hud-mono text-[8px] uppercase tracking-[0.20em] text-[var(--brand-hex)]/80">INDEX</span>
                           <span className="hud-pulse-dot ml-auto" style={{ background: "#4ade80", width: 5, height: 5 }} />
                         </div>
