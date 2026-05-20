@@ -446,6 +446,33 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
   }) {
     const showR1Mobile = activeRound === 1;
     const showR2Mobile = activeRound === 2 && !!divFinal;
+    // Once we hit the Conference Final, division identity stops mattering —
+    // the matchup is conference-wide. Hide the division label and the whole
+    // R1/R2 sub-tree on mobile so we don't show empty divisional headers
+    // sitting over nothing.
+    const cfActive = activeRound >= 3;
+    if (cfActive) {
+      return (
+        <div className="hidden sm:block opacity-50">
+          <div className={`flex flex-col sm:items-stretch ${mirror ? "sm:flex-row-reverse" : "sm:flex-row"}`}>
+            <div className="flex-1 flex-col gap-3 min-w-0 sm:flex">
+              {top}
+              {bottom}
+            </div>
+            <div className={`hidden sm:block w-5 shrink-0 relative self-stretch ${mirror ? "mr-2" : "ml-2"}`}>
+              <div className="absolute left-0 right-0 h-px bg-white/[0.10]" style={{ top: "24%" }} />
+              <div className="absolute left-0 right-0 h-px bg-white/[0.10]" style={{ top: "76%" }} />
+              <div className={`absolute w-px bg-white/[0.10] ${mirror ? "left-0" : "right-0"}`} style={{ top: "24%", bottom: "24%" }} />
+            </div>
+            {divFinal && (
+              <div className={`min-w-0 sm:flex-1 sm:flex sm:items-center ${mirror ? "sm:mr-2" : "sm:ml-2"}`}>
+                <div className="w-full">{divFinal}</div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
     return (
       <div>
         <div className={`text-[8px] font-black uppercase tracking-[0.28em] text-white/22 mb-2 px-0.5 ${mirror ? "sm:text-right" : ""}`}>{label}</div>
@@ -626,22 +653,37 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
     );
   }
 
+  // Expose the mobile round pill up to whichever round is currently live
+  // (or already has data) — so Conference Finals can be selected once R3
+  // has its first series posted.
+  const maxRoundAvailable = Math.max(
+    bracket?.currentRound ?? 1,
+    ...((bracket?.rounds ?? []).filter(r => r.series.length > 0).map(r => r.round)),
+    1,
+  );
+  const mobileRoundOptions = Array.from(
+    { length: Math.min(4, Math.max(2, maxRoundAvailable)) },
+    (_, i) => i + 1,
+  );
+  const roundShortLabel = (r: number) =>
+    r === 4 ? "Cup" : r === 3 ? "CF" : `R${r}`;
+
   return (
     <div className="space-y-10">
       {/* Mobile-only round pill — desktop renders all rounds side by side */}
       <div className="sm:hidden flex justify-center">
         <div className="flex rounded-lg border border-white/[0.10] overflow-hidden bg-white/[0.02]">
-          {[1, 2].map(r => (
+          {mobileRoundOptions.map(r => (
             <button
               key={r}
               onClick={() => setMobileRound(r)}
-              className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-wider transition-colors ${
+              className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider transition-colors ${
                 activeRound === r
                   ? "bg-[#C9A84C]/12 text-[#C9A84C]/85"
                   : "text-white/35 hover:text-white/55"
               }`}
             >
-              Round {r}
+              {roundShortLabel(r)}
             </button>
           ))}
         </div>

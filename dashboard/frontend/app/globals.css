@@ -437,6 +437,10 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 /* Faint background grid for full-page chrome (HudGrid component) */
+@keyframes hudGridDrift {
+  0%   { background-position: 0px 0px; }
+  100% { background-position: 48px 48px; }
+}
 .hud-grid-bg {
   position: absolute;
   inset: 0;
@@ -445,6 +449,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   pointer-events: none;
   mask-image: radial-gradient(ellipse 70% 70% at 50% 40%, rgba(0,0,0,0.8) 0%, transparent 80%);
   -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 40%, rgba(0,0,0,0.8) 0%, transparent 80%);
+  animation: hudGridDrift 36s linear infinite;
 }
 
 /* ─── JARVIS micro-interactions ────────────────────────────────────────────
@@ -523,6 +528,37 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   box-shadow: 0 8px 24px rgba(0,0,0,0.6), 0 0 18px rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.25);
 }
 
+/* Card boot-in — first-paint fade + soft rise. Single-shot. Used by the
+   hud-panel root so dashboards "boot up" rather than snap-in. */
+@keyframes jarvisBoot {
+  0%   { opacity: 0;   transform: translateY(6px); filter: blur(2px); }
+  60%  { opacity: 1;   filter: blur(0); }
+  100% { opacity: 1;   transform: translateY(0);   filter: blur(0); }
+}
+.jarvis-boot {
+  animation: jarvisBoot 480ms cubic-bezier(0.22, 1, 0.36, 1) 1 both;
+}
+
+/* Subtle live-data pulse — slow brightness wobble for value spans we want to
+   read as "streaming". Keep amplitude tiny so it never distracts. */
+@keyframes jarvisLivePulse {
+  0%, 100% { filter: brightness(1.00); }
+  50%      { filter: brightness(1.10); }
+}
+.jarvis-live {
+  animation: jarvisLivePulse 3.6s ease-in-out infinite;
+}
+
+/* Holographic corner-bracket reveal — animates the four corners drawing in. */
+@keyframes jarvisCornerDraw {
+  0%   { clip-path: inset(0 100% 100% 0); opacity: 0; }
+  40%  { opacity: 1; }
+  100% { clip-path: inset(0 0 0 0);       opacity: 1; }
+}
+.jarvis-corner-draw {
+  animation: jarvisCornerDraw 600ms ease-out 1 both;
+}
+
 /* ─── Player headshot treatment ──────────────────────────────────────────────
    Apply globally to every NHL mugshot so player photos read as part of the
    site's holographic dossier theme rather than dropped-in stock images.
@@ -587,11 +623,15 @@ img[src*="assets.nhle.com/mugs"]:hover {
   .hud-scan,
   .hud-pulse-dot,
   .hud-row,
+  .hud-grid-bg,
   .jarvis-type,
   .jarvis-glitch-hover,
   .jarvis-flicker,
   .jarvis-shimmer::after,
-  .jarvis-lift {
+  .jarvis-lift,
+  .jarvis-boot,
+  .jarvis-live,
+  .jarvis-corner-draw {
     animation: none !important;
     transition: none !important;
   }

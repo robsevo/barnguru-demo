@@ -36,7 +36,7 @@ export function HudPanel({
     : {};
   return (
     <div
-      className={`hud-panel ${allCorners ? "hud-panel--all-corners" : ""} ${shimmer ? "jarvis-shimmer" : ""} ${className}`}
+      className={`hud-panel jarvis-boot ${allCorners ? "hud-panel--all-corners" : ""} ${shimmer ? "jarvis-shimmer" : ""} ${className}`}
       style={{ ...themed, ...style }}
     >
       {allCorners ? (

@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import ClientLayout from "./ClientLayout";
 import ScoreboardBar from "./ScoreboardBar";
 import GoalFeed from "./GoalFeed";
+import HideScoresToggle from "./HideScoresToggle";
 
 function DevBanner() {
   const [banner, setBanner] = useState<{ active: boolean; message: string } | null>(null);
@@ -46,6 +47,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <DevBanner />
       <ScoreboardBar />
       <GoalFeed />
+      <HideScoresToggle />
       {children}
     </ClientLayout>
   );
