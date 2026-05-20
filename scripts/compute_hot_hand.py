@@ -338,6 +338,11 @@ def main() -> None:
             "  e.g. moneypuck_skaters_{season}.parquet or player_game_stats_{season}.parquet"
         )
         print("  Run 'uv run python scripts/gretzky.py sync' first.")
+        # Playoffs variant is a no-op when playoff PBP hasn't been ingested
+        # yet (pre-playoff regular season, or pbp_*.parquet ingested before
+        # the game_types=2,3 default was set). Don't fail the whole pipeline.
+        if season_type == "playoffs":
+            sys.exit(0)
         sys.exit(1)
 
     print(f"  {len(df):,} rows loaded across all seasons")
