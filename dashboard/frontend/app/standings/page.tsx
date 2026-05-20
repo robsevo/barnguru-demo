@@ -445,7 +445,7 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
           {statusText ? (
             <span className="hud-mono text-[9px] font-black tracking-[0.20em] text-[#C9A84C]/85 uppercase whitespace-nowrap"
               style={{ textShadow: "0 0 6px rgba(201,168,76,0.45)" }}>
-              ◢ {statusText} ◣
+              {statusText}
             </span>
           ) : (
             <span className="hud-mono text-[7px] font-black tracking-[0.30em] text-white/15 uppercase">vs</span>
@@ -579,7 +579,7 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
         <span className="hud-pulse-dot" style={{ background: name === "East" ? "#60a5fa" : "#f87171" }} />
         <h2 className="hud-mono text-[13px] font-black uppercase tracking-[0.24em] text-white/70"
           style={{ textShadow: name === "East" ? "0 0 6px rgba(96,165,250,0.30)" : "0 0 6px rgba(248,113,113,0.30)" }}>
-          ◢ {name}ern Conference
+          {name}ern Conference
         </h2>
         <div className="flex-1 h-px bg-gradient-to-r from-[#C9A84C]/[0.20] via-[#C9A84C]/[0.06] to-transparent" />
         <span className="hidden sm:inline-flex items-center gap-1 hud-mono text-[8px] font-black uppercase tracking-[0.24em] text-[#C9A84C]/75 border border-[#C9A84C]/[0.30] bg-[#C9A84C]/[0.05] px-2 py-0.5 rounded-full">
@@ -616,12 +616,10 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
         {confFinal ? (
           <div className="max-w-xl mx-auto">
             <div className="flex items-center gap-2 mb-2 justify-center">
-              <span aria-hidden className="text-[10px] text-[#C9A84C]/70">◢</span>
               <span className="hud-mono text-[9px] font-black uppercase tracking-[0.30em] text-[#C9A84C]/85"
                 style={{ textShadow: "0 0 6px rgba(201,168,76,0.40)" }}>
                 {name}ern Conference Final
               </span>
-              <span aria-hidden className="text-[10px] text-[#C9A84C]/70">◣</span>
             </div>
             <MatchupCard top={rowFor(confFinal.topSeed.team)} bottom={rowFor(confFinal.bottomSeed.team)} />
           </div>
@@ -670,12 +668,14 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
     return (
       <div className="flex items-center justify-center pt-1 pb-1">
         <div
-          className="relative jarvis-boot rounded-2xl border bg-gradient-to-b from-[#fbbf24]/[0.04] via-[#fbbf24]/[0.015] to-transparent px-8 py-6 text-center cursor-default transition-all duration-500"
+          className="relative jarvis-boot rounded-2xl px-8 py-6 text-center cursor-default transition-all duration-500"
           style={{
-            borderColor: hovered ? "rgba(251,191,36,0.65)" : "rgba(251,191,36,0.30)",
+            // See-through container — let the rotating halo + cup + labels
+            // do all the visual work. No fill, no border, no inset glows.
+            // The outer hover glow stays as an ambient lift.
             boxShadow: hovered
-              ? "0 0 90px rgba(251,191,36,0.28), 0 0 32px rgba(251,191,36,0.32) inset, 0 1px 0 rgba(232,208,144,0.22) inset"
-              : "0 0 60px rgba(251,191,36,0.10), 0 0 24px rgba(251,191,36,0.18) inset, 0 1px 0 rgba(232,208,144,0.12) inset",
+              ? "0 0 90px rgba(251,191,36,0.22)"
+              : "0 0 60px rgba(251,191,36,0.08)",
             transform: hovered ? "translateY(-2px)" : "translateY(0)",
           }}
           onMouseEnter={() => setHovered(true)}
@@ -764,7 +764,7 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
                 filter: hovered ? "drop-shadow(0 0 6px rgba(251,191,36,0.55))" : "drop-shadow(0 0 3px rgba(251,191,36,0.30))",
                 transition: "filter 400ms ease",
               }}>
-              ◢ Stanley Cup ◣
+              Stanley Cup
             </div>
           </div>
 
@@ -823,7 +823,7 @@ function PlayoffBracket({ rows, bracket }: { rows: StandingRow[]; bracket: Brack
                 filter: hovered ? "drop-shadow(0 0 6px rgba(251,191,36,0.55))" : "drop-shadow(0 0 3px rgba(251,191,36,0.30))",
                 transition: "filter 400ms ease",
               }}>
-              ◤ Finals ◥
+              Finals
             </div>
             <div className="text-[11px] font-bold text-white/45 italic" style={{ textShadow: "0 0 6px rgba(251,191,36,0.18)" }}>
               East Champion vs West Champion
@@ -1103,7 +1103,6 @@ function StandingsPageInner() {
 
       {/* HUD dossier strip */}
       <div className="relative z-10 mb-3 flex items-center gap-2 flex-wrap">
-        <span className="hud-mono text-[10px] uppercase tracking-[0.20em] text-[var(--brand-hex)]" aria-hidden>◢</span>
         <span className="hud-mono text-[10px] uppercase tracking-[0.20em] text-[var(--brand-hex)]">
           STANDINGS · DIVISION INTEL
         </span>
@@ -1122,7 +1121,7 @@ function StandingsPageInner() {
           </Link>
           <h1 className="text-[22px] sm:text-[34px] font-black tracking-[0.10em] uppercase leading-none bg-clip-text text-transparent"
             style={{ backgroundImage: "linear-gradient(180deg, #ffffff 0%, #E8D090 38%, #C9A84C 58%, #6a5728 78%, #E8D090 100%)", filter: "drop-shadow(0 1px 0 rgba(0,0,0,0.85))" }}>
-            ◢ STANDINGS ◣
+            STANDINGS
           </h1>
           <p className="hud-mono text-[10px] uppercase tracking-[0.22em] text-white/45 mt-1.5">2025–26 NHL SEASON</p>
         </div>
