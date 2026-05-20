@@ -166,6 +166,10 @@ def main() -> None:
 
     if len(shots_df) == 0:
         print("[positional-heatmap] No shot data found.")
+        # Playoffs variant: no playoff shots yet is a legitimate state, not
+        # a fault — exit clean so the workflow can continue.
+        if season_type == "playoffs":
+            sys.exit(0)
         sys.exit(1)
     print(f"  {len(shots_df):,} shot rows loaded")
 

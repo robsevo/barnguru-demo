@@ -283,6 +283,10 @@ def main() -> None:
 
     if not valid_seasons:
         print("ERROR: No valid seasons with complete data.", file=sys.stderr)
+        # Playoffs variant is a no-op when playoff stints/RAPM haven't been
+        # populated yet (pre-playoff season). Don't fail the pipeline.
+        if season_type == "playoffs":
+            sys.exit(0)
         sys.exit(1)
 
     # ── Train XGBoost chemistry model on all available seasons ────────────────
