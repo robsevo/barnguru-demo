@@ -511,10 +511,16 @@ export default function ScoreboardBar() {
         ? (el.querySelector(`[data-date='${nearestDate}']`) as HTMLElement | null)
         : null;
       if (target) {
-        // Center the card in the viewport (clamped to valid scroll range).
-        const cx     = target.offsetLeft + target.clientWidth / 2;
+        // Use getBoundingClientRect so the math is independent of offsetParent
+        // (the scroll container has no `position: relative`, so target.offsetLeft
+        // was measuring from an ancestor and inflating to maxSL on mobile —
+        // which dumped the user at the far-right of the strip).
+        const cRect = el.getBoundingClientRect();
+        const tRect = target.getBoundingClientRect();
+        const targetLeftInScroll = (tRect.left - cRect.left) + el.scrollLeft;
+        const desired = targetLeftInScroll + target.clientWidth / 2 - el.clientWidth / 2;
         const maxSL  = Math.max(0, el.scrollWidth - el.clientWidth);
-        el.scrollLeft = Math.max(0, Math.min(maxSL, cx - el.clientWidth / 2));
+        el.scrollLeft = Math.max(0, Math.min(maxSL, desired));
         didInitialScrollRef.current = true;
       }
     }
@@ -591,7 +597,7 @@ export default function ScoreboardBar() {
           <Arrow dir="left" onClick={() => scroll("left")} visible={canLeft} />
           <div
             ref={scrollRef}
-            className="scroll-smooth-x flex items-center flex-1 overflow-x-auto justify-center sm:justify-start gap-1.5 px-1"
+            className="scroll-smooth-x flex items-center flex-1 overflow-x-auto gap-1.5 px-1 [justify-content:safe_center] sm:justify-start"
           >
             {games.map(g => {
               const isNew  = g.date && !seenDates.has(g.date);
