@@ -1,7 +1,7 @@
 "use client";
 
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Text } from "@react-three/drei";
+import { OrbitControls, Text, Billboard } from "@react-three/drei";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 
@@ -246,6 +246,21 @@ function ZonePatch({
   const color = pct > 25 ? "#f87171" : pct > 15 ? "#fbbf24" : zone.baseColor;
   const alpha = Math.min(0.65, 0.15 + (pct / 35) * 0.55);
 
+  // Per-zone label offset (y = height above ice). Spreading these so the five
+  // chips don't collide in screen space when the camera looks from oblique
+  // angles. L CORNER + R CORNER sit higher because they're outermost; SLOT
+  // and NET sit at differentiated heights to avoid stacking near the crease.
+  const labelY: Record<string, number> = {
+    cornerL: 10,
+    cornerR: 10,
+    slot:    7,
+    net:     4,
+    perim:   8,
+  };
+  const y = labelY[zone.id] ?? 6;
+  // Shrink the most word-heavy labels so they don't sprawl across neighbours.
+  const isLong = zone.label.length > 4;
+
   return (
     <group position={[zone.cx, 0.04, zone.cz]}>
       {/* Flat colored decal */}
@@ -257,38 +272,34 @@ function ZonePatch({
         <planeGeometry args={[zone.w, zone.d]} />
         <meshBasicMaterial color={color} transparent opacity={hovered ? alpha * 1.4 : alpha} />
       </mesh>
-      {/* Border outline */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]}>
-        <ringGeometry args={[0, Math.min(zone.w, zone.d) / 2.0, 8]} />
-        <meshBasicMaterial color={color} transparent opacity={0} />
-      </mesh>
-      {/* Floating % label hovering above */}
-      <Text
-        position={[0, 6, 0]}
-        rotation={[-Math.PI / 4, 0, 0]}
-        fontSize={3.4}
-        color={color}
-        anchorX="center"
-        anchorY="middle"
-        outlineWidth={0.10}
-        outlineColor="#000"
-      >
-        {`${pct.toFixed(0)}%`}
-      </Text>
-      {/* Zone label below the percentage */}
-      <Text
-        position={[0, 3, 0]}
-        rotation={[-Math.PI / 4, 0, 0]}
-        fontSize={1.4}
-        color={color}
-        anchorX="center"
-        anchorY="middle"
-        outlineWidth={0.06}
-        outlineColor="#000"
-        letterSpacing={0.18}
-      >
-        {zone.label}
-      </Text>
+      {/* Billboarded label group — always faces camera so the % and zone name
+          stay legible no matter how the rink is rotated, and they keep a
+          consistent screen-space size between neighbouring chips. */}
+      <Billboard position={[0, y, 0]} follow lockX={false} lockY={false} lockZ={false}>
+        <Text
+          position={[0, 1.4, 0]}
+          fontSize={2.8}
+          color={color}
+          anchorX="center"
+          anchorY="middle"
+          outlineWidth={0.10}
+          outlineColor="#000"
+        >
+          {`${pct.toFixed(0)}%`}
+        </Text>
+        <Text
+          position={[0, -0.6, 0]}
+          fontSize={isLong ? 1.0 : 1.3}
+          color={color}
+          anchorX="center"
+          anchorY="middle"
+          outlineWidth={0.05}
+          outlineColor="#000"
+          letterSpacing={0.12}
+        >
+          {zone.label}
+        </Text>
+      </Billboard>
     </group>
   );
 }
@@ -314,12 +325,15 @@ export default function Zone3DScene({ activations, themeColor = "#C9A84C" }: Zon
   //   - cornerR: bottom-side corner (z > 0)
   //   - slot: central, between dots
   //   - net: tight band right in front of crease
+  // Zone bboxes laid out so adjacent patches never overlap in plan view —
+  // corners stop short of the slot, slot stops short of the net band, and
+  // each label has its own keepout column for the floating chip above it.
   const zones: Zone[] = useMemo(() => [
-    { id: "perim",   cx: 35, cz: 0,   w: 18, d: 65, baseColor: themeColor, label: "PERIM" },
-    { id: "cornerL", cx: 75, cz: -28, w: 26, d: 22, baseColor: "#38bdf8",  label: "L CORNER" },
-    { id: "cornerR", cx: 75, cz:  28, w: 26, d: 22, baseColor: "#38bdf8",  label: "R CORNER" },
-    { id: "slot",    cx: 70, cz: 0,   w: 22, d: 24, baseColor: themeColor, label: "SLOT" },
-    { id: "net",     cx: 84, cz: 0,   w: 8,  d: 14, baseColor: "#fbbf24",  label: "NET" },
+    { id: "perim",   cx: 35, cz: 0,   w: 14, d: 66, baseColor: themeColor, label: "PERIM" },
+    { id: "cornerL", cx: 78, cz: -30, w: 20, d: 18, baseColor: "#38bdf8",  label: "L CORNER" },
+    { id: "cornerR", cx: 78, cz:  30, w: 20, d: 18, baseColor: "#38bdf8",  label: "R CORNER" },
+    { id: "slot",    cx: 69, cz: 0,   w: 20, d: 22, baseColor: themeColor, label: "SLOT" },
+    { id: "net",     cx: 85, cz: 0,   w: 6,  d: 10, baseColor: "#fbbf24",  label: "NET" },
   ], [themeColor]);
 
   const hoveredZone = hover != null ? zones.find(z => z.id === hover) : null;
