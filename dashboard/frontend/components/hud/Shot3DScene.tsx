@@ -20,6 +20,9 @@ export type Shot3DSceneProps = {
   /** Render a goalie figure inside each crease and improve the net mesh.
    *  Use on goalie shot-against maps. */
   goalie?: boolean;
+  /** Per-`shot.type` color override. Shots fall back to themeColor when
+   *  their type isn't in the map (or when the map is omitted). */
+  colorByType?: Record<string, string>;
 };
 
 // NHL rink: 200×85 ft, corner radius 28 ft
@@ -401,7 +404,7 @@ function GoalieFigure({ x, themeColor }: { x: number; themeColor: string }) {
 }
 
 // ─── Goal trajectory arcs — subtle curved lines from shot → net ────────────
-function GoalTrajectories({ shots, themeColor, flip }: { shots: Shot[]; themeColor: string; flip: boolean }) {
+function GoalTrajectories({ shots, themeColor, flip, colorByType }: { shots: Shot[]; themeColor: string; flip: boolean; colorByType?: Record<string, string> }) {
   const goals = useMemo(() => shots.filter((s) => s.goal), [shots]);
   const fx = (v: number) => (flip ? -v : v);
 
@@ -426,10 +429,11 @@ function GoalTrajectories({ shots, themeColor, flip }: { shots: Shot[]; themeCol
       }
       // Arrow head direction (last segment)
       const headDir = points[points.length - 1].clone().sub(points[points.length - 2]).normalize();
-      return { positions: arr, end, headDir };
+      const color = (s.type && colorByType?.[s.type]) ?? themeColor;
+      return { positions: arr, end, headDir, color };
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [goals, flip]);
+  }, [goals, flip, colorByType, themeColor]);
 
   if (arcs.length === 0) return null;
 
@@ -441,7 +445,7 @@ function GoalTrajectories({ shots, themeColor, flip }: { shots: Shot[]; themeCol
             <bufferGeometry>
               <bufferAttribute attach="attributes-position" args={[a.positions, 3]} />
             </bufferGeometry>
-            <lineBasicMaterial color={themeColor} transparent opacity={0.42} />
+            <lineBasicMaterial color={a.color} transparent opacity={0.42} />
           </line>
           {/* Arrowhead — tiny cone pointing along headDir */}
           <mesh
@@ -454,7 +458,7 @@ function GoalTrajectories({ shots, themeColor, flip }: { shots: Shot[]; themeCol
             })()}
           >
             <coneGeometry args={[0.45, 1.2, 8]} />
-            <meshStandardMaterial color={themeColor} emissive={themeColor} emissiveIntensity={0.55} transparent opacity={0.65} />
+            <meshStandardMaterial color={a.color} emissive={a.color} emissiveIntensity={0.55} transparent opacity={0.65} />
           </mesh>
         </group>
       ))}
@@ -463,37 +467,55 @@ function GoalTrajectories({ shots, themeColor, flip }: { shots: Shot[]; themeCol
 }
 
 // ─── Shot instancing ───────────────────────────────────────────────────────
-function ShotInstances({ shots, themeColor, flip }: { shots: Shot[]; themeColor: string; flip: boolean }) {
-  const misses = useMemo(() => shots.filter((s) => !s.goal), [shots]);
-  const goals = useMemo(() => shots.filter((s) => s.goal), [shots]);
+// Group by type so per-team coloring works with the GPU-instanced renderer
+// (one material per group → one color per group). With colorByType absent
+// or empty everything falls into a single "_" group at themeColor — same
+// path as the old single-color renderer.
+function ShotInstances({ shots, themeColor, flip, colorByType }: { shots: Shot[]; themeColor: string; flip: boolean; colorByType?: Record<string, string> }) {
   const fx = (s: Shot) => (flip ? -s.x : s.x);
+
+  const groups = useMemo(() => {
+    const map = new Map<string, { color: string; misses: Shot[]; goals: Shot[] }>();
+    for (const s of shots) {
+      const key = s.type ?? "_";
+      const color = (s.type && colorByType?.[s.type]) ?? themeColor;
+      let g = map.get(key);
+      if (!g) { g = { color, misses: [], goals: [] }; map.set(key, g); }
+      (s.goal ? g.goals : g.misses).push(s);
+    }
+    return Array.from(map.entries());
+  }, [shots, colorByType, themeColor]);
 
   return (
     <group>
-      {misses.length > 0 ? (
-        <Instances limit={Math.max(1, misses.length)} range={misses.length}>
-          <sphereGeometry args={[1.0, 12, 12]} />
-          <meshStandardMaterial color={themeColor} emissive={themeColor} emissiveIntensity={0.40} roughness={0.4} />
-          {misses.map((s, i) => (
-            <Instance key={i} position={[fx(s), 0.8, s.y]} scale={0.9} />
-          ))}
-        </Instances>
-      ) : null}
-      {goals.length > 0 ? (
-        <Instances limit={Math.max(1, goals.length)} range={goals.length}>
-          <sphereGeometry args={[1.3, 14, 14]} />
-          <meshStandardMaterial
-            color="#ffffff"
-            emissive={themeColor}
-            emissiveIntensity={1.4}
-            metalness={0.4}
-            roughness={0.2}
-          />
-          {goals.map((s, i) => (
-            <Instance key={i} position={[fx(s), 1.0, s.y]} scale={1.2} />
-          ))}
-        </Instances>
-      ) : null}
+      {groups.map(([key, g]) => (
+        <group key={key}>
+          {g.misses.length > 0 ? (
+            <Instances limit={Math.max(1, g.misses.length)} range={g.misses.length}>
+              <sphereGeometry args={[1.0, 12, 12]} />
+              <meshStandardMaterial color={g.color} emissive={g.color} emissiveIntensity={0.40} roughness={0.4} />
+              {g.misses.map((s, i) => (
+                <Instance key={i} position={[fx(s), 0.8, s.y]} scale={0.9} />
+              ))}
+            </Instances>
+          ) : null}
+          {g.goals.length > 0 ? (
+            <Instances limit={Math.max(1, g.goals.length)} range={g.goals.length}>
+              <sphereGeometry args={[1.3, 14, 14]} />
+              <meshStandardMaterial
+                color="#ffffff"
+                emissive={g.color}
+                emissiveIntensity={1.4}
+                metalness={0.4}
+                roughness={0.2}
+              />
+              {g.goals.map((s, i) => (
+                <Instance key={i} position={[fx(s), 1.0, s.y]} scale={1.2} />
+              ))}
+            </Instances>
+          ) : null}
+        </group>
+      ))}
     </group>
   );
 }
@@ -513,7 +535,7 @@ function AutoRotateIntro({ controlsRef, active }: { controlsRef: React.RefObject
   return null;
 }
 
-export default function Shot3DScene({ shots, themeColor = "#C9A84C", flip = false, goalie = false }: Shot3DSceneProps) {
+export default function Shot3DScene({ shots, themeColor = "#C9A84C", flip = false, goalie = false, colorByType }: Shot3DSceneProps) {
   const [freePan, setFreePan] = useState(false);
   const [autoRotate, setAutoRotate] = useState(true);
   const [legendOpen, setLegendOpen] = useState(false);
@@ -553,8 +575,8 @@ export default function Shot3DScene({ shots, themeColor = "#C9A84C", flip = fals
             <GoalieFigure x={89}  themeColor={themeColor} />
           </>
         )}
-        <ShotInstances shots={shots} themeColor={themeColor} flip={flip} />
-        <GoalTrajectories shots={shots} themeColor={themeColor} flip={flip} />
+        <ShotInstances shots={shots} themeColor={themeColor} flip={flip} colorByType={colorByType} />
+        <GoalTrajectories shots={shots} themeColor={themeColor} flip={flip} colorByType={colorByType} />
 
         <OrbitControls
           // @ts-expect-error drei typing — accept assignable to React ref
@@ -618,14 +640,32 @@ export default function Shot3DScene({ shots, themeColor = "#C9A84C", flip = fals
               background: "rgba(0,0,0,0.78)",
               backdropFilter: "blur(6px)",
             }}>
-            <div className="flex items-center gap-1.5">
-              <span className="inline-block rounded-full shrink-0" style={{ width: 8, height: 8, background: themeColor, boxShadow: `0 0 6px ${themeColor}` }} />
-              <span>shot · saved</span>
-            </div>
+            {colorByType && Object.keys(colorByType).length > 0 ? (
+              // Two-team game: list each team with its color so the rink reads
+              // unambiguously instead of leaning on a single themeColor swatch.
+              Object.entries(colorByType).map(([team, color]) => (
+                <div key={team} className="flex items-center gap-1.5 mt-0.5 first:mt-0">
+                  <span className="inline-block rounded-full shrink-0" style={{ width: 8, height: 8, background: color, boxShadow: `0 0 6px ${color}` }} />
+                  <span>{team} · shot</span>
+                </div>
+              ))
+            ) : (
+              <>
+                <div className="flex items-center gap-1.5">
+                  <span className="inline-block rounded-full shrink-0" style={{ width: 8, height: 8, background: themeColor, boxShadow: `0 0 6px ${themeColor}` }} />
+                  <span>shot · saved</span>
+                </div>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className="inline-block rounded-full shrink-0"
+                    style={{ width: 10, height: 10, background: "#fff", boxShadow: `0 0 10px ${themeColor}, inset 0 0 4px ${themeColor}` }} />
+                  <span>goal · scored</span>
+                </div>
+              </>
+            )}
             <div className="flex items-center gap-1.5 mt-0.5">
               <span className="inline-block rounded-full shrink-0"
-                style={{ width: 10, height: 10, background: "#fff", boxShadow: `0 0 10px ${themeColor}, inset 0 0 4px ${themeColor}` }} />
-              <span>goal · scored</span>
+                style={{ width: 10, height: 10, background: "#fff", boxShadow: "0 0 10px rgba(255,255,255,0.85), inset 0 0 4px rgba(255,255,255,0.7)" }} />
+              <span>goal · scored (white core)</span>
             </div>
             <div className="flex items-center gap-1.5 mt-0.5">
               <span className="inline-block shrink-0" style={{ width: 8, height: 3, background: "#ff3030", borderRadius: 1, boxShadow: "0 0 4px rgba(255,48,48,0.6)" }} />

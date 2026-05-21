@@ -25,6 +25,9 @@ export type Shot3DProps = {
   fallback: ReactNode;
   /** Default false: user must opt in via the toggle. Reduces perf cost on first page visit. */
   defaultEnabled?: boolean;
+  /** Optional per-`shot.type` color map. Used for two-team game shot maps so
+   *  away vs home reads at a glance instead of everything in one tint. */
+  colorByType?: Record<string, string>;
 };
 
 /**
@@ -34,7 +37,7 @@ export type Shot3DProps = {
  *   (c) prefers-reduced-motion is not set.
  * Three.js bundle (~150KB gz) only downloads when conditions are met.
  */
-export function Shot3D({ shots, themeColor, flip, goalie = false, fallback, defaultEnabled = true }: Shot3DProps) {
+export function Shot3D({ shots, themeColor, flip, goalie = false, fallback, defaultEnabled = true, colorByType }: Shot3DProps) {
   const reduced = useReducedMotion();
   const [enabled, setEnabled] = useState(defaultEnabled && !reduced);
   const [inView, setInView] = useState(false);
@@ -64,7 +67,7 @@ export function Shot3D({ shots, themeColor, flip, goalie = false, fallback, defa
   return (
     <div ref={wrapRef} className="relative">
       {show3D ? (
-        <Shot3DSceneLazy shots={shots} themeColor={themeColor} flip={flip} goalie={goalie} />
+        <Shot3DSceneLazy shots={shots} themeColor={themeColor} flip={flip} goalie={goalie} colorByType={colorByType} />
       ) : (
         fallback
       )}
