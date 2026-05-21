@@ -2390,6 +2390,26 @@ function HologramScanner({
 }) {
   const [active, setActive] = useState<HoloZone | null>(null);
 
+  // Targeting-reticle bounding boxes per zone, in the 200×340 silhouette.
+  // Used to render corner brackets that converge on the active zone — the
+  // Iron-Man "lock-on" treatment that earns the "hologram scanner" framing.
+  const ZONE_BBOX: Record<HoloZone, { x: number; y: number; w: number; h: number }> = {
+    head:  { x:  72, y:   0, w:  56, h:  64 },
+    torso: { x:  46, y:  64, w: 108, h: 136 },
+    arms:  { x:  18, y:  74, w: 164, h: 110 },
+    legs:  { x:  68, y: 200, w:  64, h: 140 },
+  };
+
+  // Active zone label that animates in the dynamic readout. When no zone is
+  // hovered we cycle "SCAN · LOCK · TGT · LIVE" so the corners feel alive.
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => (t + 1) % 4), 1700);
+    return () => clearInterval(id);
+  }, []);
+  const idleLabels = ["SCAN", "LOCK", "TGT", "LIVE"];
+  const cornerLabel = active ? active.toUpperCase() : idleLabels[tick];
+
   // Zone hotspot dots mapped to body-zone groups
   const hotspots: { cx: number; cy: number; key: string; intensity: number; zone: HoloZone }[] = [
     { cx: 100, cy: 36,  key: "head",  intensity: bodyIntensity.head ?? 0,     zone: "head" },
@@ -2443,11 +2463,22 @@ function HologramScanner({
           <circle cx={200} cy={200} r={50} fill="none" stroke={teamColor} strokeOpacity={0.4} strokeWidth={1} style={{ animation: "ironPulse 4.4s ease-out infinite 2.2s" }} />
         </svg>
 
-        {/* Corner reticles */}
-        <span aria-hidden className="absolute top-1 left-2 hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: teamColor }}>◢ SCAN</span>
-        <span aria-hidden className="absolute top-1 right-2 hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: teamColor }}>LOCK ◣</span>
-        <span aria-hidden className="absolute bottom-1 left-2 hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: teamColor }}>◤ INTEL</span>
-        <span aria-hidden className="absolute bottom-1 right-2 hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: teamColor }}>LIVE ◥</span>
+        {/* Dynamic corner readouts — cycle while idle, lock onto the hovered
+            zone when one is active. Each corner pairs a gold L-bracket SVG
+            with a hud-mono code so the whole panel reads as instrumentation. */}
+        {([
+          { pos: "top-1 left-2",     align: "items-start", path: "M 0 6 L 0 0 L 6 0",  text: `▸ ${cornerLabel}`,     after: false },
+          { pos: "top-1 right-2",    align: "items-end",   path: "M 0 0 L 6 0 L 6 6",  text: `${cornerLabel} ◂`,     after: true  },
+          { pos: "bottom-1 left-2",  align: "items-start", path: "M 0 0 L 0 6 L 6 6",  text: "INTEL · 60Hz",         after: false },
+          { pos: "bottom-1 right-2", align: "items-end",   path: "M 0 6 L 6 6 L 6 0",  text: "FEED · LIVE",          after: true  },
+        ] as const).map((r, i) => (
+          <div key={i} aria-hidden className={`absolute ${r.pos} flex items-center gap-1 ${r.align}`}>
+            <svg width="7" height="7" viewBox="0 0 7 7" className="shrink-0"><path d={r.path} stroke={teamColor} strokeWidth="1" fill="none" /></svg>
+            <span className="hud-mono text-[8px] uppercase tracking-[0.18em] tabular-nums" style={{ color: teamColor, textShadow: `0 0 6px ${teamColor}55` }}>
+              {r.text}
+            </span>
+          </div>
+        ))}
 
         {/* Silhouette + zone hotspots */}
         <div className="relative" style={{ width: 200, height: 340 }}>
@@ -2474,68 +2505,134 @@ function HologramScanner({
               animation: "holoVScan 6s ease-in-out infinite",
             }}
           />
-          {/* Zone hotspot dots — clickable */}
+
+          {/* Horizontal scan-line — counter-axis sweep so the figure feels
+              actively mapped on both dimensions, not just top-to-bottom. */}
+          <div
+            aria-hidden
+            className="absolute pointer-events-none"
+            style={{
+              top: "10%",
+              bottom: "10%",
+              left: 0,
+              width: "1px",
+              background: `linear-gradient(180deg, transparent, ${teamColor}55, transparent)`,
+              boxShadow: `0 0 4px ${teamColor}33`,
+              mixBlendMode: "screen",
+              opacity: 0.45,
+              animation: "holoHScan 9s ease-in-out infinite",
+            }}
+          />
+
+          {/* Active-zone targeting reticle — 4 corner brackets converging on
+              the hovered body zone bbox. Pure SVG so it animates in/out
+              cheaply and stays crisp at any zoom. */}
+          {active && (() => {
+            const b = ZONE_BBOX[active];
+            const pad = 4;
+            const len = 10;
+            const x1 = b.x - pad, y1 = b.y - pad;
+            const x2 = b.x + b.w + pad, y2 = b.y + b.h + pad;
+            return (
+              <svg
+                aria-hidden
+                viewBox="0 0 200 340"
+                className="absolute inset-0 pointer-events-none"
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  filter: `drop-shadow(0 0 6px ${teamColor})`,
+                  animation: "holoReticle 220ms cubic-bezier(0.22,1,0.36,1)",
+                }}
+              >
+                {/* top-left */}
+                <path d={`M ${x1} ${y1 + len} L ${x1} ${y1} L ${x1 + len} ${y1}`} stroke={teamColor} strokeWidth="1.4" fill="none" />
+                {/* top-right */}
+                <path d={`M ${x2 - len} ${y1} L ${x2} ${y1} L ${x2} ${y1 + len}`} stroke={teamColor} strokeWidth="1.4" fill="none" />
+                {/* bottom-left */}
+                <path d={`M ${x1} ${y2 - len} L ${x1} ${y2} L ${x1 + len} ${y2}`} stroke={teamColor} strokeWidth="1.4" fill="none" />
+                {/* bottom-right */}
+                <path d={`M ${x2 - len} ${y2} L ${x2} ${y2} L ${x2} ${y2 - len}`} stroke={teamColor} strokeWidth="1.4" fill="none" />
+                {/* center crosshair */}
+                <line x1={b.x + b.w / 2 - 5} y1={b.y + b.h / 2} x2={b.x + b.w / 2 + 5} y2={b.y + b.h / 2} stroke={teamColor} strokeWidth="1" strokeOpacity="0.55" />
+                <line x1={b.x + b.w / 2} y1={b.y + b.h / 2 - 5} x2={b.x + b.w / 2} y2={b.y + b.h / 2 + 5} stroke={teamColor} strokeWidth="1" strokeOpacity="0.55" />
+              </svg>
+            );
+          })()}
+          {/* Zone hotspot dots — clickable. Active hotspots emit an outward
+              ripple ring to give the panel a "live targeting" cadence rather
+              than the static dots-on-an-X-ray feel. */}
           {hotspots.map((h) => {
             const isActive = active === h.zone;
             const hotColor = h.intensity >= 0.5 ? "#f87171" : h.intensity >= 0.25 ? "#fbbf24" : teamColor;
             return (
-              <button
+              <div
                 key={h.key}
-                type="button"
-                aria-label={`Focus ${h.zone}`}
-                onMouseEnter={() => setActive(h.zone)}
-                onMouseLeave={() => setActive(null)}
-                onClick={() => setActive(a => a === h.zone ? null : h.zone)}
-                className="absolute rounded-full cursor-pointer"
-                style={{
-                  left: h.cx - 6,
-                  top:  h.cy - 6,
-                  width: 12,
-                  height: 12,
-                  background: hotColor,
-                  border: `1px solid ${hotColor}`,
-                  boxShadow: `0 0 ${isActive ? 16 : 8}px ${hotColor}`,
-                  transform: isActive ? "scale(1.6)" : undefined,
-                  transition: "transform 200ms ease, box-shadow 200ms ease",
-                  animation: `holoNode ${1.8 + (h.key.length % 3) * 0.4}s ease-in-out infinite`,
-                  zIndex: 5,
-                }}
-              />
+                className="absolute"
+                style={{ left: h.cx - 12, top: h.cy - 12, width: 24, height: 24, zIndex: 5 }}
+              >
+                {isActive && (
+                  <>
+                    <span aria-hidden className="absolute inset-0 rounded-full pointer-events-none"
+                      style={{ border: `1px solid ${hotColor}`, animation: "holoRipple 1.4s ease-out infinite" }} />
+                    <span aria-hidden className="absolute inset-0 rounded-full pointer-events-none"
+                      style={{ border: `1px solid ${hotColor}`, animation: "holoRipple 1.4s ease-out infinite 0.7s" }} />
+                  </>
+                )}
+                <button
+                  type="button"
+                  aria-label={`Focus ${h.zone}`}
+                  onMouseEnter={() => setActive(h.zone)}
+                  onMouseLeave={() => setActive(null)}
+                  onClick={() => setActive(a => a === h.zone ? null : h.zone)}
+                  className="absolute rounded-full cursor-pointer"
+                  style={{
+                    left: 6,
+                    top:  6,
+                    width: 12,
+                    height: 12,
+                    background: hotColor,
+                    border: `1px solid ${hotColor}`,
+                    boxShadow: `0 0 ${isActive ? 16 : 8}px ${hotColor}`,
+                    transform: isActive ? "scale(1.6)" : undefined,
+                    transition: "transform 200ms ease, box-shadow 200ms ease",
+                    animation: `holoNode ${1.8 + (h.key.length % 3) * 0.4}s ease-in-out infinite`,
+                  }}
+                />
+              </div>
             );
           })}
         </div>
 
-        {/* LEFT telemetry callouts — 3 only, hoverable, highlights target zone */}
+        {/* LEFT telemetry callouts — 3 only, hoverable, highlights target zone.
+            Container is a div (not a button) so the StatInfoTip button inside
+            can render properly — nesting <button> in <button> is invalid HTML
+            and was why the native `title` was the only thing firing before. */}
         {telemetryLeft.length > 0 && (
           <div className="absolute left-2 top-12 bottom-10 flex flex-col justify-around items-end gap-2 z-10">
             {telemetryLeft.map((c) => {
               const isActive = active === c.target;
               return (
-                <button
+                <div
                   key={c.id}
-                  type="button"
-                  title={c.tip}
                   onMouseEnter={() => setActive(c.target)}
                   onMouseLeave={() => setActive(null)}
-                  className="flex flex-col items-end gap-0.5 px-2 py-1 rounded backdrop-blur transition-all duration-200 group cursor-help"
+                  className="flex flex-col items-end gap-0.5 px-2 py-1 rounded backdrop-blur transition-all duration-200"
                   style={{
                     background: isActive ? `${teamColor}1a` : "rgba(0,0,0,0.40)",
                     border: `1px solid ${isActive ? teamColor : `${teamColor}28`}`,
                     boxShadow: isActive ? `0 0 14px ${teamColor}55` : "none",
                   }}
                 >
-                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em] flex items-center gap-0.5"
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em] flex items-center gap-1"
                     style={{ color: isActive ? teamColor : "var(--text-secondary)" }}>
                     ▸ {c.label}
-                    {c.tip && (
-                      <span className="ml-0.5 inline-flex items-center justify-center w-3 h-3 rounded-full text-[7px] font-black"
-                        style={{ color: "#38bdf8", background: "rgba(56,189,248,0.15)", border: "1px solid rgba(56,189,248,0.40)" }}>i</span>
-                    )}
+                    {c.tip && <StatInfoTip label={c.label} tip={c.tip} />}
                   </span>
                   <span className="hud-mono text-[11px] tabular-nums font-semibold" style={{ color: teamColor }}>
                     {c.val}
                   </span>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -2547,31 +2644,26 @@ function HologramScanner({
             {telemetryRight.map((c) => {
               const isActive = active === c.target;
               return (
-                <button
+                <div
                   key={c.id}
-                  type="button"
-                  title={c.tip}
                   onMouseEnter={() => setActive(c.target)}
                   onMouseLeave={() => setActive(null)}
-                  className="flex flex-col items-start gap-0.5 px-2 py-1 rounded backdrop-blur transition-all duration-200 cursor-help"
+                  className="flex flex-col items-start gap-0.5 px-2 py-1 rounded backdrop-blur transition-all duration-200"
                   style={{
                     background: isActive ? `${teamColor}1a` : "rgba(0,0,0,0.40)",
                     border: `1px solid ${isActive ? teamColor : `${teamColor}28`}`,
                     boxShadow: isActive ? `0 0 14px ${teamColor}55` : "none",
                   }}
                 >
-                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em] flex items-center gap-0.5"
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em] flex items-center gap-1"
                     style={{ color: isActive ? teamColor : "var(--text-secondary)" }}>
-                    {c.tip && (
-                      <span className="mr-0.5 inline-flex items-center justify-center w-3 h-3 rounded-full text-[7px] font-black"
-                        style={{ color: "#38bdf8", background: "rgba(56,189,248,0.15)", border: "1px solid rgba(56,189,248,0.40)" }}>i</span>
-                    )}
+                    {c.tip && <StatInfoTip label={c.label} tip={c.tip} />}
                     {c.label} ◂
                   </span>
                   <span className="hud-mono text-[11px] tabular-nums font-semibold" style={{ color: teamColor }}>
                     {c.val}
                   </span>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -2607,6 +2699,20 @@ function HologramScanner({
           10%  { opacity: 1; }
           90%  { opacity: 1; }
           100% { transform: translateY(340px); opacity: 0; }
+        }
+        @keyframes holoHScan {
+          0%   { transform: translateX(0);    opacity: 0; }
+          10%  { opacity: 1; }
+          90%  { opacity: 1; }
+          100% { transform: translateX(200px); opacity: 0; }
+        }
+        @keyframes holoReticle {
+          from { transform: scale(1.18); opacity: 0; }
+          to   { transform: scale(1);    opacity: 1; }
+        }
+        @keyframes holoRipple {
+          0%   { transform: scale(0.5); opacity: 0.75; }
+          100% { transform: scale(2.2); opacity: 0; }
         }
         @keyframes holoNode {
           0%, 100% { opacity: 0.65; }
