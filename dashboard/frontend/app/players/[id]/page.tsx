@@ -4685,13 +4685,6 @@ export default function PlayerProfilePage() {
                     {[60, 80].map((r, i) => (
                       <circle key={i} cx={150} cy={100} r={r} fill="none" stroke={teamColor} strokeOpacity={0.08 + i * 0.04} strokeDasharray="2 6" />
                     ))}
-                    <line x1={150} y1={100} x2={150} y2={20}
-                      stroke={teamColor} strokeOpacity={0.55} strokeWidth={1.5}
-                      style={{
-                        transformOrigin: "150px 100px",
-                        animation: "ncRadar 6s linear infinite",
-                        filter: `drop-shadow(0 0 4px ${teamColor})`,
-                      }} />
                   </svg>
                   <NeuralGraph
                     center={isGoalie ? "G" : "NN"}
@@ -4700,10 +4693,6 @@ export default function PlayerProfilePage() {
                     width={300}
                     height={200}
                   />
-                  <style jsx>{`
-                    @keyframes ncRadar { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-                    @media (prefers-reduced-motion: reduce) { line { animation: none !important; } }
-                  `}</style>
                 </div>
               );
             })()}
