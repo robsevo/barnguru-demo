@@ -80,7 +80,7 @@ body {
     rgba(var(--card-base-r), var(--card-base-g), var(--card-base-b), 0.90) 0%,
     rgba(var(--card-mid-r),  var(--card-mid-g),  var(--card-mid-b),  0.97) 100%);
   border: 1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.20);
-  border-radius: 0.75rem;
+  border-radius: 1rem;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   box-shadow: 0 4px 28px rgba(0,0,0,0.70), inset 0 1px 0 rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.08);
@@ -92,7 +92,7 @@ body {
     rgba(var(--card-base-r), var(--card-base-g), var(--card-base-b), 0.75) 0%,
     rgba(var(--card-mid-r),  var(--card-mid-g),  var(--card-mid-b),  0.90) 100%);
   border: 1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.14);
-  border-radius: 0.5rem;
+  border-radius: 0.75rem;
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   box-shadow: 0 2px 14px rgba(0,0,0,0.60), inset 0 1px 0 rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.06);
@@ -108,7 +108,7 @@ body {
 .glass-inset {
   background: rgba(0,0,0,0.35);
   border: 1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.10);
-  border-radius: 0.5rem;
+  border-radius: 0.625rem;
   box-shadow: inset 0 2px 4px rgba(0,0,0,0.40);
 }
 
@@ -331,7 +331,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
       rgba(var(--card-base-r), var(--card-base-g), var(--card-base-b), 0.92) 0%,
       rgba(var(--card-mid-r),  var(--card-mid-g),  var(--card-mid-b),  0.97) 100%);
   border: 1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.22);
-  border-radius: 0.5rem;
+  border-radius: 1rem;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   box-shadow:

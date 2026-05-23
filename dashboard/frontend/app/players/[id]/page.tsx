@@ -5922,7 +5922,7 @@ export default function PlayerProfilePage() {
             (order-3, also right pane). To make this work the right pane
             is split below; rail row uses col-span to span both grid
             columns on mobile, and on lg+ collapses to column 1. */}
-        <aside className="order-2 lg:order-none lg:col-start-1 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-4 z-30 mb-2 lg:mb-0 w-full lg:w-auto max-w-full lg:max-w-none min-w-0 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+        <aside className="order-2 lg:order-none lg:col-start-1 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-16 z-30 mb-2 lg:mb-0 w-full lg:w-auto max-w-full lg:max-w-none min-w-0 lg:self-start lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto">
           {/* Outer wrapper — PLAIN div, NO .hud-panel class. The .hud-panel
               class has `overflow: hidden` baked in (globals.css line 347)
               which kills the inner nav's overflow-x-auto. Style the chrome
@@ -7408,29 +7408,14 @@ export default function PlayerProfilePage() {
 
         {/* NEURAL CORTEX column */}
         <div className="lg:col-span-4 flex">
-          <HudPanel title="Neural Cortex" themeColor={teamColor} scanline allCorners className="w-full flex flex-col">
-            {/* MODEL STATUS strip — live signal vs idle */}
-            <div className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded border"
-              style={{ borderColor: `${teamColor}33`, background: "rgba(0,0,0,0.30)" }}>
-              <span className="hud-pulse-dot" style={{ background: "#4ade80" }} />
-              <span className="hud-mono jarvis-flicker text-[9px] uppercase tracking-[0.18em] text-[#4ade80]">INFER</span>
-              <span className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-muted)]">·</span>
-              <span className="hud-mono text-[9px] uppercase tracking-[0.18em]" style={{ color: teamColor }}>
-                BNN · v2.22
-              </span>
-              <span className="ml-auto hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
-                {neuralNodes.length > 0 ? `${neuralNodes.length} CH` : "0 CH"}
-              </span>
-            </div>
-
-            {/* Archetype banner */}
-            {playerType && (
-              <div className="hud-mono text-[10px] uppercase tracking-[0.18em] px-2 py-1.5 mb-2 rounded border flex items-center gap-2"
-                style={{ color: teamColor, borderColor: `${teamColor}55`, background: `${teamColor}0f` }}>
-                <span className="hud-pulse-dot" style={{ background: teamColor }} />
-                ★ {playerType}
-              </div>
-            )}
+          <HudPanel title="Neural Cortex" subtitle="BNN v2.22" themeColor={teamColor} scanline allCorners className="w-full flex flex-col">
+            {/* INFER status strip + Archetype banner BOTH removed:
+                  - "INFER · BNN v2.22 · N CH" inline status duplicated the
+                    HudPanel subtitle; moved BNN v2.22 into the subtitle.
+                  - Archetype already shows in the Vitals PROFILE strip as
+                    a "TYPE" row, so the banner here was redundant.
+                Net effect: Neural Cortex shrinks ~5rem of header chrome
+                before we even touch the body content. */}
 
             {(() => {
               // Build goalie-specific neural nodes from save% by zone
@@ -7471,48 +7456,9 @@ export default function PlayerProfilePage() {
               );
             })()}
 
-            {/* PREDICTED PLAY — top-down zone schematic with the most likely
-                entry + in-zone action sequence given current NN weights.
-                Skaters only — the goalie's neural axes are save-related and
-                don't map to ice positions. */}
-            {!isGoalie && (
-              <PredictedPlay
-                carry={data.nn_carry_in_pct}
-                dump={data.nn_dump_pct}
-                slot={data.nn_shoot_slot_pct}
-                perim={data.nn_shoot_perimeter_pct}
-                drive={data.nn_drive_net_pct}
-                battleC={data.nn_battle_corner_pct}
-                holdC={data.nn_hold_corner_pct}
-                themeColor={teamColor}
-                leagueAvg={(() => {
-                  // Prefer the position-matched segment so deltas read true:
-                  // a D's perimeter shot rate vs forwards is meaningless;
-                  // vs other D it tells you who the real point shooters are.
-                  const pos = (data.position ?? "").toUpperCase();
-                  const isD = pos === "D" || pos === "LD" || pos === "RD";
-                  const isF = pos === "C" || pos === "L" || pos === "R" || pos === "LW" || pos === "RW";
-                  const byPos = data.nn_league_avg_by_pos;
-                  if (byPos) {
-                    if (isD && byPos.defense)  return byPos.defense;
-                    if (isF && byPos.forwards) return byPos.forwards;
-                    if (byPos.all)             return byPos.all;
-                  }
-                  return data.nn_league_avg ?? null;
-                })()}
-                position={data.position ?? null}
-                shoots={bio?.shoots_catches ?? data.shoots_catches ?? null}
-                gpg={data.game_log?.summary.gpg ?? null}
-                apg={data.game_log?.summary.apg ?? null}
-                shotsPer60={data.shots_per60 ?? null}
-                rapmOff={data.rapm_ev_off ?? null}
-                playerType={playerType ?? null}
-                hotHand={data.hot_hand_score ?? null}
-                fatigue={phase3?.fatigue_index ?? null}
-                finishing={data.finishing ?? null}
-                gamesSample={data.game_log?.summary.n_games ?? null}
-              />
-            )}
+            {/* PREDICTED PLAY moved out of Neural Cortex to its own card
+                on the Behavior tab — see "Predicted Play" Card below.
+                Compresses the Neural Cortex panel significantly. */}
 
             {/* Decision Matrix moved to the Vitals column to compact the
                 Neural Cortex panel. See the Vitals block above. */}
@@ -7919,6 +7865,49 @@ export default function PlayerProfilePage() {
               )}
             </div>
           </Card>
+        )}
+
+        {/* Predicted Play — moved here from the Neural Cortex hero panel
+            so the cortex shrinks. Spans the full row on the Behavior tab
+            since the rink + AI READ + sequences want the width. */}
+        {!isGoalie && telemetryTab === "neural" && (
+          <div className="sm:col-span-2">
+            <Card title="Predicted Play" style={cardStyle}>
+              <PredictedPlay
+                carry={data.nn_carry_in_pct}
+                dump={data.nn_dump_pct}
+                slot={data.nn_shoot_slot_pct}
+                perim={data.nn_shoot_perimeter_pct}
+                drive={data.nn_drive_net_pct}
+                battleC={data.nn_battle_corner_pct}
+                holdC={data.nn_hold_corner_pct}
+                themeColor={teamColor}
+                leagueAvg={(() => {
+                  const pos = (data.position ?? "").toUpperCase();
+                  const isD = pos === "D" || pos === "LD" || pos === "RD";
+                  const isF = pos === "C" || pos === "L" || pos === "R" || pos === "LW" || pos === "RW";
+                  const byPos = data.nn_league_avg_by_pos;
+                  if (byPos) {
+                    if (isD && byPos.defense)  return byPos.defense;
+                    if (isF && byPos.forwards) return byPos.forwards;
+                    if (byPos.all)             return byPos.all;
+                  }
+                  return data.nn_league_avg ?? null;
+                })()}
+                position={data.position ?? null}
+                shoots={bio?.shoots_catches ?? data.shoots_catches ?? null}
+                gpg={data.game_log?.summary.gpg ?? null}
+                apg={data.game_log?.summary.apg ?? null}
+                shotsPer60={data.shots_per60 ?? null}
+                rapmOff={data.rapm_ev_off ?? null}
+                playerType={playerType ?? null}
+                hotHand={data.hot_hand_score ?? null}
+                fatigue={phase3?.fatigue_index ?? null}
+                finishing={data.finishing ?? null}
+                gamesSample={data.game_log?.summary.n_games ?? null}
+              />
+            </Card>
+          </div>
         )}
 
         {/* Section header — Behavior tab "Form & Identity" group */}
