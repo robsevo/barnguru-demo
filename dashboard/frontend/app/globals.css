@@ -595,6 +595,37 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   animation: jarvisBoot 480ms cubic-bezier(0.22, 1, 0.36, 1) 1 both;
 }
 
+/* Route-transition wrapper — every page navigation re-mounts this and the
+   children fade up + sweep. Cheap to GPU, respects reduced-motion. */
+@keyframes routeTransition {
+  0%   { opacity: 0; transform: translateY(8px) scale(0.995); filter: blur(3px); }
+  60%  { opacity: 1; filter: blur(0); }
+  100% { opacity: 1; transform: translateY(0)   scale(1);     filter: blur(0); }
+}
+@keyframes routeScanSweep {
+  0%   { transform: translateY(-100%); opacity: 0; }
+  10%  { opacity: 0.6; }
+  100% { transform: translateY(100%);  opacity: 0; }
+}
+.route-transition {
+  animation: routeTransition 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  position: relative;
+}
+.route-transition::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background: linear-gradient(180deg, transparent 0%, var(--hud-scan-color) 50%, transparent 100%);
+  mix-blend-mode: screen;
+  animation: routeScanSweep 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .route-transition { animation: none; }
+  .route-transition::before { display: none; }
+}
+
 /* Subtle live-data pulse — slow brightness wobble for value spans we want to
    read as "streaming". Keep amplitude tiny so it never distracts. */
 @keyframes jarvisLivePulse {

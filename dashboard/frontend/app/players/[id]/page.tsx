@@ -5228,8 +5228,10 @@ export default function PlayerProfilePage() {
   // early returns (loading / not-found) so it runs in the same hook order
   // on every render. Rules of Hooks.
   // games + special-teams folded into advanced; not in the union anymore.
-  type TelemetryTab = "shot-map" | "zones" | "fatigue" | "advanced" | "neural";
-  const [telemetryTab, setTelemetryTab] = useState<TelemetryTab>("neural");
+  // "overview" carries the always-on hero block — first tab so it's the
+  // landing view on every player.
+  type TelemetryTab = "overview" | "shot-map" | "zones" | "fatigue" | "advanced" | "neural";
+  const [telemetryTab, setTelemetryTab] = useState<TelemetryTab>("overview");
 
   useEffect(() => {
     fetch("/api/phase2/players")
@@ -5616,6 +5618,7 @@ export default function PlayerProfilePage() {
   // because it only carried 2 stats.
   const telemetryTabs: HudTab[] = isGoalie
     ? [
+        { id: "overview", label: "Overview" },
         { id: "neural",   label: "Behavior" },
         { id: "shot-map", label: "Shots Against" },
         { id: "zones",    label: "Zones" },
@@ -5623,6 +5626,7 @@ export default function PlayerProfilePage() {
         { id: "advanced", label: "Advanced" },
       ]
     : [
+        { id: "overview", label: "Overview" },
         { id: "neural",   label: "Behavior" },
         { id: "shot-map", label: "Shot Map" },
         { id: "zones",    label: "Zones" },
@@ -5735,6 +5739,122 @@ export default function PlayerProfilePage() {
         </div>
       </div>
 
+
+      {/* ── DASHBOARD SHELL — wraps the WHOLE page so the left rail is
+          the always-visible section nav. Right pane swaps content per
+          tab. Mobile: rail collapses to a horizontal strip above the
+          content so phones still get one-tap section switching. */}
+      <div className="mt-3 grid gap-3 sm:gap-4 lg:grid-cols-[210px_minmax(0,1fr)]">
+
+        {/* Left rail — sticky vertical nav on lg; horizontal scroll strip
+            on smaller. HUD glyph + label + active state. */}
+        <aside className="lg:sticky lg:top-3 self-start z-20">
+          <div className="hud-panel hud-panel--all-corners jarvis-boot jarvis-shimmer relative overflow-hidden"
+            style={{
+              ["--hud-corner" as string]: teamColor,
+              background: "linear-gradient(180deg, rgba(0,0,0,0.62), rgba(0,0,0,0.40))",
+              boxShadow: `0 0 14px ${teamColor}1a, inset 0 0 18px rgba(0,0,0,0.45)`,
+            }}>
+            <span className="hud-panel__corner-tr" />
+            <span className="hud-panel__corner-bl" />
+            <div className="hud-scan" aria-hidden />
+            <div className="flex items-center gap-2 px-3 py-2 border-b" style={{ borderColor: `${teamColor}22` }}>
+              <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 4px ${teamColor}` }} />
+              <span className="hud-mono text-[9px] uppercase tracking-[0.24em] font-semibold"
+                style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}55` }}>
+                ▌ TELEMETRY
+              </span>
+            </div>
+            <nav className="flex lg:flex-col p-1.5 gap-1 overflow-x-auto lg:overflow-visible">
+              {(() => {
+                const glyph: Record<string, string> = {
+                  overview: "◈", neural: "◆", "shot-map": "⌖",
+                  zones: "▦", fatigue: "◭", advanced: "◉",
+                };
+                const subtitle: Record<string, string> = {
+                  overview: "identity · vitals · ratings",
+                  neural:   "play dna · patterns",
+                  "shot-map": "shot locations · 3D",
+                  zones:    "ice time · tendencies",
+                  fatigue:  "FI · confidence",
+                  advanced: "engine outputs · context",
+                };
+                return telemetryTabs.map(tab => {
+                  const isActive = telemetryTab === tab.id;
+                  return (
+                    <button key={tab.id}
+                      onClick={() => setTelemetryTab(tab.id as TelemetryTab)}
+                      className="relative group flex items-center gap-2.5 lg:gap-3 px-2.5 py-2 lg:py-2.5 rounded-sm transition-all shrink-0 lg:shrink min-w-[140px] lg:min-w-0"
+                      style={{
+                        background: isActive
+                          ? `linear-gradient(90deg, ${teamColor}28 0%, ${teamColor}08 100%)`
+                          : "transparent",
+                        borderLeft: `2px solid ${isActive ? teamColor : "transparent"}`,
+                        boxShadow: isActive ? `inset 0 0 14px ${teamColor}22, 0 0 8px ${teamColor}1a` : "none",
+                      }}>
+                      {isActive && (
+                        <span aria-hidden className="absolute inset-y-0 left-0 right-0 pointer-events-none"
+                          style={{
+                            background: `linear-gradient(90deg, transparent, ${teamColor}33, transparent)`,
+                            animation: "railScan 3.6s linear infinite",
+                            mixBlendMode: "screen",
+                          }} />
+                      )}
+                      <span className="hud-mono text-[16px] leading-none shrink-0"
+                        style={{
+                          color: isActive ? teamColor : "rgba(255,255,255,0.45)",
+                          textShadow: isActive ? `0 0 8px ${teamColor}` : "none",
+                          transition: "color 200ms, text-shadow 200ms",
+                        }}>
+                        {glyph[tab.id] ?? "▸"}
+                      </span>
+                      <span className="flex flex-col items-start min-w-0">
+                        <span className="hud-mono text-[10px] uppercase tracking-[0.20em] font-semibold leading-tight"
+                          style={{
+                            color: isActive ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.70)",
+                            textShadow: isActive ? `0 0 4px ${teamColor}55` : "none",
+                          }}>
+                          {tab.label}
+                        </span>
+                        <span className="hud-mono text-[7px] uppercase tracking-[0.18em] text-[var(--text-muted)] leading-tight truncate">
+                          {subtitle[tab.id] ?? ""}
+                        </span>
+                      </span>
+                      {isActive && (
+                        <span aria-hidden className="ml-auto hud-mono text-[10px] hidden lg:block"
+                          style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}` }}>
+                          ▸
+                        </span>
+                      )}
+                    </button>
+                  );
+                });
+              })()}
+            </nav>
+            <div className="px-3 py-1.5 border-t flex items-center justify-between"
+              style={{ borderColor: `${teamColor}22` }}>
+              <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">live</span>
+              <span className="hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: `${teamColor}99` }}>60Hz</span>
+            </div>
+            <style jsx>{`
+              @keyframes railScan {
+                0%   { transform: translateX(-100%); }
+                100% { transform: translateX(100%);  }
+              }
+              @media (prefers-reduced-motion: reduce) {
+                span { animation: none !important; }
+              }
+            `}</style>
+          </div>
+        </aside>
+
+        {/* Right content pane — wraps overview block + tab content grid */}
+        <div className="min-w-0">
+
+      {/* ── OVERVIEW SECTION — hero + ratings + command deck. Hidden when
+          another tab is active so the page reads as a true dashboard
+          (one section on screen at a time). ── */}
+      <div style={{ display: telemetryTab === "overview" ? undefined : "none" }}>
 
       {/* ── Hero section — HUD-styled identity panel ── */}
       <div className="relative jarvis-shimmer rounded-2xl overflow-hidden mb-4 shadow-[0_16px_60px_rgba(0,0,0,0.75)]"
@@ -7006,138 +7126,14 @@ export default function PlayerProfilePage() {
 
       </div>
 
-      {/* ── DASHBOARD SHELL ──────────────────────────────────────────
-          Hero (TARGET PROFILE / Ratings / Command Deck) stays up top.
-          Below it, the page splits into a left vertical icon rail + a
-          right content pane that renders ONLY the active section.
-          Replaces the long-scroll tab approach so each view fills the
-          viewport instead of stacking. On mobile the rail collapses to
-          a horizontal scrolling strip. */}
-      <div className="mt-5 grid gap-4 lg:grid-cols-[210px_minmax(0,1fr)]">
+      </div>
+      {/* /OVERVIEW SECTION */}
 
-        {/* ── Left rail — sticky vertical nav. Each item is a button with
-            HUD glyph + label + active state (left accent bar + scan band
-            + team-color glow). On <lg it collapses to a horizontal strip
-            so phones still get one-tap section switching. */}
-        <aside className="lg:sticky lg:top-3 self-start">
-          <div className="hud-panel hud-panel--all-corners jarvis-boot jarvis-shimmer relative overflow-hidden"
-            style={{
-              ["--hud-corner" as string]: teamColor,
-              background: "linear-gradient(180deg, rgba(0,0,0,0.62), rgba(0,0,0,0.40))",
-              boxShadow: `0 0 14px ${teamColor}1a, inset 0 0 18px rgba(0,0,0,0.45)`,
-            }}>
-            <span className="hud-panel__corner-tr" />
-            <span className="hud-panel__corner-bl" />
-            <div className="hud-scan" aria-hidden />
-            {/* Header */}
-            <div className="flex items-center gap-2 px-3 py-2 border-b" style={{ borderColor: `${teamColor}22` }}>
-              <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 4px ${teamColor}` }} />
-              <span className="hud-mono text-[9px] uppercase tracking-[0.24em] font-semibold"
-                style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}55` }}>
-                ▌ TELEMETRY
-              </span>
-            </div>
-            {/* Nav items — vertical on lg, horizontal scroll on smaller */}
-            <nav className="flex lg:flex-col p-1.5 gap-1 overflow-x-auto lg:overflow-visible">
-              {(() => {
-                // Glyph map — pure unicode (no emoji per CLAUDE.md rule)
-                const glyph: Record<string, string> = {
-                  neural:   "◆",   // behavior / play DNA
-                  "shot-map": "⌖", // crosshair
-                  zones:    "▦",   // grid
-                  fatigue:  "◭",   // wedge / fatigue gauge
-                  advanced: "◉",   // bullseye / deep dive
-                };
-                const subtitle: Record<string, string> = {
-                  neural:   "play dna · patterns",
-                  "shot-map": "shot locations · 3D",
-                  zones:    "ice time · tendencies",
-                  fatigue:  "FI · confidence",
-                  advanced: "engine outputs · context",
-                };
-                return telemetryTabs.map(tab => {
-                  const isActive = telemetryTab === tab.id;
-                  return (
-                    <button key={tab.id}
-                      onClick={() => setTelemetryTab(tab.id as TelemetryTab)}
-                      className="relative group flex items-center gap-2.5 lg:gap-3 px-2.5 py-2 lg:py-2.5 rounded-sm transition-all shrink-0 lg:shrink min-w-[140px] lg:min-w-0"
-                      style={{
-                        background: isActive
-                          ? `linear-gradient(90deg, ${teamColor}28 0%, ${teamColor}08 100%)`
-                          : "transparent",
-                        borderLeft: `2px solid ${isActive ? teamColor : "transparent"}`,
-                        boxShadow: isActive ? `inset 0 0 14px ${teamColor}22, 0 0 8px ${teamColor}1a` : "none",
-                      }}>
-                      {/* Active row scan-line — slow horizontal sweep on
-                          the active button only. Pure CSS so no extra JS. */}
-                      {isActive && (
-                        <span aria-hidden className="absolute inset-y-0 left-0 right-0 pointer-events-none"
-                          style={{
-                            background: `linear-gradient(90deg, transparent, ${teamColor}33, transparent)`,
-                            animation: "railScan 3.6s linear infinite",
-                            mixBlendMode: "screen",
-                          }} />
-                      )}
-                      {/* Glyph */}
-                      <span className="hud-mono text-[16px] leading-none shrink-0"
-                        style={{
-                          color: isActive ? teamColor : "rgba(255,255,255,0.45)",
-                          textShadow: isActive ? `0 0 8px ${teamColor}` : "none",
-                          transition: "color 200ms, text-shadow 200ms",
-                        }}>
-                        {glyph[tab.id] ?? "▸"}
-                      </span>
-                      {/* Label stack */}
-                      <span className="flex flex-col items-start min-w-0">
-                        <span className="hud-mono text-[10px] uppercase tracking-[0.20em] font-semibold leading-tight"
-                          style={{
-                            color: isActive ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.70)",
-                            textShadow: isActive ? `0 0 4px ${teamColor}55` : "none",
-                          }}>
-                          {tab.label}
-                        </span>
-                        <span className="hud-mono text-[7px] uppercase tracking-[0.18em] text-[var(--text-muted)] leading-tight truncate">
-                          {subtitle[tab.id] ?? ""}
-                        </span>
-                      </span>
-                      {/* Right-edge arrow indicator on active */}
-                      {isActive && (
-                        <span aria-hidden className="ml-auto hud-mono text-[10px] hidden lg:block"
-                          style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}` }}>
-                          ▸
-                        </span>
-                      )}
-                    </button>
-                  );
-                });
-              })()}
-            </nav>
-            {/* Footer chip — live indicator so the rail reads as an
-                instrument, not a static nav. */}
-            <div className="px-3 py-1.5 border-t flex items-center justify-between"
-              style={{ borderColor: `${teamColor}22` }}>
-              <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                live
-              </span>
-              <span className="hud-mono text-[8px] uppercase tracking-[0.18em]"
-                style={{ color: `${teamColor}99` }}>
-                60Hz
-              </span>
-            </div>
-            <style jsx>{`
-              @keyframes railScan {
-                0%   { transform: translateX(-100%); }
-                100% { transform: translateX(100%);  }
-              }
-              @media (prefers-reduced-motion: reduce) {
-                span { animation: none !important; }
-              }
-            `}</style>
-          </div>
-        </aside>
-
-        {/* ── Right content pane — renders only the active section. */}
-        <div className="min-w-0 grid gap-4 sm:grid-cols-2 overflow-x-hidden self-start">
+        {/* Tab content grid — 2-col on sm+, single-col on mobile. Renders
+            only when the active tab is NOT overview (overview owns the
+            block above). */}
+        <div className="grid gap-4 sm:grid-cols-2 overflow-x-hidden"
+          style={{ display: telemetryTab === "overview" ? "none" : undefined }}>
 
         {/* Tier legend — worst → best */}
         {(telemetryTab === "advanced" || telemetryTab === "fatigue") && (
@@ -8179,6 +8175,10 @@ export default function PlayerProfilePage() {
         )}
 
         </div>
+        {/* /tab-content-grid */}
+
+        </div>
+        {/* /right-pane */}
       </div>
       {/* /DASHBOARD SHELL */}
 
