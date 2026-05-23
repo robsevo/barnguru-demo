@@ -3717,6 +3717,7 @@ const ACTION_THEME: Record<string, { color: string; dash: string; kind: "shot" |
 function PredictedPlay({
   carry, dump, slot, perim, drive, battleC, holdC, themeColor, leagueAvg,
   position, shoots, gpg, apg, shotsPer60, rapmOff,
+  playerType, hotHand, fatigue, finishing, gamesSample,
 }: {
   carry?: number | null;
   dump?: number | null;
@@ -3740,6 +3741,14 @@ function PredictedPlay({
   apg?: number | null;
   shotsPer60?: number | null;
   rapmOff?: number | null;
+  // AI READ inputs — feed the scouting-style natural-language forecast
+  // at the top of the card. None are required; the generator silently
+  // degrades when context is missing.
+  playerType?: string | null;       // "Sniper" / "Playmaker" / "Defensive D" etc.
+  hotHand?: number | null;          // [-2..2] form score
+  fatigue?: number | null;          // [0..1] composite FI
+  finishing?: number | null;        // goals - xG above expected
+  gamesSample?: number | null;      // games in the behavior parquet sample
 }) {
   // A defenseman lives at the offensive blue line — the play does not start
   // above the zone like a forward zone entry. We rewire the schematic so the
@@ -3875,6 +3884,100 @@ function PredictedPlay({
   // but each row carries its own delta-vs-avg chip.
   const top3 = inZoneActions.slice(0, 3);
 
+  // ── AI READ — synthesises the model outputs + context into a 2-line
+  // scouting forecast. This is rule-based "AI" by design: per Principle 2
+  // we want interpretable, auditable text (every clause maps to one of the
+  // inputs above), not an LLM hallucinating off a probability vector. The
+  // generator combines: position, top in-zone action + its delta vs the
+  // position-matched league mean, secondary action, entry style, pass
+  // tendency, form (hot hand), fatigue, and finishing context.
+  //
+  // Confidence comes from three signals:
+  //   1. How big the top action's positive delta is vs league mean
+  //      (bigger gap = stronger fingerprint)
+  //   2. Sample size (games in the behavior parquet)
+  //   3. Top1-Top2 separation (clear top action vs a coin flip)
+  const aiRead = (() => {
+    if (!topInZone) return null;
+    const top = topInZone;
+    const second = inZoneActions.find(a => a.id !== top.id) ?? null;
+    const topAvg = avgFor(top.id);
+    const topDelta = topAvg != null ? top.pct - topAvg : null;
+    const secondDelta = second && avgFor(second.id) != null ? second.pct - (avgFor(second.id) ?? 0) : null;
+
+    // ── Confidence (0-1)
+    let confidence = 0.35;
+    if (topDelta != null) confidence += Math.min(0.30, Math.max(-0.15, topDelta / 25));
+    if (gamesSample != null) confidence += Math.min(0.20, gamesSample / 300);
+    if (second != null) confidence += Math.min(0.15, (top.pct - second.pct) / 30);
+    confidence = Math.max(0.20, Math.min(0.95, confidence));
+
+    // ── Verb library — natural-language version of the action id, position-aware
+    const verbFor = (id: string): { verb: string; noun: string } => {
+      if (isD) {
+        if (id === "perim")  return { verb: "snap one from", noun: "the point" };
+        if (id === "drive")  return { verb: "pinch toward",   noun: "the crease" };
+        if (id === "slot")   return { verb: "walk into",      noun: "the high slot" };
+        if (id === "battle") return { verb: "step down to",   noun: "the corner" };
+        if (id === "hold")   return { verb: "walk the line and reset to", noun: "the opposite point" };
+        if (id === "pass")   return { verb: "feed a cross-ice pass to", noun: "the off-wing point" };
+      }
+      if (id === "slot")   return { verb: "drive into",       noun: "the slot for a shot" };
+      if (id === "drive")  return { verb: "crash",            noun: "the crease" };
+      if (id === "perim")  return { verb: "fire from",        noun: "the perimeter" };
+      if (id === "battle") return { verb: "win possession on", noun: "the half-wall" };
+      if (id === "hold")   return { verb: "cycle to",         noun: "the off-wing corner" };
+      if (id === "pass")   return { verb: "slide a seam pass to", noun: "the slot" };
+      if (id === "carry")  return { verb: "carry through",    noun: "the neutral zone" };
+      if (id === "dump")   return { verb: "chip and chase into", noun: "the offensive zone" };
+      return { verb: "go", noun: "to the net" };
+    };
+
+    // ── Open sentence — position-aware preamble + primary action
+    const role = playerType
+      ? playerType
+      : isD ? "Defenseman"
+      : pos === "C" ? "Centre"
+      : pos === "L" || pos === "LW" ? "Left winger"
+      : pos === "R" || pos === "RW" ? "Right winger"
+      : "Skater";
+    const v1 = verbFor(top.id);
+    const deltaPhrase = topDelta != null && Math.abs(topDelta) >= 2
+      ? ` (${topDelta > 0 ? "+" : ""}${topDelta.toFixed(1)}pp ${topDelta > 0 ? "above" : "below"} ${isD ? "D" : "F"} avg)`
+      : "";
+    let sentence1 = `${role} most likely to ${v1.verb} ${v1.noun}${deltaPhrase}.`;
+
+    // Entry phrase for forwards
+    if (!isD && topEntry && entryActions.length > 0) {
+      const entryVerb = topEntry.id === "carry" ? "Prefers controlled carry-ins" : "Tends to dump-and-chase";
+      sentence1 = `${entryVerb}. ` + sentence1;
+    }
+
+    // ── Modifier sentence — context (form, fatigue, passing, secondary action)
+    const mods: string[] = [];
+    if (second != null && secondDelta != null && secondDelta > 2.5) {
+      const v2 = verbFor(second.id);
+      mods.push(`secondary read is to ${v2.verb} ${v2.noun}`);
+    } else if (second != null) {
+      const v2 = verbFor(second.id);
+      mods.push(`falls back to ${v2.verb} ${v2.noun}`);
+    }
+    if (passTendency >= 0.55) mods.push("flashes playmaker DNA");
+    else if (passTendency >= 0.40) mods.push("moderate setup volume");
+    if (hotHand != null && hotHand >= 1.0) mods.push("running hot");
+    else if (hotHand != null && hotHand <= -1.0) mods.push("ice cold streak");
+    if (finishing != null && finishing >= 4) mods.push("over-converts xG");
+    else if (finishing != null && finishing <= -3) mods.push("under-finishes chances");
+    if (fatigue != null && fatigue >= 0.55) mods.push("legs heavy — expect shorter shifts");
+    else if (fatigue != null && fatigue <= 0.15) mods.push("fresh");
+
+    const sentence2 = mods.length > 0
+      ? mods.slice(0, 3).join(" · ").replace(/^\w/, (c) => c.toUpperCase()) + "."
+      : null;
+
+    return { sentence1, sentence2, confidence, topDelta };
+  })();
+
   // ── SVG geometry ──────────────────────────────────────────────────────
   // Top-down view of the offensive zone. Player enters at the top (above
   // the blue line); net sits at the bottom.
@@ -3972,6 +4075,68 @@ function PredictedPlay({
           bnn projection
         </span>
       </div>
+
+      {/* AI READ — scouting-style natural-language forecast at the top of
+          the card. Every clause is derivable from the inputs above
+          (interpretability rule); confidence bar uses delta + sample +
+          top1-top2 spread. */}
+      {aiRead && (
+        <div className="mb-2 rounded border px-2 py-1.5 relative overflow-hidden"
+          style={{
+            borderColor: `${themeColor}33`,
+            background: "linear-gradient(180deg, rgba(0,0,0,0.45), rgba(0,0,0,0.25))",
+            boxShadow: `0 0 8px ${themeColor}14, inset 0 0 12px rgba(0,0,0,0.35)`,
+          }}>
+          <div className="flex items-center justify-between mb-1">
+            <span className="hud-mono text-[8px] uppercase tracking-[0.22em] flex items-center gap-1.5"
+              style={{ color: themeColor, textShadow: `0 0 4px ${themeColor}55` }}>
+              <span className="hud-pulse-dot" style={{ background: themeColor, boxShadow: `0 0 3px ${themeColor}` }} />
+              ◆ AI READ
+            </span>
+            <span className="hud-mono text-[7px] uppercase tracking-[0.18em] tabular-nums"
+              style={{ color: aiRead.confidence >= 0.65 ? "#5ee08a" : aiRead.confidence >= 0.45 ? `${themeColor}cc` : "#fbbf24" }}>
+              conf {Math.round(aiRead.confidence * 100)}%
+            </span>
+          </div>
+          {/* Confidence bar — single-line meter beneath the header. Greens
+              when delta is large and sample is solid; ambers when the read
+              is shakier. */}
+          <div className="relative h-[3px] rounded-sm mb-1.5 overflow-hidden"
+            style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${themeColor}22` }}>
+            <div className="h-full"
+              style={{
+                width: `${aiRead.confidence * 100}%`,
+                background: `linear-gradient(90deg, ${themeColor}66 0%, ${
+                  aiRead.confidence >= 0.65 ? "#5ee08a" : aiRead.confidence >= 0.45 ? themeColor : "#fbbf24"
+                } 100%)`,
+                boxShadow: `0 0 4px ${aiRead.confidence >= 0.65 ? "#5ee08a55" : themeColor + "55"}`,
+                animation: "aiReadFill 900ms cubic-bezier(0.22,1,0.36,1) 100ms both",
+                transformOrigin: "left center",
+              }} />
+            {/* 50% tick — anchor for "is this above coin-flip confidence?" */}
+            <div className="absolute top-[-1px] bottom-[-1px] w-px pointer-events-none"
+              style={{ left: "50%", background: "rgba(255,255,255,0.18)" }} />
+          </div>
+          <p className="text-[11px] leading-snug text-white/85" style={{ fontFamily: "var(--font-mono)" }}>
+            {aiRead.sentence1}
+          </p>
+          {aiRead.sentence2 && (
+            <p className="text-[10px] leading-snug mt-0.5"
+              style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
+              {aiRead.sentence2}
+            </p>
+          )}
+          <style jsx>{`
+            @keyframes aiReadFill {
+              from { transform: scaleX(0); opacity: 0.2; }
+              to   { transform: scaleX(1); opacity: 1; }
+            }
+            @media (prefers-reduced-motion: reduce) {
+              div { animation: none !important; }
+            }
+          `}</style>
+        </div>
+      )}
 
       <svg viewBox={`0 0 ${VB.w} ${VB.h}`} className="w-full" style={{ height: 130 }}>
         <defs>
@@ -6320,6 +6485,11 @@ export default function PlayerProfilePage() {
                 apg={data.game_log?.summary.apg ?? null}
                 shotsPer60={data.shots_per60 ?? null}
                 rapmOff={data.rapm_ev_off ?? null}
+                playerType={playerType ?? null}
+                hotHand={data.hot_hand_score ?? null}
+                fatigue={phase3?.fatigue_index ?? null}
+                finishing={data.finishing ?? null}
+                gamesSample={data.game_log?.summary.n_games ?? null}
               />
             )}
 
