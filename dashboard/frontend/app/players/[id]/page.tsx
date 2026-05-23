@@ -6461,6 +6461,129 @@ export default function PlayerProfilePage() {
               </div>
             )}
 
+            {/* Last-game + streak + last-5 result pips. Computed from the
+                game-log so the Vitals column carries a recent-form story
+                without duplicating the Recent Games card on Advanced. */}
+            {(() => {
+              const games = data.game_log?.games ?? [];
+              if (games.length === 0) return null;
+              // Game log is ordered newest-first per backend convention.
+              const last = games[0];
+              const last5 = games.slice(0, 5);
+
+              // Streak: longest run of (pts > 0) or (pts === 0) from the
+              // top of the log. Sign carries hot vs cold.
+              let streakLen = 0;
+              let streakHot: boolean | null = null;
+              for (const g of games) {
+                const hot = g.points > 0;
+                if (streakHot == null) streakHot = hot;
+                if (hot === streakHot) streakLen++;
+                else break;
+              }
+              const streakLabel = streakHot == null ? "—"
+                : streakHot ? `${streakLen}-game PT streak`
+                : `${streakLen} held without`;
+              const streakColor = streakHot == null ? "rgba(255,255,255,0.45)"
+                : streakHot && streakLen >= 3 ? "#5ee08a"
+                : streakHot ? teamColor
+                : streakLen >= 3 ? "#f87171"
+                : "#fbbf24";
+
+              return (
+                <div className="mt-4 pt-3 border-t border-white/[0.06]">
+                  {/* Last game line — opponent, result hint, mini stat
+                      pills. Tight horizontal layout so it slots into the
+                      narrow Vitals column. */}
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="hud-mono text-[8px] uppercase tracking-[0.22em] text-[var(--text-secondary)]">
+                      ▸ LAST GAME
+                    </span>
+                    <span className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                      {last.home_road === "H" ? "vs" : "@"} {last.opponent}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 mb-2.5 flex-wrap">
+                    {[
+                      { label: "G", val: last.goals,  tone: last.goals  > 0 ? "good" : "off" },
+                      { label: "A", val: last.assists, tone: last.assists > 0 ? "good" : "off" },
+                      { label: "P", val: last.points,  tone: last.points > 0 ? "good" : "off", emph: true },
+                      { label: "S", val: last.shots ?? 0, tone: "neutral" },
+                      { label: "+/-", val: (last.plus_minus > 0 ? "+" : "") + last.plus_minus, tone: last.plus_minus > 0 ? "good" : last.plus_minus < 0 ? "bad" : "off" },
+                      { label: "TOI", val: last.toi, tone: "neutral" },
+                    ].map((p, i) => {
+                      const c =
+                        p.tone === "good" ? "#5ee08a" :
+                        p.tone === "bad"  ? "#f87171" :
+                        p.tone === "off"  ? "rgba(255,255,255,0.35)" :
+                        teamColor;
+                      return (
+                        <div key={i} className="flex flex-col items-center min-w-[28px] px-1 py-0.5 rounded border"
+                          style={{
+                            borderColor: `${c}33`,
+                            background: `${c}0c`,
+                          }}>
+                          <span className="hud-mono text-[7px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                            {p.label}
+                          </span>
+                          <span className={`hud-mono tabular-nums leading-tight ${p.emph ? "text-[12px] font-bold" : "text-[11px] font-semibold"}`}
+                            style={{ color: c, textShadow: `0 0 4px ${c}66` }}>
+                            {p.val}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Streak chip */}
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span className="hud-mono text-[8px] uppercase tracking-[0.22em] text-[var(--text-secondary)]">
+                      ▸ STREAK
+                    </span>
+                    <span className="hud-mono text-[9px] uppercase tracking-[0.16em] tabular-nums px-1.5 py-0.5 rounded border"
+                      style={{
+                        color: streakColor,
+                        borderColor: `${streakColor}55`,
+                        background: `${streakColor}10`,
+                        textShadow: `0 0 4px ${streakColor}44`,
+                      }}>
+                      {streakLabel}
+                    </span>
+                  </div>
+
+                  {/* Last-5 result pips — green dot when player scored a
+                      point, dimmed when held off the sheet. Reads as a
+                      tiny recency timeline. */}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="hud-mono text-[8px] uppercase tracking-[0.22em] text-[var(--text-secondary)]">
+                      ▸ LAST 5
+                    </span>
+                    <div className="flex items-center gap-1">
+                      {last5.map((g, i) => {
+                        const hit = g.points > 0;
+                        const c = hit ? "#5ee08a" : "rgba(255,255,255,0.22)";
+                        return (
+                          <span key={i}
+                            title={`${g.date} ${g.home_road === "H" ? "vs" : "@"} ${g.opponent} — ${g.goals}G ${g.assists}A`}
+                            className="hud-mono text-[8px] tabular-nums px-1 py-px rounded-sm border"
+                            style={{
+                              color: hit ? c : "rgba(255,255,255,0.50)",
+                              borderColor: `${c}66`,
+                              background: hit ? `${c}1a` : "rgba(255,255,255,0.04)",
+                              textShadow: hit ? `0 0 4px ${c}` : "none",
+                              minWidth: 16,
+                              textAlign: "center",
+                            }}>
+                            {g.points}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Status flags — pushed to bottom so the panel evenly fills */}
             {statusFlags.length > 0 && (
               <div className="mt-auto pt-3 flex flex-wrap gap-1.5">
