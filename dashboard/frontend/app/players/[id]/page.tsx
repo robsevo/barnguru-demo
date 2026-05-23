@@ -439,10 +439,23 @@ function TierBadge({ tier }: { tier: Tier; small?: boolean }) {
 // Player type derivation
 // ---------------------------------------------------------------------------
 
-function derivePlayerType(data: ProfileData, nhlStats?: { gp: number; goals: number; points: number } | null): string | null {
+function derivePlayerType(
+  data: ProfileData,
+  nhlStats?: { gp: number; goals: number; points: number } | null,
+): string | null {
   if (data.is_goalie) return null;
   const pos = (data.position ?? "").toUpperCase();
   const isD = pos === "D" || pos === "LD" || pos === "RD";
+
+  // Archetype is a SEASON-level identity, not a context-dependent label.
+  // When the selected context is playoffs the per-60 stats (finishing,
+  // goals60, shots60, xgf60) carry only a handful of games and skew the
+  // cascade dramatically — MacKinnon's regular-season "Sniper" flips to
+  // "Defensive Forward" off 11 playoff games. Refuse to derive a new
+  // type in playoff context; let callers fall back to season-derived
+  // type instead.
+  if (data.context_applied === "playoffs") return null;
+
   const finishing  = data.finishing     ?? 0;
   const goals60    = data.goals_per60   ?? 0;
   const rapmOff    = data.rapm_ev_off   ?? 0;
@@ -5573,7 +5586,18 @@ export default function PlayerProfilePage() {
   };
 
   const ewmaAbove  = data.ewma_xgf60 != null ? data.ewma_xgf60 - 4.09 : null;
-  const playerType = derivePlayerType(data, nhlStats);
+  // Player archetype is a season-level identity. derivePlayerType returns
+  // null when context is "playoffs" to avoid skewed reads off tiny
+  // playoff samples. Cache the most recent season-derived type and reuse
+  // it under playoffs context so the badge stays stable on toggle.
+  const [cachedSeasonType, setCachedSeasonType] = useState<string | null>(null);
+  const liveType = derivePlayerType(data, nhlStats);
+  useEffect(() => {
+    if (liveType && data.context_applied !== "playoffs") {
+      setCachedSeasonType(liveType);
+    }
+  }, [liveType, data.context_applied]);
+  const playerType = liveType ?? cachedSeasonType;
 
   // "Why hot" blurb
   let formBlurb: string | null = null;
@@ -5839,30 +5863,38 @@ export default function PlayerProfilePage() {
                 type="button"
                 aria-label="Scroll left"
                 onClick={() => railRef.current?.scrollBy({ left: -140, behavior: "smooth" })}
-                className="lg:hidden absolute left-0 top-0 bottom-0 z-[6] flex items-center justify-center w-7 active:scale-95 transition-transform"
+                className="lg:hidden absolute left-0 top-0 bottom-0 z-[6] flex items-center justify-center w-8 active:scale-95 transition-transform"
                 style={{
                   background: "linear-gradient(90deg, rgba(0,0,0,0.92) 30%, rgba(0,0,0,0) 100%)",
                   color: teamColor,
                   textShadow: `0 0 5px ${teamColor}`,
                 }}>
-                <span className="hud-mono text-[14px] font-bold">◂</span>
+                <span className="hud-mono text-[14px] font-bold"
+                  style={{ animation: "railChevPulse 1.6s ease-in-out infinite" }}>
+                  ◂
+                </span>
               </button>
               <button
                 type="button"
                 aria-label="Scroll right"
                 onClick={() => railRef.current?.scrollBy({ left: 140, behavior: "smooth" })}
-                className="lg:hidden absolute right-0 top-0 bottom-0 z-[6] flex items-center justify-center w-7 active:scale-95 transition-transform"
+                className="lg:hidden absolute right-0 top-0 bottom-0 z-[6] flex items-center justify-center w-8 active:scale-95 transition-transform"
                 style={{
                   background: "linear-gradient(270deg, rgba(0,0,0,0.92) 30%, rgba(0,0,0,0) 100%)",
                   color: teamColor,
                   textShadow: `0 0 5px ${teamColor}`,
-                  animation: "railChevR 1.8s ease-in-out infinite",
                 }}>
-                <span className="hud-mono text-[14px] font-bold">▸</span>
+                {/* Glyph animates inside the button — animating the button
+                    itself fights its absolute right-0 / inset positioning
+                    and pushes the whole arrow off-screen. */}
+                <span className="hud-mono text-[14px] font-bold"
+                  style={{ animation: "railChevPulse 1.6s ease-in-out infinite" }}>
+                  ▸
+                </span>
               </button>
               <nav
                 ref={railRef}
-                className="flex lg:flex-col p-1 lg:p-1.5 gap-1 overflow-x-auto lg:overflow-visible px-7 lg:px-1.5"
+                className="flex lg:flex-col p-1 lg:p-1.5 gap-1 overflow-x-auto lg:overflow-visible px-9 lg:px-1.5"
                 style={{
                   scrollbarWidth: "none",
                   WebkitOverflowScrolling: "touch",
@@ -5955,13 +5987,11 @@ export default function PlayerProfilePage() {
                 0%   { transform: translateX(-100%); }
                 100% { transform: translateX(100%);  }
               }
-              @keyframes railChevL {
-                0%, 100% { transform: translate(0, -50%);   opacity: 0.85; }
-                50%      { transform: translate(-3px, -50%); opacity: 0.35; }
-              }
-              @keyframes railChevR {
-                0%, 100% { transform: translate(0, -50%);  opacity: 0.85; }
-                50%      { transform: translate(3px, -50%); opacity: 0.35; }
+              /* Glyph-only pulse — sits inside the absolute-positioned
+                 scroll button without fighting its inset positioning. */
+              @keyframes railChevPulse {
+                0%, 100% { transform: translateX(0);    opacity: 0.95; }
+                50%      { transform: translateX(2px);  opacity: 0.55; }
               }
               @media (prefers-reduced-motion: reduce) {
                 span { animation: none !important; }
