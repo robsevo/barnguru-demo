@@ -3441,7 +3441,11 @@ function HologramScanner({
         </div>
       )}
       {/* Scanner canvas — body + rings + callouts */}
-      <div className="relative flex-1 flex items-center justify-center py-3 min-h-[400px]">
+      {/* Trimmed min-height (400 → 320) and dropped flex-1 so the
+          silhouette canvas sizes to its content instead of stretching
+          to match the (taller) Vitals column. Hologram panel now hugs
+          its content height. */}
+      <div className="relative flex items-center justify-center py-2 min-h-[320px]">
         {/* Soft radial glow backdrop */}
         <div
           className="absolute inset-0 pointer-events-none"
@@ -7061,9 +7065,10 @@ export default function PlayerProfilePage() {
           </HudPanel>
         </div>
 
-        {/* HOLOGRAM column — slimmer 4/12 (was 5) now that Vitals carries
-            the Decision Matrix and absorbs the extra column. */}
-        <div className="lg:col-span-4 flex">
+        {/* HOLOGRAM column — self-start so it sizes to content like the
+            Cortex column. Was stretching to match the (tall) Vitals
+            column → empty bands above the rings and below the ticker. */}
+        <div className="lg:col-span-4 flex lg:self-start">
           <HudPanel title="Hologram" subtitle={isGoalie ? "goalie scan" : "skater scan"} themeColor={teamColor} scanline allCorners className="w-full flex flex-col">
             <HologramScanner
               isGoalie={!!isGoalie}
