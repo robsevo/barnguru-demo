@@ -6405,36 +6405,9 @@ export default function PlayerProfilePage() {
             (GP/G/A/P/+/-/FI for skaters, GP/W/L/SV%/GAA/SO for goalies)
             — removed. The headline totals live in the top hero. */}
 
-        {/* EDGE / SAVE TELEMETRY band — sits between hero and Ratings.
-            Radar is now in the TARGET PROFILE header (top of the page)
-            next to the picture, so this row carries the OTHER half: NHL
-            EDGE metrics for skaters, NET SAVE % heatmap for goalies. */}
-        <div className="lg:col-span-12">
-          <HudPanel title={isGoalie ? "Save Telemetry" : "EDGE Telemetry"}
-            subtitle={isGoalie ? "net save % · zone breakdown" : "NHL EDGE · skating + shot tracking"}
-            themeColor={teamColor} scanline allCorners>
-            {isGoalie ? (
-              <div className="grid lg:grid-cols-[1fr_1.4fr] gap-3 items-start">
-                <div className="min-w-0">
-                  <GoalieZoneViz data={data} teamColor={teamColor} />
-                </div>
-                <div className="min-w-0">
-                  <div className="hud-mono text-[9px] uppercase tracking-[0.22em] mb-1.5"
-                    style={{ color: teamColor }}>
-                    ◢ SAVE % · ANALYSIS
-                  </div>
-                  <p className="hud-mono text-[10px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
-                    Net-mouth heatmap colour-codes zones vs league averages —
-                    green clears the average, red lags it. The Zones tab
-                    drills into shot-origin rink heatmap when sample &gt; 60.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <EdgeMetricsCard data={data} teamColor={teamColor} />
-            )}
-          </HudPanel>
-        </div>
+        {/* EDGE / SAVE Telemetry band was moved INSIDE the Behavior tab,
+            right under Performance Snapshot. Keeping a top-level band
+            duplicated the same data twice on screen. */}
 
         {/* RATING STRIP — full width, 6 mini odometers, tier-coloured */}
         <div className="lg:col-span-12">
@@ -6585,6 +6558,40 @@ export default function PlayerProfilePage() {
                   <EwmaTrendChart xgf60={data.ewma_xgf60} teamColor={teamColor} />
                 </div>
               )}
+            </Card>
+          </div>
+        )}
+
+        {/* EDGE Telemetry — moved here directly under Performance Snapshot
+            so the NHL EDGE rank/percentile rows sit next to the radar
+            instead of in a separate band up top. */}
+        {!isGoalie && telemetryTab === "neural" && (
+          data.edge_top_shot_speed_mph != null ||
+          data.edge_top_skating_speed_kmh != null ||
+          data.edge_total_distance_km != null ||
+          data.skating_distance_per_game_km != null
+        ) && (
+          <div className="sm:col-span-2">
+            <Card title="EDGE Telemetry" style={cardStyle}>
+              <p className="text-[9px] uppercase tracking-wider text-center mb-3" style={{ color: "rgba(255,255,255,0.35)" }}>
+                NHL EDGE · skating + shot tracking · league rank + percentile
+              </p>
+              <EdgeMetricsCard data={data} teamColor={teamColor} />
+            </Card>
+          </div>
+        )}
+
+        {/* Goalie variant — Save Telemetry mirrors the skater placement:
+            sits directly under the Goalie Performance Snapshot. */}
+        {isGoalie && telemetryTab === "neural" && (data.hdsv_pct != null || data.mdsv_pct != null || data.ldsv_pct != null) && (
+          <div className="sm:col-span-2">
+            <Card title="Save Telemetry" style={cardStyle}>
+              <p className="text-[9px] uppercase tracking-wider text-center mb-3" style={{ color: "rgba(255,255,255,0.35)" }}>
+                Net-mouth heatmap · save % colour-coded vs league averages
+              </p>
+              <div className="flex justify-center">
+                <GoalieZoneViz data={data} teamColor={teamColor} />
+              </div>
             </Card>
           </div>
         )}
