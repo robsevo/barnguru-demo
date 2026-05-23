@@ -3378,6 +3378,7 @@ function HologramScanner({
   tickerLine,
   dnaRungs,
   dnaSignature,
+  topGauges,
 }: {
   isGoalie: boolean;
   teamColor: string;
@@ -3390,6 +3391,10 @@ function HologramScanner({
   // panel feels like a player-DNA scanner, not just a body diagram.
   dnaRungs?: DnaRung[];
   dnaSignature?: string;
+  // Optional gauge slot rendered above the silhouette. Used to host the
+  // Fatigue + Confidence rings lifted out of the Vitals column so that
+  // column can shrink and the Hologram fills its row more evenly.
+  topGauges?: ReactNode;
 }) {
   const [active, setActive] = useState<HoloZone | null>(null);
 
@@ -3427,6 +3432,14 @@ function HologramScanner({
 
   return (
     <div className="flex flex-col h-full">
+      {/* Optional top-of-hologram gauge slot — hosts the Fatigue + Confidence
+          rings lifted from Vitals so that column shrinks. Renders above the
+          silhouette so the eye reads "current state" → "body" naturally. */}
+      {topGauges && (
+        <div className="mb-2 pb-2 border-b" style={{ borderColor: `${teamColor}22` }}>
+          {topGauges}
+        </div>
+      )}
       {/* Scanner canvas — body + rings + callouts */}
       <div className="relative flex-1 flex items-center justify-center py-3 min-h-[400px]">
         {/* Soft radial glow backdrop */}
@@ -6609,24 +6622,9 @@ export default function PlayerProfilePage() {
         <div className="lg:col-span-4 flex">
           <HudPanel title="Vitals" themeColor={teamColor} scanline allCorners className="w-full flex flex-col">
             <div className="grid grid-cols-2 gap-3 place-items-center">
-              {fi != null && (
-                <div className="relative">
-                  <RingGauge value={fi} label="Fatigue" sublabel="FI" themeColor={teamColor} invert decimals={2} size={96} />
-                  <div className="absolute top-0 right-0">
-                    <StatInfoTip label="Fatigue Index (FI)"
-                      tip="Composite 0–1 fatigue score for the latest game. Weighs schedule (B2B, 3-in-4), travel + circadian, TOI spikes, contact load, recovery days. Lower is better — green = fresh, red = gassed." />
-                  </div>
-                </div>
-              )}
-              {ci != null && (
-                <div className="relative">
-                  <RingGauge value={Math.min(1, (ci + 0.1) / 0.2)} centerText={`${ci >= 0 ? "+" : ""}${ci.toFixed(2)}`} label="Confidence" sublabel="CI" themeColor={teamColor} size={96} />
-                  <div className="absolute top-0 right-0">
-                    <StatInfoTip label="Confidence Index (CI)"
-                      tip="Signed [-1, +1] decision-bias score. Positive = aggressive (shoots, pinches, takes risks). Negative = passive. Blends player signals (form, hot hand, role usage) with team signals (streak, coach tendencies). Distinct from fatigue — fatigue degrades execution, confidence biases decisions." />
-                  </div>
-                </div>
-              )}
+              {/* FI + CI rings moved to the Hologram panel topGauges slot
+                  so this Vitals column can shrink one row. HHS + WAR
+                  stay here as the player-identity gauges. */}
               {hhs != null && (
                 <div className="relative">
                   <RingGauge value={Math.min(1, Math.max(0, (hhs + 2) / 4))} centerText={`${hhs >= 0 ? "+" : ""}${hhs.toFixed(1)}`} label="Hot Hand" sublabel="HHS" themeColor={teamColor} size={96} />
@@ -7055,6 +7053,34 @@ export default function PlayerProfilePage() {
               isGoalie={!!isGoalie}
               teamColor={teamColor}
               bodyIntensity={bodyIntensity}
+              topGauges={
+                // FI + CI rings rendered above the silhouette — moved
+                // here from the Vitals column so that column can shrink
+                // by one row. Rings stay the same component, just docked
+                // into the Hologram header area.
+                (fi != null || ci != null) ? (
+                  <div className="grid grid-cols-2 gap-3 place-items-center">
+                    {fi != null && (
+                      <div className="relative">
+                        <RingGauge value={fi} label="Fatigue" sublabel="FI" themeColor={teamColor} invert decimals={2} size={88} />
+                        <div className="absolute top-0 right-0">
+                          <StatInfoTip label="Fatigue Index (FI)"
+                            tip="Composite 0–1 fatigue score for the latest game. Weighs schedule (B2B, 3-in-4), travel + circadian, TOI spikes, contact load, recovery days. Lower is better — green = fresh, red = gassed." />
+                        </div>
+                      </div>
+                    )}
+                    {ci != null && (
+                      <div className="relative">
+                        <RingGauge value={Math.min(1, (ci + 0.1) / 0.2)} centerText={`${ci >= 0 ? "+" : ""}${ci.toFixed(2)}`} label="Confidence" sublabel="CI" themeColor={teamColor} size={88} />
+                        <div className="absolute top-0 right-0">
+                          <StatInfoTip label="Confidence Index (CI)"
+                            tip="Signed [-1, +1] decision-bias score. Positive = aggressive (shoots, pinches, takes risks). Negative = passive. Blends player signals (form, hot hand, role usage) with team signals (streak, coach tendencies). Distinct from fatigue — fatigue degrades execution, confidence biases decisions." />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : null
+              }
               telemetryLeft={isGoalie ? [
                 // Goalies: callouts surface ONLY stats that aren't already
                 // in the TARGET PROFILE strip (SV%, GAA, W-L, SO, GP). The
