@@ -5746,8 +5746,11 @@ export default function PlayerProfilePage() {
           below gets the FULL viewport width. */}
       <div className="mt-3 flex flex-col lg:grid lg:gap-4 lg:grid-cols-[210px_minmax(0,1fr)]">
 
-        {/* Rail — horizontal strip on <lg, vertical sticky panel on lg+ */}
-        <aside className="lg:sticky lg:top-3 self-start z-20 mb-2 lg:mb-0 lg:max-h-[calc(100vh-1rem)] lg:overflow-y-auto">
+        {/* Rail — sticky horizontal strip on <lg, sticky vertical
+            sidebar on lg+. Mobile: top offset sits BELOW the 44px global
+            header bar so it doesn't overlap the search/team controls;
+            z-20 keeps it under the header (z-30) but above page content. */}
+        <aside className="sticky top-11 lg:top-3 self-start z-20 mb-2 lg:mb-0 lg:max-h-[calc(100vh-1rem)] lg:overflow-y-auto">
           <div className="hud-panel hud-panel--all-corners jarvis-boot jarvis-shimmer relative overflow-hidden"
             style={{
               ["--hud-corner" as string]: teamColor,
@@ -5788,7 +5791,7 @@ export default function PlayerProfilePage() {
                       onClick={() => setTelemetryTab(tab.id as TelemetryTab)}
                       title={`${tab.label} — ${subtitle[tab.id] ?? ""}`}
                       aria-label={tab.label}
-                      className="relative group flex items-center gap-2 lg:gap-3 px-2.5 lg:px-2.5 py-2 lg:py-2.5 rounded-sm transition-all shrink-0 lg:shrink"
+                      className="relative group flex items-center gap-1.5 lg:gap-3 px-2 lg:px-2.5 py-1.5 lg:py-2.5 rounded-sm transition-all shrink-0 lg:shrink"
                       style={{
                         background: isActive
                           ? `linear-gradient(90deg, ${teamColor}28 0%, ${teamColor}08 100%)`
@@ -5804,7 +5807,7 @@ export default function PlayerProfilePage() {
                             mixBlendMode: "screen",
                           }} />
                       )}
-                      <span className="hud-mono text-[15px] lg:text-[16px] leading-none shrink-0"
+                      <span className="hud-mono text-[13px] lg:text-[16px] leading-none shrink-0"
                         style={{
                           color: isActive ? teamColor : "rgba(255,255,255,0.55)",
                           textShadow: isActive ? `0 0 8px ${teamColor}` : "none",
@@ -5813,7 +5816,7 @@ export default function PlayerProfilePage() {
                         {glyph[tab.id] ?? "▸"}
                       </span>
                       {/* Mobile shows compact label; desktop shows label+subtitle stack. */}
-                      <span className="flex lg:hidden hud-mono text-[10px] uppercase tracking-[0.18em] font-semibold whitespace-nowrap"
+                      <span className="flex lg:hidden hud-mono text-[9px] uppercase tracking-[0.16em] font-semibold whitespace-nowrap"
                         style={{
                           color: isActive ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.65)",
                         }}>
@@ -8159,12 +8162,15 @@ export default function PlayerProfilePage() {
           </div>
         )}
 
-        {/* Section header — goalie Behavior tab "Breakdown" group */}
-        {isGoalie && telemetryTab === "neural" && (
-          <SectionHeader title="Breakdown" subtitle="full save% + workload table" teamColor={teamColor} />
+        {/* Goalie Advanced tab — Save Profile is the tier-coded deep-dive
+            view. Lives here instead of the Behavior tab so the Behavior
+            tab carries only radar + telemetry; Advanced carries the full
+            tier table + context. Section header sets up the group. */}
+        {isGoalie && telemetryTab === "advanced" && (
+          <SectionHeader title="Save Profile" subtitle="tier-coded breakdown · GSAx · HD/MD/LD" teamColor={teamColor} />
         )}
 
-        {isGoalie && telemetryTab === "neural" && (
+        {isGoalie && telemetryTab === "advanced" && (
           <div className="sm:col-span-2">
             <Card title="Goalie Profile" style={cardStyle}>
               <div className="space-y-0">
