@@ -6643,32 +6643,70 @@ export default function PlayerProfilePage() {
           <HudPanel title="Vitals" themeColor={teamColor} scanline allCorners className="w-full flex flex-col">
             <div className="grid grid-cols-2 gap-3 place-items-center">
               {/* FI + CI rings moved to the Hologram panel topGauges slot
-                  so this Vitals column can shrink one row. HHS + WAR
-                  stay here as the player-identity gauges. */}
-              {hhs != null && (
-                <div className="relative">
-                  <RingGauge value={Math.min(1, Math.max(0, (hhs + 2) / 4))} centerText={`${hhs >= 0 ? "+" : ""}${hhs.toFixed(1)}`} label="Hot Hand" sublabel="HHS" themeColor={teamColor} size={96} />
-                  <div className="absolute top-0 right-0">
-                    <StatInfoTip label="Hot Hand Score (HHS)"
-                      tip="Standardized streak detector over last 5 games — measures goals + xG above expected output. Above +0.7 = meaningfully running hot. Above +1.5 = serious heater. Negative = ice-cold. Feeds straight into the Rust simulator's shot resolution." />
-                  </div>
-                </div>
-              )}
-              {warVal != null && (
-                <div className="relative">
-                  <RingGauge
-                    value={warRankPct ?? Math.min(1, Math.max(0, (warVal + 1) / 4))}
-                    centerText={`${warVal >= 0 ? "+" : ""}${warVal.toFixed(2)}`}
-                    label="WAR"
-                    sublabel={data.war_rank ? `#${data.war_rank}` : "rating"}
-                    themeColor={teamColor}
-                    size={96}
-                  />
-                  <div className="absolute top-0 right-0">
-                    <StatInfoTip label="Wins Above Replacement (WAR)"
-                      tip="Single-number value vs a freely available AHL callup, summed across offense, defense and special teams. +2.5 is elite. The ring fill is the rank-percentile across qualified skaters when available, else a normalized scale around 0." />
-                  </div>
-                </div>
+                  so this Vitals column can shrink one row. Skaters keep
+                  HHS + WAR. Goalies render GSAx + SV% rings so the panel
+                  isn't empty for them. */}
+              {isGoalie ? (
+                <>
+                  {data.gsax != null && (
+                    <div className="relative">
+                      <RingGauge
+                        value={Math.min(1, Math.max(0, (data.gsax + 10) / 30))}
+                        centerText={`${data.gsax >= 0 ? "+" : ""}${data.gsax.toFixed(1)}`}
+                        label="GSAx" sublabel="goalie"
+                        themeColor={teamColor}
+                        size={96}
+                      />
+                      <div className="absolute top-0 right-0">
+                        <StatInfoTip label="Goals Saved Above Expected (GSAx)"
+                          tip="Extra saves made vs an average NHL goalie given the same shot diet. +10 over a season is elite; +20 is Vezina-territory. Most predictive single goalie metric." />
+                      </div>
+                    </div>
+                  )}
+                  {(data.sv_pct ?? nhlStats?.sv_pct) != null && (
+                    <div className="relative">
+                      <RingGauge
+                        value={Math.min(1, Math.max(0, (((data.sv_pct ?? nhlStats?.sv_pct) ?? 0.880) - 0.880) / 0.045))}
+                        centerText={`.${Math.round(((data.sv_pct ?? nhlStats?.sv_pct) ?? 0) * 1000)}`}
+                        label="SV%" sublabel="overall"
+                        themeColor={teamColor}
+                        size={96}
+                      />
+                      <div className="absolute top-0 right-0">
+                        <StatInfoTip label="Overall Save % (SV%)"
+                          tip="Traditional save percentage. NHL avg ~.905; .920+ is starter-quality. Less predictive than GSAx because it doesn't account for shot quality." />
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {hhs != null && (
+                    <div className="relative">
+                      <RingGauge value={Math.min(1, Math.max(0, (hhs + 2) / 4))} centerText={`${hhs >= 0 ? "+" : ""}${hhs.toFixed(1)}`} label="Hot Hand" sublabel="HHS" themeColor={teamColor} size={96} />
+                      <div className="absolute top-0 right-0">
+                        <StatInfoTip label="Hot Hand Score (HHS)"
+                          tip="Standardized streak detector over last 5 games — measures goals + xG above expected output. Above +0.7 = meaningfully running hot. Above +1.5 = serious heater. Negative = ice-cold. Feeds straight into the Rust simulator's shot resolution." />
+                      </div>
+                    </div>
+                  )}
+                  {warVal != null && (
+                    <div className="relative">
+                      <RingGauge
+                        value={warRankPct ?? Math.min(1, Math.max(0, (warVal + 1) / 4))}
+                        centerText={`${warVal >= 0 ? "+" : ""}${warVal.toFixed(2)}`}
+                        label="WAR"
+                        sublabel={data.war_rank ? `#${data.war_rank}` : "rating"}
+                        themeColor={teamColor}
+                        size={96}
+                      />
+                      <div className="absolute top-0 right-0">
+                        <StatInfoTip label="Wins Above Replacement (WAR)"
+                          tip="Single-number value vs a freely available AHL callup, summed across offense, defense and special teams. +2.5 is elite. The ring fill is the rank-percentile across qualified skaters when available, else a normalized scale around 0." />
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
@@ -7751,20 +7789,10 @@ export default function PlayerProfilePage() {
           </div>
         )}
 
-        {/* Goalie variant — Save Telemetry mirrors the skater placement:
-            sits directly under the Goalie Performance Snapshot. */}
-        {isGoalie && telemetryTab === "neural" && (data.hdsv_pct != null || data.mdsv_pct != null || data.ldsv_pct != null) && (
-          <div className="sm:col-span-2">
-            <Card title="Save Telemetry" style={cardStyle}>
-              <p className="text-[9px] uppercase tracking-wider text-center mb-3" style={{ color: "rgba(255,255,255,0.35)" }}>
-                Net-mouth heatmap · save % colour-coded vs league averages
-              </p>
-              <div className="flex justify-center">
-                <GoalieZoneViz data={data} teamColor={teamColor} />
-              </div>
-            </Card>
-          </div>
-        )}
+        {/* Save Telemetry moved to the Zones tab (below) so the
+            Behavior tab carries only Performance Snapshot + Goalie
+            Profile / Form. Net-mouth heatmap lives with the rink-based
+            shot-origin heatmap on Zones. */}
 
         {/* ── Shot Map card — 3D + 2D toggle ── */}
         {!isGoalie && telemetryTab === "shot-map" && (
@@ -8746,18 +8774,42 @@ export default function PlayerProfilePage() {
             so the goalie zones tab fills the page width instead of stacking
             two narrow viz columns. Falls back to single-col when shot
             sample is too thin for the rink heatmap. */}
-        {/* Goalie Zones tab — rink-based shot-location heatmap only.
-            The net-mouth heatmap lives in Save Telemetry on the Behavior
-            tab; rendering it here too is duplication. */}
-        {isGoalie && telemetryTab === "zones" && (
+        {/* Goalie Zones tab — net-mouth + shot-origin heatmaps live
+            here side-by-side. Behavior tab now stays focused on
+            radar + form / profile, no longer carries the net heatmap. */}
+        {isGoalie && telemetryTab === "zones" && (data.hdsv_pct != null || data.mdsv_pct != null || data.ldsv_pct != null) && (
           <div className="sm:col-span-2">
-            <Card title="Shot-Location Save %" style={cardStyle}>
-              {goalieShots.length >= 60 ? (
-                <GoalieSaveLocationMap shots={goalieShots} teamColor={teamColor} />
-              ) : (
-                <div className="py-6 text-center hud-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                  not enough shot data for the rink heatmap yet · check the Behavior tab for the net-mouth view
+            <Card title="Save Zones" style={cardStyle}>
+              <div className={`grid gap-4 items-start ${goalieShots.length >= 60 ? "lg:grid-cols-[1fr_1.1fr]" : "grid-cols-1"}`}>
+                <div className="min-w-0">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="hud-mono text-[9px] uppercase tracking-[0.22em]" style={{ color: teamColor }}>
+                      ◢ NET-MOUTH HEATMAP
+                    </span>
+                    <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                      save % · 5-zone
+                    </span>
+                  </div>
+                  <GoalieZoneViz data={data} teamColor={teamColor} />
                 </div>
+                {goalieShots.length >= 60 && (
+                  <div className="min-w-0">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="hud-mono text-[9px] uppercase tracking-[0.22em]" style={{ color: teamColor }}>
+                        ◢ SHOT-LOCATION HEATMAP
+                      </span>
+                      <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                        save % · by origin
+                      </span>
+                    </div>
+                    <GoalieSaveLocationMap shots={goalieShots} teamColor={teamColor} />
+                  </div>
+                )}
+              </div>
+              {goalieShots.length < 60 && (
+                <p className="mt-3 py-3 text-center hud-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] border-t" style={{ borderColor: `${teamColor}1a` }}>
+                  rink-zone shot-origin heatmap unlocks at 60+ shots faced
+                </p>
               )}
             </Card>
           </div>
