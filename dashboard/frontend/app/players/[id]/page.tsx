@@ -6555,9 +6555,25 @@ export default function PlayerProfilePage() {
           the analytical anchors are visible before the deck opens. Six
           tier-coloured odometers across one HudPanel. */}
       <div className="mt-4">
-        <HudPanel title="Ratings" subtitle="aggregate engine inputs" themeColor={teamColor} scanline allCorners>
+        <HudPanel title="Ratings" subtitle={isGoalie ? "save-zone + workload" : "aggregate engine inputs"} themeColor={teamColor} scanline allCorners>
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 text-center">
-            {[
+            {(isGoalie ? [
+              // GOALIE Ratings — six goalie-relevant stats. The skater
+              // panel showed all dashes for goalies because those fields
+              // (xGF/60, CDR, Finishing, PP) are skater-only.
+              { label: "SV%",     val: data.sv_pct != null ? data.sv_pct * 100 : (nhlStats?.sv_pct != null ? nhlStats.sv_pct * 100 : null), dec: 2, suffix: "%", tier: data.sv_pct != null ? svpctTier(data.sv_pct) : null,
+                tip: "Overall save percentage this season. NHL avg ~.905; .920+ is starter-quality." },
+              { label: "HD SV%",  val: data.hdsv_pct != null ? data.hdsv_pct * 100 : null, dec: 1, suffix: "%", tier: data.hdsv_pct != null ? hdsvTier(data.hdsv_pct * 100) : null,
+                tip: "High-danger save percentage — most predictive goalie metric. League avg ~80%; elite goalies clear 83%." },
+              { label: "MD SV%",  val: data.mdsv_pct != null ? data.mdsv_pct * 100 : null, dec: 1, suffix: "%", tier: data.mdsv_pct != null ? mdsvTier(data.mdsv_pct) : null,
+                tip: "Mid-danger save percentage. League avg ~87%. Reads tracking + rebound control on mid-range shots." },
+              { label: "LD SV%",  val: data.ldsv_pct != null ? data.ldsv_pct * 100 : null, dec: 1, suffix: "%", tier: data.ldsv_pct != null ? ldsvTier(data.ldsv_pct) : null,
+                tip: "Low-danger save percentage. League avg ~96.5%. Anything below means soft goals leaking through." },
+              { label: "GSAx",    val: data.gsax, dec: 1, suffix: "", tier: data.gsax != null ? gsaxTier(data.gsax) : null,
+                tip: "Goals saved above expected — value-added vs an average goalie given the same shot diet. +10 over a season is elite; negative means letting in more than the model expects." },
+              { label: "xGA",     val: data.xga, dec: 1, suffix: "", tier: data.xga != null ? xgaTier(data.xga) : null,
+                tip: "Workload indicator — expected goals an average goalie would allow given the same shots faced. Higher = heavier starter workload." },
+            ] : [
               { label: "xGF/60",     val: data.xgf_per60,            dec: 2, suffix: "", tier: data.xgf_per60     != null ? xgf60Tier(data.xgf_per60)         : null,
                 tip: "Expected goals FOR per 60 minutes at 5v5 (RAPM model). Measures how much offense this player drives — weighs every shot by shot quality, not just count. League avg ≈ 4.1; elite forwards 5.5+; D-men 3.5+ is strong." },
               { label: "xGA/60",     val: data.rapm_xga_60,          dec: 2, suffix: "", tier: data.rapm_xga_60   != null ? xgaAllowedTier(data.rapm_xga_60)  : null,
@@ -6570,7 +6586,7 @@ export default function PlayerProfilePage() {
                 tip: "Expected goals generated per 60 minutes of power-play time. Measures PP unit impact. League avg ≈ 6.5 on a PP unit; 8.0+ is elite PP1 production." },
               { label: "Bayes",      val: data.bayesian_rating,      dec: 3, suffix: "", tier: data.bayesian_rating != null ? bayesianTier(data.bayesian_rating) : null,
                 tip: "Bayesian posterior-mean skill estimate — career stats shrunk toward position average to account for sample size. The smaller the sample, the more it pulls toward average. More stable than single-season raw stats; the model's foundational prior." },
-            ].map((m, i) => {
+            ]).map((m, i) => {
               const tierColor = m.tier ? TIER_COLOR[m.tier] : null;
               return m.val != null ? (
                 <div key={i} className="flex flex-col items-center gap-0.5">
@@ -7529,6 +7545,84 @@ export default function PlayerProfilePage() {
                 {playStyle}
               </p>
             )}
+
+            {/* Extra Cortex telemetry — fills the empty vertical space
+                under the readouts grid + play-style blurb. Pulled from
+                already-computed fields so no new fetches. */}
+            <div className="mt-auto pt-3 border-t border-white/[0.05] space-y-1.5">
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="hud-mono text-[8px] uppercase tracking-[0.22em] text-[var(--text-secondary)]">
+                  ▸ ENGINE CONTEXT
+                </span>
+                <span className="hud-mono text-[7px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                  derived
+                </span>
+              </div>
+              {/* Archetype + EWMA form */}
+              {playerType && (
+                <div className="flex items-baseline gap-2">
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)] w-16 shrink-0">Archetype</span>
+                  <span className="hud-mono text-[10px] tabular-nums truncate" style={{ color: teamColor, textShadow: `0 0 4px ${teamColor}33` }}>
+                    {playerType}
+                  </span>
+                </div>
+              )}
+              {data.ewma_form_flag && (
+                <div className="flex items-baseline gap-2">
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)] w-16 shrink-0">Form Flag</span>
+                  <span className="hud-mono text-[10px] tabular-nums uppercase tracking-[0.16em]"
+                    style={{
+                      color: data.ewma_form_flag === "rising" ? "#5ee08a"
+                           : data.ewma_form_flag === "falling" ? "#f87171"
+                           : `${teamColor}cc`,
+                    }}>
+                    {data.ewma_form_flag}
+                  </span>
+                </div>
+              )}
+              {data.inseason_blend_weight != null && (
+                <div className="flex items-baseline gap-2">
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)] w-16 shrink-0">Blend</span>
+                  <span className="hud-mono text-[10px] tabular-nums" style={{ color: teamColor }}>
+                    {(data.inseason_blend_weight * 100).toFixed(0)}% in-season · {(100 - data.inseason_blend_weight * 100).toFixed(0)}% prior
+                  </span>
+                </div>
+              )}
+              {data.playoff_delta != null && (
+                <div className="flex items-baseline gap-2">
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)] w-16 shrink-0">PO Delta</span>
+                  <span className="hud-mono text-[10px] tabular-nums"
+                    style={{ color: data.playoff_delta > 0 ? "#5ee08a" : data.playoff_delta < 0 ? "#f87171" : `${teamColor}cc` }}>
+                    {data.playoff_delta > 0 ? "+" : ""}{(data.playoff_delta * 100).toFixed(1)}% xGF playoff lift
+                  </span>
+                </div>
+              )}
+              {data.former_team_boost != null && data.former_team && (
+                <div className="flex items-baseline gap-2">
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)] w-16 shrink-0">vs Ex</span>
+                  <span className="hud-mono text-[10px] tabular-nums"
+                    style={{ color: data.former_team_boost > 0 ? "#5ee08a" : `${teamColor}cc` }}>
+                    {data.former_team_boost > 0 ? "+" : ""}{(data.former_team_boost * 100).toFixed(1)}% vs {data.former_team}
+                  </span>
+                </div>
+              )}
+              {data.bayesian_uncertainty != null && (
+                <div className="flex items-baseline gap-2">
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)] w-16 shrink-0">σ Bayes</span>
+                  <span className="hud-mono text-[10px] tabular-nums" style={{ color: `${teamColor}cc` }}>
+                    ±{data.bayesian_uncertainty.toFixed(3)}
+                  </span>
+                </div>
+              )}
+              {data.archetype_name && (
+                <div className="flex items-baseline gap-2">
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)] w-16 shrink-0">Cluster</span>
+                  <span className="hud-mono text-[10px] tabular-nums truncate" style={{ color: `${teamColor}cc` }}>
+                    {data.archetype_name}{data.archetype_id != null ? ` · #${data.archetype_id}` : ""}
+                  </span>
+                </div>
+              )}
+            </div>
           </HudPanel>
         </div>
 
@@ -8647,42 +8741,17 @@ export default function PlayerProfilePage() {
             so the goalie zones tab fills the page width instead of stacking
             two narrow viz columns. Falls back to single-col when shot
             sample is too thin for the rink heatmap. */}
-        {/* Goalie Zones tab — focused on the rink-based shot-location
-            heatmap (the deep-dive view). The NET HEATMAP summary already
-            lives in the TARGET PROFILE band up top, so we don't duplicate
-            it here. Falls back to a tiny info note when shot sample is
-            too thin for a meaningful rink-zone breakdown. */}
+        {/* Goalie Zones tab — rink-based shot-location heatmap only.
+            The net-mouth heatmap lives in Save Telemetry on the Behavior
+            tab; rendering it here too is duplication. */}
         {isGoalie && telemetryTab === "zones" && (
           <div className="sm:col-span-2">
             <Card title="Shot-Location Save %" style={cardStyle}>
               {goalieShots.length >= 60 ? (
-                <div className="grid gap-4 lg:grid-cols-[1.1fr_1fr] items-start">
-                  <div className="min-w-0">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="hud-mono text-[9px] uppercase tracking-[0.22em]" style={{ color: teamColor }}>
-                        ◢ SAVE % · BY SHOT ORIGIN
-                      </span>
-                      <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                        rink-zone heatmap
-                      </span>
-                    </div>
-                    <GoalieSaveLocationMap shots={goalieShots} teamColor={teamColor} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="hud-mono text-[9px] uppercase tracking-[0.22em]" style={{ color: teamColor }}>
-                        ◢ NET-MOUTH HEATMAP
-                      </span>
-                      <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                        save % · 5-zone
-                      </span>
-                    </div>
-                    <GoalieZoneViz data={data} teamColor={teamColor} />
-                  </div>
-                </div>
+                <GoalieSaveLocationMap shots={goalieShots} teamColor={teamColor} />
               ) : (
                 <div className="py-6 text-center hud-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                  not enough shot data for the rink heatmap yet · check the TARGET PROFILE for the net-mouth view
+                  not enough shot data for the rink heatmap yet · check the Behavior tab for the net-mouth view
                 </div>
               )}
             </Card>
