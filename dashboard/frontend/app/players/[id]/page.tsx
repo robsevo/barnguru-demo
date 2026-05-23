@@ -6538,8 +6538,9 @@ export default function PlayerProfilePage() {
          the page can hide behind tabs. */}
       <div className="mt-4 grid gap-3 lg:grid-cols-12">
 
-        {/* VITALS column */}
-        <div className="lg:col-span-3 flex">
+        {/* VITALS column — bumped to 4/12 (was 3) since Decision Matrix
+            moved here from Neural Cortex. Hologram drops to 4 to match. */}
+        <div className="lg:col-span-4 flex">
           <HudPanel title="Vitals" themeColor={teamColor} scanline allCorners className="w-full flex flex-col">
             <div className="grid grid-cols-2 gap-3 place-items-center">
               {fi != null && (
@@ -6877,6 +6878,96 @@ export default function PlayerProfilePage() {
               );
             })()}
 
+            {/* DECISION MATRIX — moved here from the Neural Cortex column
+                so the Hologram + Neural Cortex panels can shrink and the
+                Vitals column fills its vertical space with more signal.
+                Bars animate in + scan-sweep just like before. */}
+            {(() => {
+              const goalieNodes: NeuralNode[] = isGoalie ? [
+                { id: "hd",   label: "HD Save",    weight: data.hdsv_pct != null ? Math.min(1, Math.max(0, (data.hdsv_pct - 0.70) / 0.20)) : 0 },
+                { id: "md",   label: "MD Save",    weight: data.mdsv_pct != null ? Math.min(1, Math.max(0, (data.mdsv_pct - 0.85) / 0.10)) : 0 },
+                { id: "ld",   label: "LD Save",    weight: data.ldsv_pct != null ? Math.min(1, Math.max(0, (data.ldsv_pct - 0.94) / 0.06)) : 0 },
+                { id: "ov",   label: "Overall",    weight: data.sv_pct   != null ? Math.min(1, Math.max(0, (data.sv_pct  - 0.880) / 0.045)) : 0 },
+                { id: "gsax", label: "GSAx",       weight: data.gsax    != null ? Math.min(1, Math.max(0, (data.gsax + 10) / 30)) : 0 },
+                { id: "vol",  label: "Workload",   weight: data.xga     != null ? Math.min(1, Math.max(0, data.xga / 80)) : 0 },
+              ] : [];
+              const matrixNodes = isGoalie ? goalieNodes : neuralNodes;
+              if (matrixNodes.length === 0 || !matrixNodes.some(n => n.weight > 0)) return null;
+              return (
+              <div className="mt-3 pt-2.5 border-t border-white/[0.06] space-y-1.5">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="hud-mono text-[9px] uppercase tracking-[0.20em] flex items-center gap-1.5"
+                    style={{ color: teamColor, textShadow: `0 0 4px ${teamColor}55` }}>
+                    <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 3px ${teamColor}` }} />
+                    ◢ DECISION MATRIX
+                  </span>
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                    weight 0 → 1
+                  </span>
+                </div>
+                {matrixNodes.slice(0, 6).map((n, i) => {
+                  const NN_TIPS: Record<string, string> = {
+                    carry:   "Probability the player carries the puck in across the offensive blue line on entries.",
+                    dump:    "Probability the player dumps + chases on zone entries instead of carrying in.",
+                    slot:    "Probability the player's next shot comes from the slot (high-danger area).",
+                    drive:   "Probability the player drives the net rather than circling back or passing out.",
+                    perim:   "Probability the player's next shot comes from the perimeter (outside the slot).",
+                    battle:  "Probability the player engages in a corner board battle in the offensive zone.",
+                    hold:    "Probability the player retains possession in a corner cycle rather than forcing a play.",
+                    hd:      "High-danger save % normalized to 0–1. League avg HDsv% ≈ 80%.",
+                    md:      "Mid-danger save % normalized to 0–1. League avg ≈ 87%.",
+                    ld:      "Low-danger save % normalized to 0–1. NHL starters typically 96%+.",
+                    ov:      "Overall save % normalized to 0–1 (range 0.880–0.925).",
+                    gsax:    "Goals Saved Above Expected — net positive saves vs an average goalie on the same shots.",
+                    vol:     "Workload index — expected goals against this goalie has faced (proxy for starter usage).",
+                  };
+                  const tip = NN_TIPS[n.id];
+                  return (
+                  <div key={n.id} className="flex items-center gap-2">
+                    <span className="hud-mono text-[9px] uppercase tracking-[0.14em] text-[var(--text-secondary)] flex items-center gap-1 w-16 shrink-0 truncate">
+                      <span className="truncate">{n.label}</span>
+                      {tip && (<span className="ml-0.5"><StatInfoTip label={n.label} tip={tip} /></span>)}
+                    </span>
+                    <div className="flex-1 h-2 rounded-sm overflow-hidden relative"
+                      style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${teamColor}22` }}>
+                      <div className="h-full" style={{
+                        width: `${Math.round(n.weight * 100)}%`,
+                        background: `linear-gradient(90deg, ${teamColor}aa 0%, ${teamColor} 100%)`,
+                        boxShadow: `0 0 8px ${teamColor}55, inset 0 0 8px ${teamColor}44`,
+                        animation: `decMatrix 900ms cubic-bezier(0.22,1,0.36,1) ${i * 70}ms backwards`,
+                        transformOrigin: "left center",
+                      }} />
+                      <div className="absolute top-0 bottom-0 w-6 pointer-events-none" style={{
+                        background: `linear-gradient(90deg, transparent, ${teamColor}aa, transparent)`,
+                        animation: `decScan 3.4s linear infinite ${i * 0.25}s`,
+                        mixBlendMode: "screen",
+                        opacity: n.weight > 0.05 ? 0.7 : 0,
+                      }} />
+                    </div>
+                    <span className="hud-mono text-[10px] tabular-nums w-10 text-right font-semibold"
+                      style={{ color: teamColor }}>
+                      {n.weight.toFixed(2)}
+                    </span>
+                  </div>
+                  );
+                })}
+                <style jsx>{`
+                  @keyframes decMatrix {
+                    from { transform: scaleX(0); opacity: 0; }
+                    to   { transform: scaleX(1); opacity: 1; }
+                  }
+                  @keyframes decScan {
+                    0%   { transform: translateX(-30px); }
+                    100% { transform: translateX(280px); }
+                  }
+                  @media (prefers-reduced-motion: reduce) {
+                    div { animation: none !important; }
+                  }
+                `}</style>
+              </div>
+              );
+            })()}
+
             {/* Status flags — pushed to bottom so the panel evenly fills */}
             {statusFlags.length > 0 && (
               <div className="mt-auto pt-3 flex flex-wrap gap-1.5">
@@ -6890,8 +6981,9 @@ export default function PlayerProfilePage() {
           </HudPanel>
         </div>
 
-        {/* HOLOGRAM column — body silhouette with Iron Man HUD */}
-        <div className="lg:col-span-5 flex">
+        {/* HOLOGRAM column — slimmer 4/12 (was 5) now that Vitals carries
+            the Decision Matrix and absorbs the extra column. */}
+        <div className="lg:col-span-4 flex">
           <HudPanel title="Hologram" subtitle={isGoalie ? "goalie scan" : "skater scan"} themeColor={teamColor} scanline allCorners className="w-full flex flex-col">
             <HologramScanner
               isGoalie={!!isGoalie}
@@ -7398,103 +7490,8 @@ export default function PlayerProfilePage() {
               />
             )}
 
-            {/* DECISION MATRIX — animated bars per NN dimension (skater + goalie) */}
-            {(() => {
-              const goalieNodes: NeuralNode[] = isGoalie ? [
-                { id: "hd",   label: "HD Save",    weight: data.hdsv_pct != null ? Math.min(1, Math.max(0, (data.hdsv_pct - 0.70) / 0.20)) : 0 },
-                { id: "md",   label: "MD Save",    weight: data.mdsv_pct != null ? Math.min(1, Math.max(0, (data.mdsv_pct - 0.85) / 0.10)) : 0 },
-                { id: "ld",   label: "LD Save",    weight: data.ldsv_pct != null ? Math.min(1, Math.max(0, (data.ldsv_pct - 0.94) / 0.06)) : 0 },
-                { id: "ov",   label: "Overall",    weight: data.sv_pct   != null ? Math.min(1, Math.max(0, (data.sv_pct  - 0.880) / 0.045)) : 0 },
-                { id: "gsax", label: "GSAx",       weight: data.gsax    != null ? Math.min(1, Math.max(0, (data.gsax + 10) / 30)) : 0 },
-                { id: "vol",  label: "Workload",   weight: data.xga     != null ? Math.min(1, Math.max(0, data.xga / 80)) : 0 },
-              ] : [];
-              const matrixNodes = isGoalie ? goalieNodes : neuralNodes;
-              if (matrixNodes.length === 0 || !matrixNodes.some(n => n.weight > 0)) return null;
-              return (
-              <div className="mt-2 pt-2 border-t border-white/[0.05] space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="hud-mono text-[9px] uppercase tracking-[0.18em]" style={{ color: teamColor }}>
-                    ▸ DECISION MATRIX
-                  </span>
-                  <span className="hud-mono text-[8px] uppercase tracking-[0.14em] text-[var(--text-muted)]">
-                    weight 0 → 1
-                  </span>
-                </div>
-                {matrixNodes.slice(0, 6).map((n, i) => {
-                  const NN_TIPS: Record<string, string> = {
-                    carry:   "Probability the player carries the puck in across the offensive blue line on entries.",
-                    dump:    "Probability the player dumps + chases on zone entries instead of carrying in.",
-                    slot:    "Probability the player's next shot comes from the slot (high-danger area).",
-                    drive:   "Probability the player drives the net rather than circling back or passing out.",
-                    perim:   "Probability the player's next shot comes from the perimeter (outside the slot).",
-                    battle:  "Probability the player engages in a corner board battle in the offensive zone.",
-                    hold:    "Probability the player retains possession in a corner cycle rather than forcing a play.",
-                    hd:      "High-danger save % normalized to 0–1. League avg HDsv% ≈ 80%.",
-                    md:      "Mid-danger save % normalized to 0–1. League avg ≈ 87%.",
-                    ld:      "Low-danger save % normalized to 0–1. NHL starters typically 96%+.",
-                    ov:      "Overall save % normalized to 0–1 (range 0.880–0.925).",
-                    gsax:    "Goals Saved Above Expected — net positive saves vs an average goalie on the same shots.",
-                    vol:     "Workload index — expected goals against this goalie has faced (proxy for starter usage).",
-                  };
-                  const tip = NN_TIPS[n.id];
-                  return (
-                  <div key={n.id} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
-                    <div className="flex items-center justify-between gap-2 sm:justify-start sm:w-16 sm:shrink-0">
-                      <span className="hud-mono text-[10px] sm:text-[9px] uppercase tracking-[0.10em] sm:tracking-[0.14em] text-[var(--text-secondary)] flex items-center gap-1 min-w-0 sm:truncate">
-                        <span className="truncate">{n.label}</span>
-                        {tip && (
-                          <span className="ml-0.5"><StatInfoTip label={n.label} tip={tip} /></span>
-                        )}
-                      </span>
-                      <span className="sm:hidden hud-mono text-[11px] tabular-nums font-semibold shrink-0" style={{ color: teamColor }}>
-                        {n.weight.toFixed(2)}
-                      </span>
-                    </div>
-                    <div className="flex-1 h-2 rounded-sm overflow-hidden relative"
-                      style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${teamColor}22` }}>
-                      <div
-                        className="h-full"
-                        style={{
-                          width: `${Math.round(n.weight * 100)}%`,
-                          background: `linear-gradient(90deg, ${teamColor}aa 0%, ${teamColor} 100%)`,
-                          boxShadow: `0 0 8px ${teamColor}55, inset 0 0 8px ${teamColor}44`,
-                          animation: `decMatrix 900ms cubic-bezier(0.22,1,0.36,1) ${i * 70}ms backwards`,
-                          transformOrigin: "left center",
-                        }}
-                      />
-                      {/* Sweeping scan line — continuous, makes the bar "live" */}
-                      <div
-                        className="absolute top-0 bottom-0 w-6 pointer-events-none"
-                        style={{
-                          background: `linear-gradient(90deg, transparent, ${teamColor}aa, transparent)`,
-                          animation: `decScan 3.4s linear infinite ${i * 0.25}s`,
-                          mixBlendMode: "screen",
-                          opacity: n.weight > 0.05 ? 0.7 : 0,
-                        }}
-                      />
-                    </div>
-                    <span className="hidden sm:inline hud-mono text-[10px] tabular-nums w-10 text-right font-semibold" style={{ color: teamColor }}>
-                      {n.weight.toFixed(2)}
-                    </span>
-                  </div>
-                  );
-                })}
-                <style jsx>{`
-                  @keyframes decMatrix {
-                    from { transform: scaleX(0); opacity: 0; }
-                    to   { transform: scaleX(1); opacity: 1; }
-                  }
-                  @keyframes decScan {
-                    0%   { transform: translateX(-30px); }
-                    100% { transform: translateX(280px); }
-                  }
-                  @media (prefers-reduced-motion: reduce) {
-                    div { animation: none !important; }
-                  }
-                `}</style>
-              </div>
-              );
-            })()}
+            {/* Decision Matrix moved to the Vitals column to compact the
+                Neural Cortex panel. See the Vitals block above. */}
 
             {/* Quick neural readouts */}
             <div className="mt-3 pt-2 border-t border-white/[0.05] grid grid-cols-2 gap-2 text-center">
@@ -7864,9 +7861,14 @@ export default function PlayerProfilePage() {
           </Card>
         )}
 
-        {/* Section header — Special Teams group */}
-        {!isGoalie && telemetryTab === "advanced" && (data.special_teams_pp != null || data.special_teams_pk != null) && (
-          <SectionHeader title="Special Teams" subtitle="PP + PK impact" teamColor={teamColor} />
+        {/* Section header — Special Teams + Context grouped under one
+            header so the two cards land side-by-side in the 2-col grid
+            below instead of stacking one on top of the other. */}
+        {!isGoalie && telemetryTab === "advanced" && (
+          (data.special_teams_pp != null || data.special_teams_pk != null) ||
+          (data.playoff_delta != null || data.former_team_boost != null || data.bayesian_rating != null)
+        ) && (
+          <SectionHeader title="Special Teams + Context" subtitle="PP · PK · playoffs · priors" teamColor={teamColor} />
         )}
 
         {/* Special Teams */}
@@ -7952,10 +7954,8 @@ export default function PlayerProfilePage() {
           </Card>
         )}
 
-        {/* Section header — context block */}
-        {!isGoalie && telemetryTab === "advanced" && (data.playoff_delta != null || data.former_team_boost != null || data.bayesian_rating != null) && (
-          <SectionHeader title="Context" subtitle="playoffs · transitions · priors" teamColor={teamColor} />
-        )}
+        {/* Context SectionHeader retired — Special Teams + Context now
+            share a single header above (cards sit side-by-side). */}
 
         {/* Playoff & Context */}
         {!isGoalie && telemetryTab === "advanced" && (data.playoff_delta != null || data.former_team_boost != null || data.bayesian_rating != null) && (

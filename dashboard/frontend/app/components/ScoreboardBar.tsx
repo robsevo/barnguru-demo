@@ -262,22 +262,30 @@ function GameCard({ g }: { g: Game }) {
   const gcBorder = isLive ? "rgba(74,222,128,0.45)" : isFinal ? "rgba(248,113,113,0.45)" : "rgba(251,191,36,0.45)";
 
   // HUD-styled cards — corner brackets via ::before/::after (hud-panel--all-corners helper)
-  // No corner brackets on game cards — they read cleaner without
+  // No corner brackets on game cards — they read cleaner without.
+  // Pre-game (!live && !isFinal) uses the active TEAM theme vars instead of
+  // hardcoded amber/yellow so the strip tints with whatever theme is set
+  // (CAR red, COL maroon, etc.) — only Live (green) + Final (white) stay
+  // status-coloured because those are universal states.
   const cardCls = live
     ? "rounded-md cursor-pointer active:scale-[0.97] transition-all duration-150 hover:shadow-[0_0_24px_rgba(74,222,128,0.35)]"
     : isFinal
     ? "rounded-md cursor-pointer active:scale-[0.97] transition-all duration-150 hover:opacity-90"
-    : "rounded-md cursor-pointer active:scale-[0.97] transition-all duration-150 hover:shadow-[0_0_18px_rgba(251,191,36,0.25)]";
+    : "rounded-md cursor-pointer active:scale-[0.97] transition-all duration-150 hover:shadow-[0_0_18px_rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.25)]";
 
   const cardStyle: React.CSSProperties = {
     background: live
       ? "linear-gradient(180deg, rgba(74,222,128,0.10) 0%, rgba(var(--card-base-r),var(--card-base-g),var(--card-base-b),0.95) 30%, rgba(var(--card-mid-r),var(--card-mid-g),var(--card-mid-b),0.99) 100%)"
       : "linear-gradient(180deg, rgba(220,228,240,0.04) 0%, rgba(var(--card-base-r),var(--card-base-g),var(--card-base-b),0.95) 30%, rgba(var(--card-mid-r),var(--card-mid-g),var(--card-mid-b),0.99) 100%)",
-    border: `1px solid ${live ? "rgba(74,222,128,0.30)" : isFinal ? "rgba(255,255,255,0.08)" : "rgba(251,191,36,0.25)"}`,
+    border: `1px solid ${live ? "rgba(74,222,128,0.30)" : isFinal ? "rgba(255,255,255,0.08)" : "rgba(var(--brand-r),var(--brand-g),var(--brand-b),0.30)"}`,
     boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -1px 0 rgba(0,0,0,0.40), 0 2px 8px rgba(0,0,0,0.50)",
   };
 
-  const cardThemeColor = live ? "#4ade80" : isFinal ? "#f87171" : "#fbbf24";
+  const cardThemeColor = live
+    ? "#4ade80"
+    : isFinal
+    ? "#f87171"
+    : "rgb(var(--brand-r), var(--brand-g), var(--brand-b))";
 
   const homeClr = TEAM_COLORS[g.home_team] ?? "#C9A84C";
   const awayClr = TEAM_COLORS[g.away_team] ?? "#94a3b8";
