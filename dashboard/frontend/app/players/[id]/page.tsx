@@ -2831,83 +2831,177 @@ function EdgeMetricsCard({ data, teamColor }: { data: ProfileData; teamColor: st
   );
 }
 
-function IceTimeByZoneBars({ data }: { data: ProfileData }) {
+/**
+ * IceTimeByZoneBars — a single 100% horizontal bar split into three glowing
+ * chambers (OZ · NZ · DZ). Reads like a HUD power-distribution meter, not a
+ * stack of progress bars. Each chamber has its own colour glow, animated
+ * fill on mount, a sweeping scan band, and a floating value chip. Pulse
+ * dot in the header + corner reticles + dashed centerline tick so it sits
+ * cleanly under the 3D rink without competing for attention.
+ */
+function IceTimeByZoneBars({ data, teamColor = "var(--brand-hex)" }: { data: ProfileData; teamColor?: string }) {
   const oz = data.skating_zone_time_oz_pct ?? 0;
   const dz = data.skating_zone_time_dz_pct ?? 0;
   const nz = Math.max(0, 100 - oz - dz);
 
-  const bars = [
-    { label: "OZ", pct: oz, color: "#4ade80", tip: "Offensive zone" },
-    { label: "NZ", pct: nz, color: "#fbbf24", tip: "Neutral zone" },
-    { label: "DZ", pct: dz, color: "#f87171", tip: "Defensive zone" },
+  // Determine the dominant chamber so we can give it the pulse halo.
+  const seg = [
+    { id: "OZ", pct: oz, color: "#4ade80", tip: "Offensive zone — time spent in the attacking end" },
+    { id: "NZ", pct: nz, color: "#fbbf24", tip: "Neutral zone — between the blue lines" },
+    { id: "DZ", pct: dz, color: "#f87171", tip: "Defensive zone — time in your own end" },
   ];
+  const dominant = seg.reduce((a, b) => (b.pct > a.pct ? b : a)).id;
 
   return (
-    <div className="w-full flex flex-col gap-2.5 px-1">
-      <div className="flex items-center justify-between mb-1">
-        <span className="hud-mono text-[9px] uppercase tracking-[0.22em] text-[var(--text-secondary)]">
-          ◢ ICE TIME · ZONES
+    <div className="relative w-full rounded border px-3 pt-2.5 pb-3 overflow-hidden"
+      style={{
+        borderColor: `${teamColor}33`,
+        background: "linear-gradient(180deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.32) 100%)",
+        boxShadow: `0 0 12px ${teamColor}1a, inset 0 0 18px rgba(0,0,0,0.4)`,
+      }}>
+      {/* Corner reticles */}
+      <span className="absolute top-1 left-1 w-2.5 h-2.5 pointer-events-none" style={{ borderLeft: `1px solid ${teamColor}88`, borderTop: `1px solid ${teamColor}88` }} />
+      <span className="absolute top-1 right-1 w-2.5 h-2.5 pointer-events-none" style={{ borderRight: `1px solid ${teamColor}88`, borderTop: `1px solid ${teamColor}88` }} />
+      <span className="absolute bottom-1 left-1 w-2.5 h-2.5 pointer-events-none" style={{ borderLeft: `1px solid ${teamColor}88`, borderBottom: `1px solid ${teamColor}88` }} />
+      <span className="absolute bottom-1 right-1 w-2.5 h-2.5 pointer-events-none" style={{ borderRight: `1px solid ${teamColor}88`, borderBottom: `1px solid ${teamColor}88` }} />
+
+      {/* Header strip */}
+      <div className="flex items-center justify-between mb-2 px-0.5">
+        <span className="hud-mono text-[9px] uppercase tracking-[0.22em] flex items-center gap-1.5"
+          style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}55` }}>
+          <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 4px ${teamColor}` }} />
+          ◢ ICE TIME · ZONE DEPLOYMENT
         </span>
         <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-          % SHIFT
+          % shift · 60Hz
         </span>
       </div>
-      {bars.map((b, idx) => (
-        <div key={b.label} className="flex items-center gap-2 group" title={b.tip}>
-          <span className="hud-mono text-[10px] uppercase tracking-[0.18em] w-7 shrink-0" style={{ color: b.color }}>
-            {b.label}
-          </span>
-          <div
-            className="relative flex-1 h-2.5 overflow-hidden rounded-sm"
-            style={{
-              background: "rgba(255,255,255,0.04)",
-              border: `1px solid ${b.color}22`,
-            }}
-          >
-            {/* Animated bar fill */}
-            <div
-              className="h-full"
+
+      {/* Single 100% segmented bar — flex children sized by zone %. Each
+          chamber owns its own glow + fill animation. Dominant chamber gets
+          a pulsing halo so the dashboard reads at a glance. */}
+      <div className="relative h-9 flex items-stretch rounded-sm overflow-hidden"
+        style={{
+          background: "rgba(255,255,255,0.025)",
+          border: `1px solid ${teamColor}33`,
+          boxShadow: `inset 0 0 12px rgba(0,0,0,0.45)`,
+        }}>
+        {seg.map((s, i) => {
+          const pulse = s.id === dominant && s.pct >= 25;
+          return (
+            <div key={s.id}
+              className="relative h-full flex items-center justify-center group cursor-help"
+              title={`${s.tip} — ${s.pct.toFixed(1)}%`}
               style={{
-                width: `${b.pct}%`,
-                background: `linear-gradient(90deg, ${b.color}aa 0%, ${b.color} 100%)`,
-                boxShadow: `0 0 8px ${b.color}55, inset 0 0 8px ${b.color}44`,
+                width: `${s.pct}%`,
                 transformOrigin: "left center",
-                animation: `iceBarFill 900ms cubic-bezier(0.22,1,0.36,1) ${idx * 100}ms both`,
-              }}
-            />
-            {/* Sweeping scan-line */}
-            <div
-              className="absolute top-0 bottom-0 w-6 pointer-events-none"
-              style={{
-                background: `linear-gradient(90deg, transparent, ${b.color}aa, transparent)`,
-                animation: `iceBarScan 3.6s linear infinite ${idx * 0.4}s`,
-                mixBlendMode: "screen",
-                opacity: b.pct > 5 ? 0.7 : 0,
-              }}
-            />
-            {/* Tick marks at 25/50/75 */}
-            <div className="absolute inset-0 flex justify-between px-[25%] pointer-events-none">
-              <span className="w-px h-full" style={{ background: "rgba(255,255,255,0.08)" }} />
-              <span className="w-px h-full" style={{ background: "rgba(255,255,255,0.12)" }} />
-              <span className="w-px h-full" style={{ background: "rgba(255,255,255,0.08)" }} />
+                animation: `iceSegIn 900ms cubic-bezier(0.22,1,0.36,1) ${i * 110}ms both`,
+              }}>
+              {/* Chamber fill — gradient + inner glow */}
+              <div className="absolute inset-0"
+                style={{
+                  background: `linear-gradient(180deg, ${s.color}66 0%, ${s.color}aa 50%, ${s.color}77 100%)`,
+                  boxShadow: `inset 0 0 12px ${s.color}55, 0 0 14px ${s.color}33`,
+                }} />
+              {/* Sweep scan band — per-chamber so the eye reads it as live */}
+              <div className="absolute top-0 bottom-0 w-8 pointer-events-none"
+                style={{
+                  background: `linear-gradient(90deg, transparent, ${s.color}, transparent)`,
+                  mixBlendMode: "screen",
+                  opacity: s.pct > 5 ? 0.55 : 0,
+                  animation: `iceSegScan ${3.6 + i * 0.4}s linear infinite ${i * 0.5}s`,
+                }} />
+              {/* Diagonal scanline pattern for sensor-deck texture */}
+              <div className="absolute inset-0 pointer-events-none"
+                style={{
+                  background: `repeating-linear-gradient(45deg, transparent 0px, transparent 4px, ${s.color}1a 4px, ${s.color}1a 5px)`,
+                  opacity: 0.4,
+                }} />
+              {/* Dominant-chamber pulse halo */}
+              {pulse && (
+                <div className="absolute inset-0 pointer-events-none"
+                  style={{
+                    boxShadow: `inset 0 0 20px ${s.color}aa, 0 0 18px ${s.color}66`,
+                    animation: "iceSegPulse 2.6s ease-in-out infinite",
+                  }} />
+              )}
+              {/* Value label — only show when chamber is wide enough */}
+              {s.pct >= 8 && (
+                <div className="relative z-10 flex flex-col items-center leading-none"
+                  style={{
+                    textShadow: `0 0 6px ${s.color}, 0 0 2px rgba(0,0,0,0.9)`,
+                    animation: `iceSegLabelIn 700ms ease-out ${i * 110 + 300}ms both`,
+                  }}>
+                  <span className="hud-mono text-[10px] font-semibold tabular-nums" style={{ color: "rgba(255,255,255,0.96)" }}>
+                    {s.pct.toFixed(0)}%
+                  </span>
+                  <span className="hud-mono text-[7px] uppercase tracking-[0.20em]" style={{ color: "rgba(255,255,255,0.85)" }}>
+                    {s.id}
+                  </span>
+                </div>
+              )}
+              {/* Right-edge divider — bright vertical line between chambers */}
+              {i < seg.length - 1 && (
+                <span className="absolute right-0 top-0 bottom-0 w-px pointer-events-none z-20"
+                  style={{
+                    background: `linear-gradient(180deg, transparent 0%, ${teamColor}cc 30%, ${teamColor}cc 70%, transparent 100%)`,
+                    boxShadow: `0 0 4px ${teamColor}`,
+                  }} />
+              )}
             </div>
-          </div>
-          <span className="hud-mono text-[11px] tabular-nums font-semibold w-10 text-right shrink-0" style={{ color: b.color }}>
-            {b.pct.toFixed(0)}%
-          </span>
-        </div>
-      ))}
+          );
+        })}
+
+        {/* Top + bottom rails — slim accent lines so the bar reads as a
+            framed sensor strip, not a raw progress bar. */}
+        <span className="absolute top-0 left-0 right-0 h-px pointer-events-none"
+          style={{ background: `linear-gradient(90deg, transparent, ${teamColor}aa, transparent)` }} />
+        <span className="absolute bottom-0 left-0 right-0 h-px pointer-events-none"
+          style={{ background: `linear-gradient(90deg, transparent, ${teamColor}aa, transparent)` }} />
+      </div>
+
+      {/* Legend pips below the bar — small dots with deltas vs 33%
+          (perfectly balanced ice time = each zone 33%). Tells Bob "this
+          player is +14pp tilted to the OZ" at a glance. */}
+      <div className="flex items-center justify-between mt-2.5 px-0.5">
+        {seg.map((s) => {
+          const delta = s.pct - 33.3;
+          const sign = delta > 0 ? "+" : "";
+          return (
+            <div key={`leg-${s.id}`} className="flex items-center gap-1.5">
+              <span className="inline-block w-2 h-2 rounded-full"
+                style={{ background: s.color, boxShadow: `0 0 5px ${s.color}` }} />
+              <span className="hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: `${s.color}cc` }}>
+                {s.id}
+              </span>
+              <span className="hud-mono text-[8px] uppercase tracking-[0.18em] tabular-nums"
+                style={{ color: Math.abs(delta) < 2 ? "rgba(255,255,255,0.35)" : delta > 0 ? "#5ee08a" : "#f87b7b" }}>
+                {sign}{delta.toFixed(1)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
       <style jsx>{`
-        @keyframes iceBarFill {
-          from { transform: scaleX(0); opacity: 0; }
-          to   { transform: scaleX(1); opacity: 1; }
+        @keyframes iceSegIn {
+          from { transform: scaleX(0.05); opacity: 0; }
+          to   { transform: scaleX(1);    opacity: 1; }
         }
-        @keyframes iceBarScan {
-          0%   { transform: translateX(-30px); }
-          100% { transform: translateX(420px); }
+        @keyframes iceSegLabelIn {
+          from { opacity: 0; transform: translateY(2px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes iceSegScan {
+          0%   { transform: translateX(-40px); }
+          100% { transform: translateX(800px); }
+        }
+        @keyframes iceSegPulse {
+          0%, 100% { opacity: 0.55; }
+          50%      { opacity: 1;    }
         }
         @media (prefers-reduced-motion: reduce) {
-          div { animation: none !important; }
+          div, span { animation: none !important; }
         }
       `}</style>
     </div>
@@ -6523,33 +6617,28 @@ export default function PlayerProfilePage() {
           </div>
         )}
 
-        {/* ── Zone Tendencies — 3D rink LEFT, ICE TIME + EDGE METRICS
-            stacked on the RIGHT so the card actually fills the page width
-            instead of stranding narrow columns in the middle. */}
+        {/* ── Zone Tendencies — 3D rink fills the full width on top, ICE
+            TIME deployment bar full-width underneath so it reads as a
+            HUD instrument strip rather than a tucked-away sidebar. */}
         {!isGoalie && telemetryTab === "zones" && (
           <div className="sm:col-span-2">
             <Card title="Zone Tendencies" style={cardStyle}>
-              <div className="grid gap-3 lg:grid-cols-[1.35fr_1fr] items-start">
-                {/* LEFT — 3D rink with 2D fallback. Fills the column.
-                    No external header strip — Zone3D ships its own 2D
-                    toggle in the top-left corner and any label here would
-                    collide with it. The Card title "Zone Tendencies"
-                    already names the section. */}
-                <div className="min-w-0">
+              <div className="flex flex-col gap-3 w-full">
+                {/* TOP — 3D rink with 2D fallback (Zone3D ships its own
+                    2D toggle so we don't add an external header). */}
+                <div className="w-full min-w-0">
                   {data.nn_shoot_slot_pct != null ? (
-                    <>
-                      <Zone3D
-                        activations={{
-                          slot:    data.nn_shoot_slot_pct ?? 0,
-                          perim:   data.nn_shoot_perimeter_pct ?? 0,
-                          net:     data.nn_drive_net_pct ?? 0,
-                          cornerL: data.nn_battle_corner_pct ?? 0,
-                          cornerR: data.nn_hold_corner_pct ?? 0,
-                        }}
-                        themeColor={teamColor}
-                        fallback={<ZoneTendencyMap data={data} teamColor={teamColor} />}
-                      />
-                    </>
+                    <Zone3D
+                      activations={{
+                        slot:    data.nn_shoot_slot_pct ?? 0,
+                        perim:   data.nn_shoot_perimeter_pct ?? 0,
+                        net:     data.nn_drive_net_pct ?? 0,
+                        cornerL: data.nn_battle_corner_pct ?? 0,
+                        cornerR: data.nn_hold_corner_pct ?? 0,
+                      }}
+                      themeColor={teamColor}
+                      fallback={<ZoneTendencyMap data={data} teamColor={teamColor} />}
+                    />
                   ) : (
                     <div className="flex flex-col items-center justify-center py-10 gap-1.5">
                       <p className="hud-mono text-[9px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Model not yet trained</p>
@@ -6557,17 +6646,11 @@ export default function PlayerProfilePage() {
                   )}
                 </div>
 
-                {/* RIGHT — telemetry stack. ICE TIME bars on top, EDGE
-                    METRICS underneath. Both fill the column (no max-w). */}
-                <div className="min-w-0 space-y-3">
-                  {data.skating_zone_time_oz_pct != null && (
-                    <div className="w-full">
-                      <IceTimeByZoneBars data={data} />
-                    </div>
-                  )}
-                  {/* EDGE METRICS lives in the TARGET PROFILE band up top
-                      now — keeping it here too was just duplication. */}
-                </div>
+                {/* BOTTOM — ICE TIME deployment bar (single full-width
+                    segmented HUD strip). */}
+                {data.skating_zone_time_oz_pct != null && (
+                  <IceTimeByZoneBars data={data} teamColor={teamColor} />
+                )}
               </div>
             </Card>
           </div>
