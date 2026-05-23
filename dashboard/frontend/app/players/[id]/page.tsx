@@ -5940,7 +5940,7 @@ export default function PlayerProfilePage() {
               <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 4px ${teamColor}` }} />
               <span className="hud-mono text-[9px] uppercase tracking-[0.24em] font-semibold"
                 style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}55` }}>
-                ▌ TELEMETRY
+                ▌ DASHBOARD
               </span>
             </div>
             {/* Rail layout — mirrors ScoreboardBar exactly: arrows are
