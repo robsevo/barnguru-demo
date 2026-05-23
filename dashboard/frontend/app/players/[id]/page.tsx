@@ -666,7 +666,7 @@ function Card({ title, icon, children, className = "", style }: {
   // pack tighter on dense tabs. Each Card boots in via jarvis-boot +
   // jarvis-shimmer so the page actually feels alive on tab switch.
   return (
-    <div className={`hud-panel hud-panel--all-corners jarvis-boot jarvis-shimmer relative overflow-hidden ${className}`} style={style}>
+    <div className={`hud-panel hud-panel--all-corners jarvis-boot jarvis-shimmer hud-interactive relative overflow-hidden ${className}`} style={style}>
       <span className="hud-panel__corner-tr" />
       <span className="hud-panel__corner-bl" />
       <div className="hud-scan" aria-hidden />
@@ -5283,6 +5283,9 @@ export default function PlayerProfilePage() {
   // landing view on every player.
   type TelemetryTab = "overview" | "shot-map" | "zones" | "fatigue" | "advanced" | "neural";
   const [telemetryTab, setTelemetryTab] = useState<TelemetryTab>("overview");
+  // Ref for the mobile telemetry rail — used by the left/right scroll
+  // buttons below the rail to programmatically scroll the nav.
+  const railRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     fetch("/api/phase2/players")
@@ -5807,17 +5810,17 @@ export default function PlayerProfilePage() {
             is split below; rail row uses col-span to span both grid
             columns on mobile, and on lg+ collapses to column 1. */}
         <aside className="order-2 lg:order-none lg:col-start-1 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-3 self-start z-20 mb-2 lg:mb-0 lg:max-h-[calc(100vh-1rem)] lg:overflow-y-auto">
-          {/* overflow-hidden on lg+ only — on mobile we need the inner
-              nav's horizontal scroll to actually scroll. */}
-          <div className="hud-panel hud-panel--all-corners jarvis-boot jarvis-shimmer relative lg:overflow-hidden"
+          {/* Outer wrapper — PLAIN div, NO .hud-panel class. The .hud-panel
+              class has `overflow: hidden` baked in (globals.css line 347)
+              which kills the inner nav's overflow-x-auto. Style the chrome
+              inline so we keep the HUD look without the overflow trap. */}
+          <div className="jarvis-boot relative rounded-md border lg:overflow-hidden"
             style={{
               ["--hud-corner" as string]: teamColor,
+              borderColor: `${teamColor}3a`,
               background: "linear-gradient(180deg, rgba(0,0,0,0.62), rgba(0,0,0,0.40))",
-              boxShadow: `0 0 14px ${teamColor}1a, inset 0 0 18px rgba(0,0,0,0.45)`,
+              boxShadow: `0 0 14px ${teamColor}1a, 0 4px 18px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.06)`,
             }}>
-            <span className="hud-panel__corner-tr" />
-            <span className="hud-panel__corner-bl" />
-            <div className="hud-scan" aria-hidden />
             {/* Header — hidden on mobile to keep the strip thin. */}
             <div className="hidden lg:flex items-center gap-2 px-3 py-2 border-b"
               style={{ borderColor: `${teamColor}22` }}>
@@ -5827,42 +5830,39 @@ export default function PlayerProfilePage() {
                 ▌ TELEMETRY
               </span>
             </div>
+            {/* Scroll-rail wrapper — relative so chevron buttons + edge
+                fades can absolute-position over the nav. */}
             <div className="relative">
-              {/* Scroll hint arrows + fade gradients — mobile only. Tells
-                  the user there's more nav off-screen. The right arrow
-                  hides once the user scrolls to the end; left arrow
-                  hides at the start. Pure CSS hint here (no JS), so the
-                  hint is always-on for small viewports where the strip
-                  overflows — good enough for first-impression UX. */}
-              <span aria-hidden
-                className="lg:hidden absolute left-0 top-0 bottom-0 w-8 pointer-events-none z-[5]"
+              {/* Mobile-only left/right scroll buttons. JS-driven so they
+                  actually scroll the nav by 140px per tap. Hidden on lg+. */}
+              <button
+                type="button"
+                aria-label="Scroll left"
+                onClick={() => railRef.current?.scrollBy({ left: -140, behavior: "smooth" })}
+                className="lg:hidden absolute left-0 top-0 bottom-0 z-[6] flex items-center justify-center w-7 active:scale-95 transition-transform"
                 style={{
-                  background: "linear-gradient(90deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0) 100%)",
-                }} />
-              <span aria-hidden
-                className="lg:hidden absolute right-0 top-0 bottom-0 w-8 pointer-events-none z-[5]"
-                style={{
-                  background: "linear-gradient(270deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0) 100%)",
-                }} />
-              <span aria-hidden
-                className="lg:hidden absolute left-0.5 top-1/2 -translate-y-1/2 z-[6] hud-mono text-[12px] pointer-events-none"
-                style={{
+                  background: "linear-gradient(90deg, rgba(0,0,0,0.92) 30%, rgba(0,0,0,0) 100%)",
                   color: teamColor,
-                  textShadow: `0 0 4px ${teamColor}`,
-                  animation: "railChevL 1.8s ease-in-out infinite",
+                  textShadow: `0 0 5px ${teamColor}`,
                 }}>
-                ◂
-              </span>
-              <span aria-hidden
-                className="lg:hidden absolute right-0.5 top-1/2 -translate-y-1/2 z-[6] hud-mono text-[12px] pointer-events-none"
+                <span className="hud-mono text-[14px] font-bold">◂</span>
+              </button>
+              <button
+                type="button"
+                aria-label="Scroll right"
+                onClick={() => railRef.current?.scrollBy({ left: 140, behavior: "smooth" })}
+                className="lg:hidden absolute right-0 top-0 bottom-0 z-[6] flex items-center justify-center w-7 active:scale-95 transition-transform"
                 style={{
+                  background: "linear-gradient(270deg, rgba(0,0,0,0.92) 30%, rgba(0,0,0,0) 100%)",
                   color: teamColor,
-                  textShadow: `0 0 4px ${teamColor}`,
+                  textShadow: `0 0 5px ${teamColor}`,
                   animation: "railChevR 1.8s ease-in-out infinite",
                 }}>
-                ▸
-              </span>
-              <nav className="flex lg:flex-col p-1 lg:p-1.5 gap-1 overflow-x-auto lg:overflow-visible"
+                <span className="hud-mono text-[14px] font-bold">▸</span>
+              </button>
+              <nav
+                ref={railRef}
+                className="flex lg:flex-col p-1 lg:p-1.5 gap-1 overflow-x-auto lg:overflow-visible px-7 lg:px-1.5"
                 style={{
                   scrollbarWidth: "none",
                   WebkitOverflowScrolling: "touch",

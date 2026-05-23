@@ -595,6 +595,48 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   animation: jarvisBoot 480ms cubic-bezier(0.22, 1, 0.36, 1) 1 both;
 }
 
+/* HUD interactive — press / hover feedback for any container the user can
+   click or that should feel reactive (game tiles, KPI cards, nav pills).
+   Apply via `.hud-interactive`. Hover lifts the card 2px with a brighter
+   team-color glow, active state pushes it 1px in for a tactile click feel.
+   Pointer-coarse devices use :active only since :hover lingers. */
+.hud-interactive {
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1),
+              filter 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform, box-shadow;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .hud-interactive:hover {
+    transform: translateY(-2px);
+    box-shadow:
+      0 10px 30px rgba(0,0,0,0.55),
+      0 4px 10px rgba(0,0,0,0.40),
+      0 0 22px rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.30),
+      inset 0 1px 0 rgba(255,255,255,0.10);
+    filter: brightness(1.06);
+  }
+}
+.hud-interactive:active {
+  transform: translateY(0) scale(0.985);
+  box-shadow:
+    0 2px 8px rgba(0,0,0,0.60),
+    inset 0 0 12px rgba(0,0,0,0.35),
+    0 0 14px rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.45);
+  filter: brightness(0.95);
+  transition-duration: 80ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hud-interactive,
+  .hud-interactive:hover,
+  .hud-interactive:active {
+    transition: none;
+    transform: none;
+    filter: none;
+  }
+}
+
 /* Route-transition wrapper — every page navigation re-mounts this and the
    children fade up + sweep. Cheap to GPU, respects reduced-motion. */
 @keyframes routeTransition {

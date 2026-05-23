@@ -355,7 +355,7 @@ function GameCard({ g }: { g: Game }) {
   const rightClr = rightIsSeries ? "text-[#C9A84C]/75" : countdownClr;
 
   return (
-    <Link href={`/game/${g.game_id}`} className="block shrink-0 w-[140px]">
+    <Link href={`/game/${g.game_id}`} className="block shrink-0 w-[140px] hud-interactive">
     <div className={`relative group flex flex-col justify-center gap-1 px-2 py-1.5 w-full ${cardCls}`}
       style={cardStyle}>
       {row(g.away_team, g.away_score, awayWins, false)}
