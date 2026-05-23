@@ -4602,7 +4602,8 @@ export default function PlayerProfilePage() {
   // Tab state for the bottom telemetry strip — MUST be declared before any
   // early returns (loading / not-found) so it runs in the same hook order
   // on every render. Rules of Hooks.
-  type TelemetryTab = "shot-map" | "zones" | "games" | "special-teams" | "fatigue" | "advanced" | "neural";
+  // games + special-teams folded into advanced; not in the union anymore.
+  type TelemetryTab = "shot-map" | "zones" | "fatigue" | "advanced" | "neural";
   const [telemetryTab, setTelemetryTab] = useState<TelemetryTab>("neural");
 
   useEffect(() => {
@@ -4984,22 +4985,24 @@ export default function PlayerProfilePage() {
   })();
 
   // telemetryTab state is declared above (before the early-return guards).
+  // Tab bar — consolidated. "Neural" tab renamed to "Behavior" so it
+  // doesn't collide with the Neural Cortex hero panel. "Recent" tab dropped
+  // entirely (just a game log); "Special" tab folded into "Advanced"
+  // because it only carried 2 stats.
   const telemetryTabs: HudTab[] = isGoalie
     ? [
-        { id: "neural",   label: "Neural" },
+        { id: "neural",   label: "Behavior" },
         { id: "shot-map", label: "Shots Against" },
         { id: "zones",    label: "Zones" },
-        { id: "games",    label: "Recent" },
         { id: "fatigue",  label: "Fatigue" },
+        { id: "advanced", label: "Advanced" },
       ]
     : [
-        { id: "neural",        label: "Neural" },
-        { id: "shot-map",      label: "Shot Map" },
-        { id: "zones",         label: "Zones" },
-        { id: "games",         label: "Recent" },
-        { id: "special-teams", label: "Special" },
-        { id: "fatigue",       label: "Fatigue" },
-        { id: "advanced",      label: "Advanced" },
+        { id: "neural",   label: "Behavior" },
+        { id: "shot-map", label: "Shot Map" },
+        { id: "zones",    label: "Zones" },
+        { id: "fatigue",  label: "Fatigue" },
+        { id: "advanced", label: "Advanced" },
       ];
 
   // Map ProfileData shots → Shot3D shot type for the 3D rink
@@ -5509,13 +5512,50 @@ export default function PlayerProfilePage() {
 
           if (rows.length === 0) return null;
           return (
-            <div className="border-t px-5 py-4 space-y-1.5" style={{ borderColor: `${teamColor}12` }}>
-              {rows.map(([label, value]) => (
-                <div key={label} className="flex items-baseline gap-2">
-                  <span className="text-[11px] text-white/30 w-24 shrink-0">{label}:</span>
-                  <span className="text-[13px] font-medium text-white/75">{value}</span>
+            <div className="border-t" style={{ borderColor: `${teamColor}12` }}>
+              {/* Bio rows LEFT, Attribute Radar RIGHT — the radar lives in
+                  the TARGET PROFILE header next to the picture/bio so the
+                  player's signature is the first graph you see, not buried
+                  on a tab three scrolls down. */}
+              <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] gap-4 px-5 py-4">
+                <div className="space-y-1.5 min-w-0">
+                  {rows.map(([label, value]) => (
+                    <div key={label} className="flex items-baseline gap-2">
+                      <span className="text-[11px] text-white/30 w-24 shrink-0">{label}:</span>
+                      <span className="text-[13px] font-medium text-white/75">{value}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
+                <div className="relative min-w-0 rounded border px-2 py-2 overflow-hidden flex flex-col items-center"
+                  style={{
+                    borderColor: `${teamColor}33`,
+                    background: "linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0.32))",
+                    boxShadow: `0 0 12px ${teamColor}14, inset 0 0 18px rgba(0,0,0,0.4)`,
+                  }}>
+                  {/* Lock-on corner cross-hairs around the radar */}
+                  <div className="absolute top-1 left-1 w-3 h-3 pointer-events-none" style={{ borderLeft: `1px solid ${teamColor}aa`, borderTop: `1px solid ${teamColor}aa` }} />
+                  <div className="absolute top-1 right-1 w-3 h-3 pointer-events-none" style={{ borderRight: `1px solid ${teamColor}aa`, borderTop: `1px solid ${teamColor}aa` }} />
+                  <div className="absolute bottom-1 left-1 w-3 h-3 pointer-events-none" style={{ borderLeft: `1px solid ${teamColor}aa`, borderBottom: `1px solid ${teamColor}aa` }} />
+                  <div className="absolute bottom-1 right-1 w-3 h-3 pointer-events-none" style={{ borderRight: `1px solid ${teamColor}aa`, borderBottom: `1px solid ${teamColor}aa` }} />
+                  <div className="flex items-center justify-between w-full px-1 mb-1">
+                    <span className="hud-mono text-[9px] uppercase tracking-[0.22em] flex items-center gap-1.5"
+                      style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}55` }}>
+                      <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 4px ${teamColor}` }} />
+                      ⌖ {isGoalie ? "GOALIE SCAN" : "BIOMETRIC SCAN"}
+                    </span>
+                    <span className="hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: `${teamColor}99` }}>
+                      target locked
+                    </span>
+                  </div>
+                  <div className="w-full overflow-hidden flex justify-center">
+                    {isGoalie ? (
+                      <GoalieRadarChart data={data} teamColor={teamColor} nhlSvPct={nhlStats?.sv_pct} nhlGaa={nhlStats?.gaa} />
+                    ) : (
+                      <PlayerRadarChart data={data} teamColor={teamColor} />
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           );
         })()}
@@ -6332,77 +6372,34 @@ export default function PlayerProfilePage() {
           return <KpiBand tiles={tiles} teamColor={teamColor} />;
         })()}
 
-        {/* TARGET PROFILE — promotes the Attribute Radar + EDGE telemetry
-            UP the page so it's visible without scrolling. Sits between KPI
-            and Ratings. LEFT = Radar (skater or goalie) inside a lock-on
-            frame. RIGHT = EDGE Metrics for skaters / Goalie zone summary
-            for goalies. Same panel chrome as the Ratings strip so the
-            three bands feel like instrument rows on one console. */}
+        {/* EDGE / SAVE TELEMETRY band — sits between KPI and Ratings.
+            Radar is now in the TARGET PROFILE header (top of the page)
+            next to the picture, so this row carries the OTHER half: NHL
+            EDGE metrics for skaters, NET SAVE % heatmap for goalies. */}
         <div className="lg:col-span-12">
-          <HudPanel title="Target Profile" subtitle={isGoalie ? "biometric · save-zone signature" : "attribute radar · NHL EDGE telemetry"} themeColor={teamColor} scanline allCorners>
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] items-start">
-              {/* LEFT — Attribute Radar inside a target-lock frame */}
-              <div className="relative min-w-0 rounded border px-3 py-3 overflow-hidden"
-                style={{
-                  borderColor: `${teamColor}33`,
-                  background: "linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0.32))",
-                  boxShadow: `0 0 14px ${teamColor}14, inset 0 0 24px rgba(0,0,0,0.4)`,
-                }}>
-                {/* Header strip */}
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-2">
-                    <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 4px ${teamColor}` }} />
-                    <span className="hud-mono text-[9px] uppercase tracking-[0.22em]"
-                      style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}55` }}>
-                      ◢ {isGoalie ? "GOALIE SCAN" : "BIOMETRIC SCAN"}
-                    </span>
-                  </div>
-                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: `${teamColor}99` }}>
-                    target locked
-                  </span>
+          <HudPanel title={isGoalie ? "Save Telemetry" : "EDGE Telemetry"}
+            subtitle={isGoalie ? "net save % · zone breakdown" : "NHL EDGE · skating + shot tracking"}
+            themeColor={teamColor} scanline allCorners>
+            {isGoalie ? (
+              <div className="grid lg:grid-cols-[1fr_1.4fr] gap-3 items-start">
+                <div className="min-w-0">
+                  <GoalieZoneViz data={data} teamColor={teamColor} />
                 </div>
-                {/* Animated lock-on crosshair corners around the radar */}
-                <div className="absolute top-1 left-1 w-3.5 h-3.5 pointer-events-none" style={{ borderLeft: `1px solid ${teamColor}aa`, borderTop: `1px solid ${teamColor}aa` }} />
-                <div className="absolute top-1 right-1 w-3.5 h-3.5 pointer-events-none" style={{ borderRight: `1px solid ${teamColor}aa`, borderTop: `1px solid ${teamColor}aa` }} />
-                <div className="absolute bottom-1 left-1 w-3.5 h-3.5 pointer-events-none" style={{ borderLeft: `1px solid ${teamColor}aa`, borderBottom: `1px solid ${teamColor}aa` }} />
-                <div className="absolute bottom-1 right-1 w-3.5 h-3.5 pointer-events-none" style={{ borderRight: `1px solid ${teamColor}aa`, borderBottom: `1px solid ${teamColor}aa` }} />
-                <div className="flex flex-col items-center w-full overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-                  {isGoalie ? (
-                    <GoalieRadarChart data={data} teamColor={teamColor} nhlSvPct={nhlStats?.sv_pct} nhlGaa={nhlStats?.gaa} />
-                  ) : (
-                    <PlayerRadarChart data={data} teamColor={teamColor} />
-                  )}
+                <div className="min-w-0">
+                  <div className="hud-mono text-[9px] uppercase tracking-[0.22em] mb-1.5"
+                    style={{ color: teamColor }}>
+                    ◢ SAVE % · ANALYSIS
+                  </div>
+                  <p className="hud-mono text-[10px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                    Net-mouth heatmap colour-codes zones vs league averages —
+                    green clears the average, red lags it. The Zones tab
+                    drills into shot-origin rink heatmap when sample &gt; 60.
+                  </p>
                 </div>
               </div>
-
-              {/* RIGHT — EDGE Metrics (skater) / Goalie zone summary */}
-              <div className="min-w-0">
-                {isGoalie ? (
-                  <div className="rounded border px-3 py-3"
-                    style={{
-                      borderColor: `${teamColor}33`,
-                      background: "linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0.32))",
-                      boxShadow: `0 0 14px ${teamColor}14, inset 0 0 24px rgba(0,0,0,0.4)`,
-                    }}>
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 4px ${teamColor}` }} />
-                        <span className="hud-mono text-[9px] uppercase tracking-[0.22em]"
-                          style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}55` }}>
-                          ◢ SAVE % · ZONE
-                        </span>
-                      </div>
-                      <span className="hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: `${teamColor}99` }}>
-                        net heatmap
-                      </span>
-                    </div>
-                    <GoalieZoneViz data={data} teamColor={teamColor} />
-                  </div>
-                ) : (
-                  <EdgeMetricsCard data={data} teamColor={teamColor} />
-                )}
-              </div>
-            </div>
+            ) : (
+              <EdgeMetricsCard data={data} teamColor={teamColor} />
+            )}
           </HudPanel>
         </div>
 
@@ -6487,7 +6484,7 @@ export default function PlayerProfilePage() {
       <div className="grid gap-4 sm:grid-cols-2 min-w-0 overflow-x-hidden">
 
         {/* Tier legend — worst → best */}
-        {(telemetryTab === "advanced" || telemetryTab === "fatigue" || telemetryTab === "special-teams") && (
+        {(telemetryTab === "advanced" || telemetryTab === "fatigue") && (
         <div className="sm:col-span-2 flex items-center justify-center gap-1 flex-wrap px-3 py-2 rounded-xl" style={{ border: `1px solid ${teamColor}15`, background: `${teamDarkBg}80` }}>
           <span className="text-[8px] text-white/20 uppercase tracking-wider font-semibold shrink-0 mr-0.5">Scale</span>
           {([["Low","Low"],["Below Average","Below Avg"],["Average","Avg"],["Above Average","Above Avg"],["Elite","Elite"]] as [Tier,string][]).map(([t, label], i, arr) => (
@@ -6638,7 +6635,7 @@ export default function PlayerProfilePage() {
         )}
 
         {/* Recent Games */}
-        {telemetryTab === "games" && (
+        {telemetryTab === "advanced" && (
           <div className="sm:col-span-2">
             <Card title="Recent Games" style={cardStyle}>
               {gl && gl.games.length > 0 ? (
@@ -6764,7 +6761,7 @@ export default function PlayerProfilePage() {
         )}
 
         {/* Special Teams */}
-        {!isGoalie && telemetryTab === "special-teams" && (data.special_teams_pp != null || data.special_teams_pk != null) && (
+        {!isGoalie && telemetryTab === "advanced" && (data.special_teams_pp != null || data.special_teams_pk != null) && (
           <Card title="Special Teams" style={cardStyle}>
             <div className="space-y-0">
               {data.special_teams_pp != null && (
@@ -7458,7 +7455,7 @@ export default function PlayerProfilePage() {
         )}
 
         {/* Line Pairs (chemistry) */}
-        {!isGoalie && telemetryTab === "games" && data.line_pairs && data.line_pairs.length > 0 && (
+        {!isGoalie && telemetryTab === "advanced" && data.line_pairs && data.line_pairs.length > 0 && (
           <div className="sm:col-span-2">
             <Card title="Best Linemates" style={cardStyle}>
               <p className="text-[10px] text-white/30 mb-3">
