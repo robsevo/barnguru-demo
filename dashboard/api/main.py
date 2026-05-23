@@ -117,16 +117,24 @@ _TEAM_KEYWORDS: dict[str, list[str]] = {
 }
 
 
-_BEHAVIOR_LEAGUE_AVG_CACHE: dict[tuple[str, int], dict[str, float]] = {}
+_BEHAVIOR_LEAGUE_AVG_CACHE: dict[tuple[str, int], dict[str, dict[str, float]]] = {}
 
 
-def _behavior_league_avg(beh_path: Path) -> dict[str, float] | None:
-    """League-mean action probabilities (as percentages) from a behavior parquet.
+def _behavior_league_avg(beh_path: Path) -> dict[str, dict[str, float]] | None:
+    """Per-position league-mean action probabilities (percentages).
 
-    Cached on (path, mtime_ns) so the parquet is only scanned once per
-    process unless a fresh training run replaces the file. The UI uses this
-    to render per-player deltas vs league — without it the raw probabilities
-    look near-identical across players because the entry signal is flat.
+    Returns a dict shaped ``{"all": {...}, "forwards": {...}, "defense": {...}}``
+    so the UI can render delta-vs-peers with a fair comparison group: a D's
+    shoot_perimeter looks dominant against the global mean (forwards dilute
+    the average) but reads as average against the D-only mean — which is the
+    honest signal. We keep ``all`` for backward compat and the rare case
+    where position is unknown.
+
+    Position comes from the shots parquet (``shooter_id → player_position``),
+    joined on player_id. Players missing from shots fall into ``all`` only.
+
+    Cached on (path, mtime_ns); recomputed when the behavior parquet is
+    overwritten by a fresh training run.
     """
     try:
         mtime = beh_path.stat().st_mtime_ns
@@ -138,14 +146,40 @@ def _behavior_league_avg(beh_path: Path) -> dict[str, float] | None:
     try:
         import polars as pl
         cols = ["carry_in", "dump", "shoot_slot", "shoot_perimeter", "drive_net", "battle_corner", "hold_corner"]
-        df = pl.read_parquet(beh_path, columns=cols)
+        df = pl.read_parquet(beh_path, columns=["player_id"] + cols)
         if df.is_empty():
             return None
-        avg = {c: round(float(df[c].drop_nulls().mean() or 0.0) * 100, 1) for c in cols}
+        # Join player_position from the most recent shots parquet. shooter_id
+        # is the same NHL player_id used in behavior_predictions.
+        shots_dir = _GRETZKY_DATA_DIR / "shots"
+        shots_files = sorted(shots_dir.glob("*.parquet")) if shots_dir.exists() else []
+        pos_df: pl.DataFrame | None = None
+        if shots_files:
+            try:
+                raw = pl.read_parquet(shots_files[-1], columns=["shooter_id", "player_position"])
+                pos_df = (raw.filter(pl.col("shooter_id").is_not_null()
+                                     & pl.col("player_position").is_not_null())
+                              .unique(subset=["shooter_id"])
+                              .rename({"shooter_id": "player_id"}))
+            except Exception:
+                pos_df = None
+        joined = df.join(pos_df, on="player_id", how="left") if pos_df is not None else df.with_columns(pl.lit(None).alias("player_position"))
+
+        def _mean(frame: pl.DataFrame) -> dict[str, float]:
+            return {c: round(float(frame[c].drop_nulls().mean() or 0.0) * 100, 1) for c in cols}
+
+        out: dict[str, dict[str, float]] = {"all": _mean(joined)}
+        # Forwards: C / L / R. Defense: D. (G is filtered by is_goalie upstream.)
+        fwd = joined.filter(pl.col("player_position").is_in(["C", "L", "R"]))
+        de  = joined.filter(pl.col("player_position") == "D")
+        if not fwd.is_empty():
+            out["forwards"] = _mean(fwd)
+        if not de.is_empty():
+            out["defense"] = _mean(de)
     except Exception:
         return None
-    _BEHAVIOR_LEAGUE_AVG_CACHE[key] = avg
-    return avg
+    _BEHAVIOR_LEAGUE_AVG_CACHE[key] = out
+    return out
 
 
 def _shots_name_position_map() -> dict[str, str]:
@@ -2239,6 +2273,7 @@ async def phase2_player(
     nn_battle_corner_pct_val:   float | None = None
     nn_hold_corner_pct_val:     float | None = None
     nn_league_avg_payload:      dict[str, float] | None = None
+    nn_league_avg_by_pos_payload: dict[str, dict[str, float]] | None = None
     try:
         beh_dir = _GRETZKY_DATA_DIR / "behavior_net"
         beh_parquets = sorted(beh_dir.glob("behavior_predictions_*.parquet")) if beh_dir.exists() else []
@@ -2255,7 +2290,12 @@ async def phase2_player(
                 nn_drive_net_pct_val       = round(float(beh["drive_net"]) * 100, 1)         if beh.get("drive_net")        is not None else None
                 nn_battle_corner_pct_val   = round(float(beh["battle_corner"]) * 100, 1)     if beh.get("battle_corner")    is not None else None
                 nn_hold_corner_pct_val     = round(float(beh["hold_corner"]) * 100, 1)       if beh.get("hold_corner")      is not None else None
-            nn_league_avg_payload = _behavior_league_avg(beh_path)
+            full = _behavior_league_avg(beh_path)
+            if full is not None:
+                # ``all`` stays in the flat field for back-compat with any
+                # client still reading nn_league_avg as a flat dict.
+                nn_league_avg_payload = full.get("all")
+                nn_league_avg_by_pos_payload = full
     except Exception:
         pass
 
@@ -2280,6 +2320,83 @@ async def phase2_player(
                 skating_max_speed_val = round(float(sk["baseline_max_speed_kmh"]), 1)           if sk.get("baseline_max_speed_kmh")    is not None else None
                 skating_distance_val  = round(float(sk["baseline_distance_per_game_km"]), 2)    if sk.get("baseline_distance_per_game_km") is not None else None
                 skating_games_val     = int(sk["n_games_total"]) if sk.get("n_games_total") is not None else None
+    except Exception:
+        pass
+
+    # NHL EDGE rankings — top shot speed, top skating speed, total distance.
+    # Pulled from the latest edge_skating + edge_shot_speed parquets. We
+    # compute the player's own value plus the league percentile + rank so
+    # the UI can render "87.5 mph · rank 142/612 · 76th percentile" the way
+    # NHL EDGE pages do, without re-walking the parquet on every render.
+    edge_top_shot_speed:     float | None = None
+    edge_top_shot_rank:      int   | None = None
+    edge_top_shot_pop:       int   | None = None
+    edge_top_shot_pct:       float | None = None
+    edge_hard_shot_count:    int   | None = None
+    edge_high_danger_shots:  int   | None = None
+    edge_hd_shots_rank:      int   | None = None
+    edge_hd_shots_pop:       int   | None = None
+    edge_hd_shots_pct:       float | None = None
+    edge_top_skate_speed:    float | None = None
+    edge_top_skate_rank:     int   | None = None
+    edge_top_skate_pop:      int   | None = None
+    edge_top_skate_pct:      float | None = None
+    edge_total_distance:     float | None = None
+    edge_avg_speed_kmh:      float | None = None
+    edge_games_played:       int   | None = None
+    try:
+        edge_dir = _GRETZKY_DATA_DIR / "edge"
+        if edge_dir.exists() and player_id_val is not None:
+            shot_parquets = sorted(edge_dir.glob("edge_shot_speed_*.parquet"))
+            if shot_parquets:
+                shot_df = pl.read_parquet(shot_parquets[-1])
+                shot_pop = shot_df.filter(pl.col("max_shot_speed_mph").is_not_null()).shape[0]
+                shot_row = shot_df.filter(pl.col("player_id") == player_id_val)
+                if not shot_row.is_empty():
+                    sr = shot_row.to_dicts()[0]
+                    mv = sr.get("max_shot_speed_mph")
+                    if mv is not None:
+                        edge_top_shot_speed = round(float(mv), 1)
+                        ranked = shot_df.filter(pl.col("max_shot_speed_mph") > mv).shape[0]
+                        edge_top_shot_rank = ranked + 1
+                        edge_top_shot_pop  = shot_pop
+                        edge_top_shot_pct  = round((shot_pop - edge_top_shot_rank) / max(shot_pop - 1, 1) * 100, 0) if shot_pop > 1 else None
+                    hsc = sr.get("hard_shot_count")
+                    if hsc is not None:
+                        edge_hard_shot_count = int(hsc)
+                    hd = sr.get("high_danger_shots")
+                    if hd is not None:
+                        edge_high_danger_shots = int(hd)
+                # High-danger shot rank lives on the same parquet but a
+                # different column — compute it in the same pass to save
+                # a second read.
+                if "high_danger_shots" in shot_df.columns:
+                    hd_pop = shot_df.filter(pl.col("high_danger_shots").is_not_null()).shape[0]
+                    if edge_high_danger_shots is not None and hd_pop > 0:
+                        ranked = shot_df.filter(pl.col("high_danger_shots") > edge_high_danger_shots).shape[0]
+                        edge_hd_shots_rank = ranked + 1
+                        edge_hd_shots_pop  = hd_pop
+                        edge_hd_shots_pct  = round((hd_pop - edge_hd_shots_rank) / max(hd_pop - 1, 1) * 100, 0) if hd_pop > 1 else None
+            skate_parquets = sorted(edge_dir.glob("edge_skating_*.parquet"))
+            if skate_parquets:
+                skate_df = pl.read_parquet(skate_parquets[-1])
+                skate_pop = skate_df.filter(pl.col("max_speed_kmh").is_not_null()).shape[0]
+                skate_row = skate_df.filter(pl.col("player_id") == player_id_val)
+                if not skate_row.is_empty():
+                    er = skate_row.to_dicts()[0]
+                    mxk = er.get("max_speed_kmh")
+                    if mxk is not None:
+                        edge_top_skate_speed = round(float(mxk), 2)
+                        ranked = skate_df.filter(pl.col("max_speed_kmh") > mxk).shape[0]
+                        edge_top_skate_rank = ranked + 1
+                        edge_top_skate_pop  = skate_pop
+                        edge_top_skate_pct  = round((skate_pop - edge_top_skate_rank) / max(skate_pop - 1, 1) * 100, 0) if skate_pop > 1 else None
+                    if er.get("total_distance_km") is not None:
+                        edge_total_distance = round(float(er["total_distance_km"]), 1)
+                    if er.get("avg_speed_kmh") is not None:
+                        edge_avg_speed_kmh = round(float(er["avg_speed_kmh"]), 2)
+                    if er.get("games_played") is not None:
+                        edge_games_played = int(er["games_played"])
     except Exception:
         pass
 
@@ -2387,12 +2504,30 @@ async def phase2_player(
         "nn_battle_corner_pct":      nn_battle_corner_pct_val,
         "nn_hold_corner_pct":        nn_hold_corner_pct_val,
         "nn_league_avg":             nn_league_avg_payload,
+        "nn_league_avg_by_pos":      nn_league_avg_by_pos_payload,
         "skating_zone_time_oz_pct":     skating_zone_oz_val,
         "skating_zone_time_dz_pct":     skating_zone_dz_val,
         "skating_avg_speed_kmh":        skating_avg_speed_val,
         "skating_max_speed_kmh":        skating_max_speed_val,
         "skating_distance_per_game_km": skating_distance_val,
         "skating_games_sample":         skating_games_val,
+        # NHL EDGE — top speeds + ranking + distance
+        "edge_top_shot_speed_mph":      edge_top_shot_speed,
+        "edge_top_shot_speed_rank":     edge_top_shot_rank,
+        "edge_top_shot_speed_pop":      edge_top_shot_pop,
+        "edge_top_shot_speed_pct":      edge_top_shot_pct,
+        "edge_hard_shot_count":         edge_hard_shot_count,
+        "edge_high_danger_shots":       edge_high_danger_shots,
+        "edge_high_danger_shots_rank":  edge_hd_shots_rank,
+        "edge_high_danger_shots_pop":   edge_hd_shots_pop,
+        "edge_high_danger_shots_pct":   edge_hd_shots_pct,
+        "edge_top_skating_speed_kmh":   edge_top_skate_speed,
+        "edge_top_skating_speed_rank":  edge_top_skate_rank,
+        "edge_top_skating_speed_pop":   edge_top_skate_pop,
+        "edge_top_skating_speed_pct":   edge_top_skate_pct,
+        "edge_total_distance_km":       edge_total_distance,
+        "edge_avg_speed_kmh":           edge_avg_speed_kmh,
+        "edge_games_played":            edge_games_played,
     }
 
 

@@ -108,6 +108,23 @@ interface ProfileData {
   skating_zone_time_oz_pct?: number | null;
   skating_zone_time_dz_pct?: number | null;
   skating_games_sample?: number | null;
+  // NHL EDGE — top speeds, distance, hard shots + league ranks
+  edge_top_shot_speed_mph?: number | null;
+  edge_top_shot_speed_rank?: number | null;
+  edge_top_shot_speed_pop?: number | null;
+  edge_top_shot_speed_pct?: number | null;
+  edge_hard_shot_count?: number | null;
+  edge_high_danger_shots?: number | null;
+  edge_high_danger_shots_rank?: number | null;
+  edge_high_danger_shots_pop?: number | null;
+  edge_high_danger_shots_pct?: number | null;
+  edge_top_skating_speed_kmh?: number | null;
+  edge_top_skating_speed_rank?: number | null;
+  edge_top_skating_speed_pop?: number | null;
+  edge_top_skating_speed_pct?: number | null;
+  edge_total_distance_km?: number | null;
+  edge_avg_speed_kmh?: number | null;
+  edge_games_played?: number | null;
   // Puck Battles
   battle_score?: number | null;
   battle_percentile?: number | null;
@@ -130,6 +147,14 @@ interface ProfileData {
     carry_in?: number; dump?: number;
     shoot_slot?: number; shoot_perimeter?: number;
     drive_net?: number; battle_corner?: number; hold_corner?: number;
+  } | null;
+  // Position-segmented league averages (forwards / defense / all). The UI
+  // prefers the matching segment so a D's perimeter shot rate gets compared
+  // to other D, not the forward-heavy global mean.
+  nn_league_avg_by_pos?: {
+    all?: { carry_in?: number; dump?: number; shoot_slot?: number; shoot_perimeter?: number; drive_net?: number; battle_corner?: number; hold_corner?: number };
+    forwards?: { carry_in?: number; dump?: number; shoot_slot?: number; shoot_perimeter?: number; drive_net?: number; battle_corner?: number; hold_corner?: number };
+    defense?: { carry_in?: number; dump?: number; shoot_slot?: number; shoot_perimeter?: number; drive_net?: number; battle_corner?: number; hold_corner?: number };
   } | null;
   // In-Season Blend
   inseason_mu_blend?: number | null;
@@ -1962,8 +1987,8 @@ function GoalieZoneViz({ data, teamColor = "var(--brand-hex)" }: { data: Profile
         <rect x="8" y="8" width="3" height="70" fill="url(#goalPost)" stroke="#600" strokeWidth="0.3" rx="0.5" />
         {/* Right post */}
         <rect x="109" y="8" width="3" height="70" fill="url(#goalPost)" stroke="#600" strokeWidth="0.3" rx="0.5" />
-        {/* Bottom rail (ice line) */}
-        <rect x="10" y="76" width="100" height="2.5" fill="url(#goalPost)" stroke="#600" strokeWidth="0.3" rx="0.5" />
+        {/* Bottom skate-pad rail — neutral tone so the eye reads it as ice, not a red line */}
+        <rect x="11" y="76" width="98" height="1.2" fill="rgba(255,255,255,0.18)" />
 
         {/* Top scan line (animated sweep across the net) */}
         <rect x="12" y="8" width="96" height="1.4" fill={teamColor} fillOpacity="0.22"
@@ -2024,6 +2049,161 @@ function GoalieZoneViz({ data, teamColor = "var(--brand-hex)" }: { data: Profile
           rect { animation: none !important; }
         }
       `}</style>
+    </div>
+  );
+}
+
+/**
+ * GoalieSaveLocationMap — half-rink heatmap of save% by shot origin zone.
+ *
+ * NHL EDGE goalie pages show a per-rink-zone save% so you can tell at a
+ * glance "this goalie reads the slot but bleeds from the left wing" — the
+ * GoalieZoneViz only tells you about net mouth coverage (HD vs MD vs LD on
+ * the net itself). This is the complement: same MoneyPuck shots-against
+ * data we already render in the dot map, but bucketed into ice zones and
+ * colored by save% with the same ramp as the net viz, so the two readouts
+ * line up.
+ *
+ * Coordinates match the rotated frame used by HalfRinkMarkings + the dot
+ * maps: outer svg is 85×100, child `<g>` is rotated -90 so inside the
+ * group cx/cy use the horizontal-rink frame (x: 0 blue line side → 100 end
+ * boards; y: 0 top → 85 bottom; goal at x≈89, y≈42.5).
+ */
+function GoalieSaveLocationMap({ shots, teamColor = "var(--brand-hex)" }: { shots: ShotPoint[]; teamColor?: string }) {
+  const [hover, setHover] = useState<string | null>(null);
+
+  // Zone polygons in the rotated child frame. Boundaries chosen to mirror
+  // the NHL EDGE shot-location breakdown: HD slot, mid-slot, L/R wings,
+  // L/R corners, point. Each polygon's `bbox` is used for shot bucketing
+  // (point-in-rect — keeps the math fast and unambiguous).
+  type Zone = {
+    id: string;
+    label: string;
+    short: string;
+    bbox: { x0: number; x1: number; y0: number; y1: number };
+  };
+  const zones: Zone[] = [
+    { id: "slot_hd", label: "High Slot",    short: "SLOT",   bbox: { x0: 75, x1: 89, y0: 33, y1: 52 } },
+    { id: "slot_mid",label: "Mid Slot",     short: "MID",    bbox: { x0: 55, x1: 75, y0: 30, y1: 55 } },
+    { id: "wing_l", label: "Left Wing",     short: "LW",     bbox: { x0: 55, x1: 80, y0: 10, y1: 30 } },
+    { id: "wing_r", label: "Right Wing",    short: "RW",     bbox: { x0: 55, x1: 80, y0: 55, y1: 75 } },
+    { id: "corn_l", label: "Left Corner",   short: "LC",     bbox: { x0: 80, x1: 100, y0: 0,  y1: 33 } },
+    { id: "corn_r", label: "Right Corner",  short: "RC",     bbox: { x0: 80, x1: 100, y0: 52, y1: 85 } },
+    { id: "pt_l",   label: "Left Point",    short: "LP",     bbox: { x0: 25, x1: 55, y0: 0,  y1: 42.5 } },
+    { id: "pt_r",   label: "Right Point",   short: "RP",     bbox: { x0: 25, x1: 55, y0: 42.5, y1: 85 } },
+  ];
+
+  // Bucket every shot into the first zone whose bbox contains it. Shots
+  // that fall outside all zones (e.g. wraparounds behind the net) are
+  // dropped — they're already rendered as dots in the shot-map tab.
+  const counts: Record<string, { shots: number; goals: number }> = {};
+  for (const z of zones) counts[z.id] = { shots: 0, goals: 0 };
+  for (const s of shots) {
+    const cx = s.x;
+    const cy = 42.5 - s.y;
+    for (const z of zones) {
+      if (cx >= z.bbox.x0 && cx <= z.bbox.x1 && cy >= z.bbox.y0 && cy <= z.bbox.y1) {
+        counts[z.id].shots += 1;
+        if (s.goal) counts[z.id].goals += 1;
+        break;
+      }
+    }
+  }
+
+  // Save% per zone — null when sample too small to color (under 8 shots),
+  // so we don't paint a green "elite" tile off a 1/1 sample.
+  const svFor = (id: string): number | null => {
+    const c = counts[id];
+    if (!c || c.shots < 8) return null;
+    return (c.shots - c.goals) / c.shots;
+  };
+
+  // Same colour ramp as GoalieZoneViz so the two readouts feel like one viz.
+  const tone = (pct: number | null) => {
+    if (pct == null) return { fill: "rgba(120,120,120,0.10)", stroke: "rgba(120,120,120,0.40)" };
+    if (pct >= 0.92) return { fill: "rgba(74,222,128,0.34)",  stroke: "rgba(74,222,128,0.90)" };
+    if (pct >= 0.88) return { fill: `${teamColor}3a`,         stroke: teamColor };
+    if (pct >= 0.84) return { fill: "rgba(251,191,36,0.32)",  stroke: "rgba(251,191,36,0.90)" };
+    return                  { fill: "rgba(248,113,113,0.34)", stroke: "rgba(248,113,113,0.95)" };
+  };
+
+  const fmt = (pct: number | null) => pct == null ? "—" : `${(pct * 100).toFixed(1)}%`;
+  const totalShots = shots.length;
+
+  return (
+    <div className="relative w-full max-w-[440px] mx-auto"
+      style={{ ["--gnz-color" as string]: teamColor }}>
+      <svg viewBox="0 0 85 100" width="100%" className="block"
+        style={{ filter: `drop-shadow(0 6px 14px rgba(0,0,0,0.55)) drop-shadow(0 0 12px ${teamColor}22)` }}>
+        <g transform="translate(0,100) rotate(-90)">
+          <HalfRinkMarkings />
+          {/* Zone tiles (drawn over the rink so save% colour reads first) */}
+          {zones.map((z) => {
+            const pct = svFor(z.id);
+            const t = tone(pct);
+            const isHover = hover === z.id;
+            const cx = (z.bbox.x0 + z.bbox.x1) / 2;
+            const cy = (z.bbox.y0 + z.bbox.y1) / 2;
+            const w  = z.bbox.x1 - z.bbox.x0;
+            const h  = z.bbox.y1 - z.bbox.y0;
+            return (
+              <g key={z.id}
+                onMouseEnter={() => setHover(z.id)}
+                onMouseLeave={() => setHover(null)}
+                style={{ cursor: "pointer" }}>
+                <rect
+                  x={z.bbox.x0} y={z.bbox.y0} width={w} height={h}
+                  fill={t.fill}
+                  stroke={t.stroke}
+                  strokeOpacity={isHover ? 0.95 : 0.55}
+                  strokeWidth={isHover ? 0.9 : 0.4}
+                  style={{ transition: "stroke-opacity 200ms ease, stroke-width 200ms ease" }} />
+                <text x={cx} y={cy - 1} textAnchor="middle"
+                  fontSize="4.6" fontWeight="700"
+                  fill={t.stroke}
+                  style={{ fontFamily: "var(--font-mono)", letterSpacing: "0.10em" }}>
+                  {z.short}
+                </text>
+                <text x={cx} y={cy + 4.4} textAnchor="middle"
+                  fontSize="3.4"
+                  fill="rgba(255,255,255,0.85)"
+                  style={{ fontFamily: "var(--font-mono)", letterSpacing: "0.08em" }}>
+                  {pct == null ? "—" : `${(pct * 100).toFixed(1)}%`}
+                </text>
+              </g>
+            );
+          })}
+        </g>
+      </svg>
+
+      <div className="absolute top-1 left-1 hud-mono text-[9px] uppercase tracking-[0.18em] px-2 py-0.5 rounded"
+        style={{ color: teamColor, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}>
+        ◢ SAVE % BY SHOT LOCATION
+      </div>
+      {hover && (() => {
+        const z = zones.find(x => x.id === hover);
+        if (!z) return null;
+        const c = counts[z.id];
+        const pct = svFor(z.id);
+        return (
+          <div className="absolute top-1 right-1 hud-mono text-[10px] uppercase tracking-[0.18em] px-2 py-1 rounded border pointer-events-none"
+            style={{
+              color: teamColor,
+              borderColor: `${teamColor}55`,
+              background: "rgba(0,0,0,0.72)",
+              backdropFilter: "blur(6px)",
+            }}>
+            <div className="font-semibold">▸ {z.label}</div>
+            <div className="text-[9px] tracking-[0.16em] text-white/65 mt-0.5">
+              {c.shots} shots · {c.goals} goals · {fmt(pct)}
+            </div>
+          </div>
+        );
+      })()}
+
+      <p className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-muted)] text-center mt-2">
+        {totalShots} shots faced · zones under 8 shots greyed out
+      </p>
     </div>
   );
 }
@@ -2276,6 +2456,187 @@ function ZoneTendencyMap({ data, teamColor }: { data: ProfileData; teamColor: st
 }
 
 /** Ice Time By Zone — horizontal bar charts (OZ / NZ / DZ) */
+/**
+ * EdgeMetricsCard — surfaces the NHL-EDGE-style "Top Shot Speed / Top Skating
+ * Speed / Skating Distance / Hard Shots" rows that NHL EDGE puts at the top
+ * of every skater page (see nhl.com/nhl-edge/skaters/<player>). Each row
+ * pairs the player's value with their league rank + percentile, with a small
+ * gradient bar that mirrors how NHL EDGE shows the position vs the field.
+ *
+ * The data is already on disk (edge_skating_*.parquet, edge_shot_speed_*.parquet);
+ * the API endpoint computes rank/percentile per request so the UI can stay dumb.
+ */
+const KMH_TO_MPH = 0.621371;
+
+function EdgeStatRow({
+  label, sub, value, rank, pop, pct, teamColor, threshold,
+}: {
+  label: string;
+  sub?: string;
+  value: string;
+  rank?: number | null;
+  pop?: number | null;
+  pct?: number | null;        // 0-100; higher = better
+  teamColor: string;
+  threshold?: { ok: boolean; text: string } | null;
+}) {
+  // Percentile drives both the bar fill and the colour. Above-90 = elite
+  // (greens), 60-90 = solid (team accent), 40-60 = average (slate),
+  // below 40 = below avg (amber/red). Matches NHL EDGE's own colour ramp.
+  const pctClamped = pct == null ? null : Math.max(0, Math.min(100, pct));
+  const tone = pctClamped == null
+    ? { fill: `${teamColor}55`, text: "rgba(255,255,255,0.65)" }
+    : pctClamped >= 90 ? { fill: "#5ee08a", text: "#5ee08a" }
+    : pctClamped >= 60 ? { fill: teamColor,  text: teamColor }
+    : pctClamped >= 40 ? { fill: "#94a3b8", text: "rgba(255,255,255,0.65)" }
+    : pctClamped >= 20 ? { fill: "#fbbf24", text: "#fbbf24" }
+    :                    { fill: "#f87171", text: "#f87171" };
+  return (
+    <div className="flex flex-col gap-1 py-1.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="hud-mono text-[9px] uppercase tracking-[0.20em] text-[var(--text-secondary)]">
+          ▸ {label}
+        </span>
+        <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)] tabular-nums">
+          {rank != null && pop != null ? `rank ${rank} / ${pop}` : ""}
+        </span>
+      </div>
+      <div className="flex items-baseline gap-3">
+        <span className="hud-mono text-[14px] font-semibold tabular-nums" style={{ color: tone.text, textShadow: `0 0 6px ${tone.fill}33` }}>
+          {value}
+        </span>
+        {sub && (
+          <span className="hud-mono text-[9px] uppercase tracking-[0.16em] text-[var(--text-muted)] tabular-nums">
+            {sub}
+          </span>
+        )}
+        {pctClamped != null && (
+          <span className="ml-auto hud-mono text-[10px] tabular-nums" style={{ color: tone.text }}>
+            {pctClamped.toFixed(0)}<span className="text-[7px] uppercase tracking-[0.18em] ml-0.5 text-[var(--text-muted)]">pct</span>
+          </span>
+        )}
+      </div>
+      {pctClamped != null && (
+        <div className="relative h-1.5 rounded-sm overflow-hidden"
+          style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${tone.fill}33` }}>
+          <div className="h-full"
+            style={{
+              width: `${pctClamped}%`,
+              background: `linear-gradient(90deg, ${tone.fill}aa 0%, ${tone.fill} 100%)`,
+              boxShadow: `0 0 6px ${tone.fill}55`,
+            }} />
+          {/* 50th-percentile tick — league median anchor */}
+          <div className="absolute top-[-1px] bottom-[-1px] w-px pointer-events-none"
+            style={{ left: "50%", background: "rgba(255,255,255,0.25)" }} />
+        </div>
+      )}
+      {threshold && (
+        <span className="hud-mono text-[8px] uppercase tracking-[0.16em]"
+          style={{ color: threshold.ok ? "#5ee08a" : "rgba(255,255,255,0.35)" }}>
+          {threshold.ok ? "▸ " : "· "}{threshold.text}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function EdgeMetricsCard({ data, teamColor }: { data: ProfileData; teamColor: string }) {
+  const shotMph    = data.edge_top_shot_speed_mph ?? null;
+  const skateKmh   = data.edge_top_skating_speed_kmh ?? null;
+  const skateMph   = skateKmh != null ? skateKmh * KMH_TO_MPH : null;
+  const totalKm    = data.edge_total_distance_km ?? null;
+  const perGameKm  = data.skating_distance_per_game_km ?? null;
+  const avgKmh     = data.edge_avg_speed_kmh ?? data.skating_avg_speed_kmh ?? null;
+  const gp         = data.edge_games_played ?? data.skating_games_sample ?? null;
+  const hardShots  = data.edge_hard_shot_count ?? null;
+  const hdShots    = data.edge_high_danger_shots ?? null;
+
+  // The 22 mph (35.4 km/h) threshold is NHL EDGE's headline "burst" marker.
+  // We don't have per-shift bursts yet, but a season-top max above the bar
+  // is itself a meaningful flag — surfaced as a small chip instead of a count.
+  const burst22 = skateKmh != null ? skateKmh >= 35.4 : null;
+  const burst20 = skateKmh != null ? skateKmh >= 32.2 : null;
+
+  // No EDGE data at all? Don't render the card — better than half-empty.
+  if (shotMph == null && skateKmh == null && totalKm == null && perGameKm == null) return null;
+
+  return (
+    <div className="rounded border px-3 py-2.5 mt-2"
+      style={{ borderColor: `${teamColor}28`, background: "rgba(0,0,0,0.35)" }}>
+      <div className="flex items-center justify-between mb-1.5 pb-1.5 border-b" style={{ borderColor: `${teamColor}20` }}>
+        <span className="hud-mono text-[10px] uppercase tracking-[0.22em]" style={{ color: teamColor }}>
+          ◢ EDGE METRICS
+        </span>
+        <span className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+          NHL EDGE{gp ? ` · ${gp} GP` : ""}
+        </span>
+      </div>
+      <div className="divide-y" style={{ borderColor: `${teamColor}10` }}>
+        {shotMph != null && (
+          <EdgeStatRow
+            label="Top Shot Speed"
+            value={`${shotMph.toFixed(1)} mph`}
+            sub={hardShots != null ? `${hardShots} shots ≥70 mph` : undefined}
+            rank={data.edge_top_shot_speed_rank}
+            pop={data.edge_top_shot_speed_pop}
+            pct={data.edge_top_shot_speed_pct}
+            teamColor={teamColor}
+          />
+        )}
+        {skateKmh != null && (
+          <EdgeStatRow
+            label="Top Skating Speed"
+            value={`${skateMph!.toFixed(1)} mph`}
+            sub={`${skateKmh.toFixed(2)} km/h`}
+            rank={data.edge_top_skating_speed_rank}
+            pop={data.edge_top_skating_speed_pop}
+            pct={data.edge_top_skating_speed_pct}
+            teamColor={teamColor}
+            threshold={
+              burst22 === true ? { ok: true,  text: "Cleared 22 mph burst threshold" } :
+              burst20 === true ? { ok: true,  text: "Cleared 20 mph burst threshold" } :
+              burst20 === false ? { ok: false, text: "Below 20 mph burst threshold" } : null
+            }
+          />
+        )}
+        {(perGameKm != null || totalKm != null || avgKmh != null) && (
+          <EdgeStatRow
+            label="Skating Distance"
+            value={perGameKm != null ? `${perGameKm.toFixed(2)} km/g` : (totalKm != null ? `${totalKm.toFixed(1)} km` : "—")}
+            sub={[
+              totalKm != null ? `${totalKm.toFixed(1)} km total` : null,
+              avgKmh != null ? `${avgKmh.toFixed(1)} km/h avg` : null,
+            ].filter(Boolean).join(" · ") || undefined}
+            teamColor={teamColor}
+          />
+        )}
+        {hdShots != null && (
+          <EdgeStatRow
+            label="High-Danger Shots"
+            value={`${hdShots}`}
+            sub={gp ? `${(hdShots / Math.max(gp, 1)).toFixed(2)} / game` : undefined}
+            rank={data.edge_high_danger_shots_rank}
+            pop={data.edge_high_danger_shots_pop}
+            pct={data.edge_high_danger_shots_pct}
+            teamColor={teamColor}
+          />
+        )}
+        {hardShots != null && (
+          <EdgeStatRow
+            label="Hard Shots ≥70 mph"
+            value={`${hardShots}`}
+            sub={gp ? `${(hardShots / Math.max(gp, 1)).toFixed(2)} / game` : undefined}
+            teamColor={teamColor}
+          />
+        )}
+      </div>
+      <p className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-muted)] mt-2">
+        ranks vs all skaters with EDGE coverage this season
+      </p>
+    </div>
+  );
+}
+
 function IceTimeByZoneBars({ data }: { data: ProfileData }) {
   const oz = data.skating_zone_time_oz_pct ?? 0;
   const dz = data.skating_zone_time_dz_pct ?? 0;
@@ -2768,6 +3129,7 @@ const ACTION_THEME: Record<string, { color: string; dash: string; kind: "shot" |
 
 function PredictedPlay({
   carry, dump, slot, perim, drive, battleC, holdC, themeColor, leagueAvg,
+  position, shoots,
 }: {
   carry?: number | null;
   dump?: number | null;
@@ -2782,7 +3144,30 @@ function PredictedPlay({
     shoot_slot?: number; shoot_perimeter?: number;
     drive_net?: number; battle_corner?: number; hold_corner?: number;
   } | null;
+  position?: string | null;
+  shoots?: string | null;
 }) {
+  // A defenseman lives at the offensive blue line — the play does not start
+  // above the zone like a forward zone entry. We rewire the schematic so the
+  // origin is the L or R point, the in-zone routes read as point shot / walk
+  // the line / pinch instead of slot-rush, and carry/dump entries are
+  // suppressed (they don't apply to D in the OZ). Drive-to-net only renders
+  // when this specific D's nn_drive_net_pct meaningfully clears the league
+  // mean for their position — otherwise we drop it so Slavin doesn't get
+  // drawn like Makar.
+  const pos = (position ?? "").toUpperCase();
+  const isD = pos === "D" || pos === "LD" || pos === "RD";
+  // Right-hand shots usually play the left point (for the one-timer on the
+  // off-wing); LD/RD overrides shoots when explicit. Default to right point
+  // when we have no signal at all.
+  const dSide: "L" | "R" = (() => {
+    if (pos === "LD") return "L";
+    if (pos === "RD") return "R";
+    const sh = (shoots ?? "").toUpperCase();
+    if (sh === "L") return "R";
+    if (sh === "R") return "L";
+    return "R";
+  })();
   // Resolve league averages per action id (matches the ACTION_THEME keys).
   // When the backend hasn't shipped them yet, we leave deltas null and the
   // UI silently falls back to raw-probability ranking.
@@ -2801,11 +3186,26 @@ function PredictedPlay({
     return typeof v === "number" ? v : null;
   };
 
-  const entryActions: PredAction[] = [
+  // D plays already start in the OZ at the point — carry / dump don't apply.
+  // Suppressing them avoids drawing a forward-style entry curve for a D.
+  const entryActions: PredAction[] = isD ? [] : [
     { id: "carry", label: "Carry-in", pct: carry ?? 0 },
     { id: "dump",  label: "Dump-in",  pct: dump  ?? 0 },
   ].filter(a => a.pct > 0).sort((a, b) => b.pct - a.pct);
-  const inZoneActions: PredAction[] = [
+  // In-zone labels are position-aware. For D the same model dimension reads
+  // differently on ice: shoot_perimeter → point shot, drive_net → pinch net
+  // (only highlighted when this D is meaningfully above forward average),
+  // battle/hold corner → cycle pinch / hold the line, shoot_slot → walk-in
+  // shot (rare for D — needs the model to actually project it). We also
+  // de-prioritize drive_net for D unless their probability tops the league
+  // mean by a real margin, so non-pinching D don't get rendered like Makar.
+  const inZoneActions: PredAction[] = isD ? [
+    { id: "perim",  label: "Point Shot",   pct: perim   ?? 0 },
+    { id: "battle", label: "Pinch Corner", pct: battleC ?? 0 },
+    { id: "hold",   label: "Hold Line",    pct: holdC   ?? 0 },
+    { id: "drive",  label: "Pinch Net",    pct: drive   ?? 0 },
+    { id: "slot",   label: "Walk-In Shot", pct: slot    ?? 0 },
+  ].filter(a => a.pct > 0).sort((a, b) => b.pct - a.pct) : [
     { id: "slot",   label: "Slot Shot",     pct: slot    ?? 0 },
     { id: "drive",  label: "Drive Net",     pct: drive   ?? 0 },
     { id: "perim",  label: "Perimeter",     pct: perim   ?? 0 },
@@ -2828,6 +3228,9 @@ function PredictedPlay({
   // In-zone primary: when league averages are available, pick the action
   // whose probability deviates *most positively* from league — that's what
   // makes this player distinct. Otherwise fall back to highest raw %.
+  // For D this is honest because the caller passes the D-only league mean,
+  // so the delta reflects "this D vs other D" — Slavin's drive_net only
+  // wins when he's actually pinching more than peer defensemen.
   const primaryByDelta = (() => {
     if (!leagueAvg || inZoneActions.length === 0) return null;
     let best: PredAction | null = null;
@@ -2840,7 +3243,17 @@ function PredictedPlay({
     }
     return bestDelta > 1 ? best : null;
   })();
-  const topInZone = primaryByDelta ?? inZoneActions[0] ?? null;
+  // Fallback ordering matters too: for D, default the top action to point
+  // shot / pinch corner / hold line before drive_net or walk-in slot. We
+  // walk the sorted list and prefer the first "D-typical" route present.
+  const dPreferred = isD
+    ? (inZoneActions.find(a => a.id === "perim")
+       ?? inZoneActions.find(a => a.id === "battle")
+       ?? inZoneActions.find(a => a.id === "hold")
+       ?? inZoneActions[0]
+       ?? null)
+    : (inZoneActions[0] ?? null);
+  const topInZone = primaryByDelta ?? dPreferred;
   const topInZoneDelta = topInZone ? (() => {
     const avg = avgFor(topInZone.id);
     return avg == null ? null : topInZone.pct - avg;
@@ -2862,6 +3275,18 @@ function PredictedPlay({
   const CORNER_L = { cx: 30, cy: 165 };
   const CORNER_R = { cx: 250, cy: 165 };
 
+  // D blue-line position (the "point") — origin for every D route. The
+  // off-side point is the dominant deployment (R-handed D on the left point
+  // for the one-timer is the modern norm), so we pick the side that matches
+  // LD/RD, or invert shoots-hand when only `shoots` is known. The opposite
+  // point gets a ghost marker so "walk the line" reads correctly.
+  const D_POINT = dSide === "L"
+    ? { cx: 90,  cy: 28 }    // left point
+    : { cx: 190, cy: 28 };   // right point
+  const D_OPP   = dSide === "L"
+    ? { cx: 190, cy: 28 }
+    : { cx: 90,  cy: 28 };
+
   // ── Arrow path builder ────────────────────────────────────────────────
   // Returns an SVG path string + endpoint for arrowhead orientation.
   function entryPath(id: string): string {
@@ -2873,6 +3298,32 @@ function PredictedPlay({
     return `M 140 -5 L 145 50 L 245 150`;
   }
   function inZonePath(id: string): string {
+    if (isD) {
+      // All D routes originate at the blue-line point on the player's side.
+      // Point shot — straight down through traffic, slight off-stick lean so
+      // the line reads as a wrist/slap shot not a skating route.
+      if (id === "perim") {
+        const lean = dSide === "L" ? 5 : -5;
+        return `M ${D_POINT.cx} ${D_POINT.cy + 4} L ${D_POINT.cx + lean} ${D_POINT.cy + 38} L ${NET.cx} ${NET.y - 4}`;
+      }
+      // Pinch net — diagonal skate from point straight down to crease. Only
+      // rendered when this D actually does it (drive_net deviates positively).
+      if (id === "drive") {
+        return `M ${D_POINT.cx} ${D_POINT.cy + 4} Q ${(D_POINT.cx + NET.cx) / 2} ${(D_POINT.cy + NET.y) / 2 - 6} ${NET.cx} ${NET.y - 4}`;
+      }
+      // Walk-in shot — skate diagonally toward the high slot, shot from there.
+      if (id === "slot") {
+        return `M ${D_POINT.cx} ${D_POINT.cy + 4} Q ${(D_POINT.cx + SLOT.cx) / 2} ${(D_POINT.cy + SLOT.cy) / 2 - 4} ${SLOT.cx} ${SLOT.cy} L ${NET.cx} ${NET.y - 4}`;
+      }
+      // Pinch corner — D drops down to the strong-side boards / corner.
+      if (id === "battle") {
+        const corner = dSide === "L" ? CORNER_L : CORNER_R;
+        return `M ${D_POINT.cx} ${D_POINT.cy + 4} Q ${(D_POINT.cx + corner.cx) / 2} ${(D_POINT.cy + corner.cy) / 2 + 6} ${corner.cx + (dSide === "L" ? 6 : -6)} ${corner.cy - 4}`;
+      }
+      // Hold line — D walks the blue line across to the opposite point.
+      /* hold */
+      return `M ${D_POINT.cx} ${D_POINT.cy} Q ${(D_POINT.cx + D_OPP.cx) / 2} ${D_POINT.cy - 10} ${D_OPP.cx} ${D_OPP.cy}`;
+    }
     if (id === "slot")   return `M 140 90  L ${SLOT.cx} ${SLOT.cy} L ${NET.cx} ${NET.y - 4}`;
     if (id === "drive")  return `M 140 80  Q 145 110 ${NET.cx} ${NET.y - 4}`;
     if (id === "perim")  return `M 140 80  L ${PERIM_R.cx} ${PERIM_R.cy} L ${NET.cx + 4} ${NET.y - 4}`;
@@ -3000,8 +3451,23 @@ function PredictedPlay({
           );
         })()}
 
-        {/* Origin marker — small triangle at the top of the zone, in team colour */}
-        <polygon points={`${140 - 4},-3 ${140 + 4},-3 140,7`} fill={themeColor} opacity="0.85" />
+        {/* Origin marker — for forwards we drop an entry-arrow over the blue
+            line; for D we plant a player puck at the strong-side point and
+            ghost a teammate at the opposite point so "walk the line" reads
+            as a real route. */}
+        {isD ? (
+          <g>
+            <circle cx={D_OPP.cx} cy={D_OPP.cy} r="3.4"
+              fill="none" stroke={themeColor} strokeOpacity="0.45" strokeWidth="0.9" strokeDasharray="1.5 1.5" />
+            <circle cx={D_POINT.cx} cy={D_POINT.cy} r="4.4" fill={themeColor} opacity="0.92"
+              style={{ filter: `drop-shadow(0 0 5px ${themeColor})` }} />
+            <text x={D_POINT.cx} y={D_POINT.cy + 1.5} textAnchor="middle"
+              fontSize="4.6" fontWeight="700" fill="rgba(0,0,0,0.75)"
+              style={{ fontFamily: "var(--font-mono)" }}>D</text>
+          </g>
+        ) : (
+          <polygon points={`${140 - 4},-3 ${140 + 4},-3 140,7`} fill={themeColor} opacity="0.85" />
+        )}
 
         <style>{`
           @keyframes ppDraw { to { stroke-dashoffset: 0; } }
@@ -3057,7 +3523,9 @@ function PredictedPlay({
 
       {/* Inline legend — one chip per action present in this player's NN
           weights, with the same colour + dash style as the rink arrow so
-          Bob can tell which line means what. */}
+          Bob can tell which line means what. D legends rename routes to
+          their D-specific concept (Point shot / Pinch corner / etc.) so
+          the chips match the arrows on the rink. */}
       <div className="mt-2 flex flex-wrap gap-1.5 px-1">
         {[
           ...(entryActions.length ? entryActions.map(a => a.id) : []),
@@ -3065,6 +3533,14 @@ function PredictedPlay({
         ].filter((id, i, arr) => arr.indexOf(id) === i).map((id) => {
           const t = ACTION_THEME[id];
           if (!t) return null;
+          const dLegend: Record<string, string> = {
+            slot:   "Walk-in · shot",
+            drive:  "Pinch · net",
+            perim:  "Point · shot",
+            battle: "Pinch · corner",
+            hold:   "Walk the line",
+          };
+          const legendText = (isD && dLegend[id]) ? dLegend[id] : t.legend;
           return (
             <div key={id} className="flex items-center gap-1.5 px-1.5 py-0.5 rounded border"
               style={{ borderColor: `${t.color}33`, background: `${t.color}0e` }}>
@@ -3075,7 +3551,7 @@ function PredictedPlay({
                   strokeDasharray={t.dash !== "0" ? t.dash : undefined} />
               </svg>
               <span className="hud-mono text-[8px] uppercase tracking-[0.14em]" style={{ color: `${t.color}cc` }}>
-                {t.legend}
+                {legendText}
               </span>
             </div>
           );
@@ -4711,7 +5187,23 @@ export default function PlayerProfilePage() {
                 battleC={data.nn_battle_corner_pct}
                 holdC={data.nn_hold_corner_pct}
                 themeColor={teamColor}
-                leagueAvg={data.nn_league_avg ?? null}
+                leagueAvg={(() => {
+                  // Prefer the position-matched segment so deltas read true:
+                  // a D's perimeter shot rate vs forwards is meaningless;
+                  // vs other D it tells you who the real point shooters are.
+                  const pos = (data.position ?? "").toUpperCase();
+                  const isD = pos === "D" || pos === "LD" || pos === "RD";
+                  const isF = pos === "C" || pos === "L" || pos === "R" || pos === "LW" || pos === "RW";
+                  const byPos = data.nn_league_avg_by_pos;
+                  if (byPos) {
+                    if (isD && byPos.defense)  return byPos.defense;
+                    if (isF && byPos.forwards) return byPos.forwards;
+                    if (byPos.all)             return byPos.all;
+                  }
+                  return data.nn_league_avg ?? null;
+                })()}
+                position={data.position ?? null}
+                shoots={bio?.shoots_catches ?? data.shoots_catches ?? null}
               />
             )}
 
@@ -5058,6 +5550,10 @@ export default function PlayerProfilePage() {
                     <IceTimeByZoneBars data={data} />
                   </div>
                 ) : null}
+                {/* NHL EDGE-style top speed / shot speed / distance rankings */}
+                <div className="w-full max-w-[520px] mx-auto">
+                  <EdgeMetricsCard data={data} teamColor={teamColor} />
+                </div>
                 <p className="hud-mono text-[8px] uppercase tracking-[0.18em] text-center text-[var(--text-muted)]">
                   drag the 3D rink to rotate · scroll to zoom
                 </p>
@@ -5826,9 +6322,21 @@ export default function PlayerProfilePage() {
           <div className="sm:col-span-2">
             <Card title="Save % by Zone" style={cardStyle}>
               <p className="text-[9px] text-white/25 uppercase tracking-wider text-center mb-3">
-                Color coded vs league averages · green = above avg · red = below avg
+                Net heatmap · color coded vs league averages · green = above avg · red = below avg
               </p>
               <GoalieZoneViz data={data} teamColor={teamColor} />
+              {/* Shot-location complement: save% bucketed by where the puck was
+                  released on the ice. Renders only when we have enough shots
+                  to bucket meaningfully — small early-season samples would
+                  produce noisy "elite/awful" tiles. */}
+              {goalieShots.length >= 60 && (
+                <div className="mt-5 pt-4 border-t" style={{ borderColor: `${teamColor}1a` }}>
+                  <p className="text-[9px] text-white/25 uppercase tracking-wider text-center mb-2">
+                    Shot-location heatmap · save % by origin zone on the ice
+                  </p>
+                  <GoalieSaveLocationMap shots={goalieShots} teamColor={teamColor} />
+                </div>
+              )}
             </Card>
           </div>
         )}
