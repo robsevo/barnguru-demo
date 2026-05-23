@@ -5641,6 +5641,47 @@ export default function PlayerProfilePage() {
   const liveType = derivePlayerType(data, nhlStats);
   const playerType = liveType ?? cachedSeasonType;
 
+  // Neural DNA rungs — one per behavior NN dimension for skaters
+  // (CRY / DMP / SLT / PRM / DRV / BTL / HLD), or per goalie save-zone
+  // axis for goalies. Lifted to component scope so the helix can render
+  // inside the Current Form card on the Behavior tab. Weight is the
+  // probability / save% scaled to 0-1; missing inputs drop the rung.
+  const dnaRungs: DnaRung[] = (() => {
+    const r = (id: string, label: string, weight: number | null, tip: string): DnaRung | null =>
+      weight == null ? null : {
+        id,
+        label,
+        weight: Math.max(0.05, Math.min(1, weight)),
+        color: ACTION_THEME[id]?.color ?? teamColor,
+        tip,
+      };
+    if (isGoalie) {
+      const rg = (id: string, label: string, weight: number | null, color: string, tip: string): DnaRung | null =>
+        weight == null ? null : { id, label, weight: Math.max(0.05, Math.min(1, weight)), color, tip };
+      const normSv = (v: number | null, lo: number, hi: number) =>
+        v == null ? null : Math.max(0, Math.min(1, (v - lo) / (hi - lo)));
+      const gsaxNorm = data.gsax != null ? Math.max(0, Math.min(1, (data.gsax + 10) / 30)) : null;
+      return [
+        rg("hd",  "HDV", normSv(data.hdsv_pct ?? null, 0.70, 0.90), "#f87171", "High-danger save %"),
+        rg("md",  "MDV", normSv(data.mdsv_pct ?? null, 0.82, 0.96), "#fbbf24", "Mid-danger save %"),
+        rg("ld",  "LDV", normSv(data.ldsv_pct ?? null, 0.94, 1.00), "#5ee08a", "Low-danger save %"),
+        rg("ovr", "SVP", normSv(data.sv_pct  ?? null, 0.880, 0.925), teamColor, "Overall save %"),
+        rg("gsx", "GSX", gsaxNorm, "#a78bfa", "Goals saved above expected"),
+        rg("vol", "VOL", data.xga != null ? Math.min(1, data.xga / 80) : null, "#38bdf8", "Workload (xGA)"),
+      ].filter((x): x is DnaRung => x !== null);
+    }
+    return [
+      r("carry",  "CRY", data.nn_carry_in_pct        != null ? data.nn_carry_in_pct        / 60 : null, "Carry-in rate"),
+      r("dump",   "DMP", data.nn_dump_pct            != null ? data.nn_dump_pct            / 60 : null, "Dump-in rate"),
+      r("slot",   "SLT", data.nn_shoot_slot_pct      != null ? data.nn_shoot_slot_pct      / 40 : null, "Slot shot rate"),
+      r("perim",  "PRM", data.nn_shoot_perimeter_pct != null ? data.nn_shoot_perimeter_pct / 40 : null, "Perimeter shot rate"),
+      r("drive",  "DRV", data.nn_drive_net_pct       != null ? data.nn_drive_net_pct       / 30 : null, "Drive-net rate"),
+      r("battle", "BTL", data.nn_battle_corner_pct   != null ? data.nn_battle_corner_pct   / 30 : null, "Battle-corner rate"),
+      r("hold",   "HLD", data.nn_hold_corner_pct     != null ? data.nn_hold_corner_pct     / 30 : null, "Hold-possession rate"),
+    ].filter((x): x is DnaRung => x !== null);
+  })();
+  const dnaSignature = isGoalie ? "G · save-zone v1" : "S · BNN v2.22";
+
   // "Why hot" blurb
   let formBlurb: string | null = null;
   const gl = data.game_log;
@@ -7062,48 +7103,11 @@ export default function PlayerProfilePage() {
                 data.toi_ev != null ? `TOI ${data.toi_ev.toFixed(0)}m` : null,
                 data.ewma_xgf60 != null ? `EWMA ${data.ewma_xgf60.toFixed(2)}` : null,
               ].filter((s): s is string => Boolean(s))}
-              dnaRungs={(() => {
-                // Neural DNA strip — one rung per behavior NN dimension for
-                // skaters (CRY / DMP / SLT / PRM / DRV / BTL / HLD), and one
-                // rung per goalie save-zone axis for goalies. Weight is the
-                // probability / save% scaled to 0-1 so the helix encodes
-                // the player's identity as a visible fingerprint.
-                const r = (id: string, label: string, weight: number | null, tip: string): DnaRung | null =>
-                  weight == null ? null : {
-                    id,
-                    label,
-                    weight: Math.max(0.05, Math.min(1, weight)),
-                    color: ACTION_THEME[id]?.color ?? teamColor,
-                    tip,
-                  };
-                if (isGoalie) {
-                  const rg = (id: string, label: string, weight: number | null, color: string, tip: string): DnaRung | null =>
-                    weight == null ? null : { id, label, weight: Math.max(0.05, Math.min(1, weight)), color, tip };
-                  // Re-scale save% to 0-1 against a useful band so weak vs
-                  // strong zones actually look different on the helix.
-                  const normSv = (v: number | null, lo: number, hi: number) =>
-                    v == null ? null : Math.max(0, Math.min(1, (v - lo) / (hi - lo)));
-                  const gsaxNorm = data.gsax != null ? Math.max(0, Math.min(1, (data.gsax + 10) / 30)) : null;
-                  return [
-                    rg("hd",  "HDV", normSv(data.hdsv_pct ?? null, 0.70, 0.90), "#f87171", "High-danger save %"),
-                    rg("md",  "MDV", normSv(data.mdsv_pct ?? null, 0.82, 0.96), "#fbbf24", "Mid-danger save %"),
-                    rg("ld",  "LDV", normSv(data.ldsv_pct ?? null, 0.94, 1.00), "#5ee08a", "Low-danger save %"),
-                    rg("ovr", "SVP", normSv(data.sv_pct  ?? null, 0.880, 0.925), teamColor, "Overall save %"),
-                    rg("gsx", "GSX", gsaxNorm, "#a78bfa", "Goals saved above expected"),
-                    rg("vol", "VOL", data.xga != null ? Math.min(1, data.xga / 80) : null, "#38bdf8", "Workload (xGA)"),
-                  ].filter((x): x is DnaRung => x !== null);
-                }
-                return [
-                  r("carry",  "CRY", data.nn_carry_in_pct        != null ? data.nn_carry_in_pct        / 60 : null, "Carry-in rate"),
-                  r("dump",   "DMP", data.nn_dump_pct            != null ? data.nn_dump_pct            / 60 : null, "Dump-in rate"),
-                  r("slot",   "SLT", data.nn_shoot_slot_pct      != null ? data.nn_shoot_slot_pct      / 40 : null, "Slot shot rate"),
-                  r("perim",  "PRM", data.nn_shoot_perimeter_pct != null ? data.nn_shoot_perimeter_pct / 40 : null, "Perimeter shot rate"),
-                  r("drive",  "DRV", data.nn_drive_net_pct       != null ? data.nn_drive_net_pct       / 30 : null, "Drive-net rate"),
-                  r("battle", "BTL", data.nn_battle_corner_pct   != null ? data.nn_battle_corner_pct   / 30 : null, "Battle-corner rate"),
-                  r("hold",   "HLD", data.nn_hold_corner_pct     != null ? data.nn_hold_corner_pct     / 30 : null, "Hold-possession rate"),
-                ].filter((x): x is DnaRung => x !== null);
-              })()}
-              dnaSignature={isGoalie ? "G · save-zone v1" : "S · BNN v2.22"}
+              // Neural DNA strip moved to the Current Form card on the
+              // Behavior tab — empty rungs here so the Hologram panel
+              // shrinks and the helix lives in a more relevant spot.
+              dnaRungs={[]}
+              dnaSignature={undefined}
             />
             {/* Legacy hologram canvas (replaced by HologramScanner above) */}
             <div className="hidden">
@@ -7965,6 +7969,15 @@ export default function PlayerProfilePage() {
                 />
               )}
             </div>
+            {/* Neural DNA helix — player fingerprint. Lives at the bottom
+                of Current Form on the Behavior tab so the helix shows
+                where momentum + identity reads naturally. Lifted out of
+                the Hologram panel so that column can shrink. */}
+            {dnaRungs.length > 0 && (
+              <div className="mt-3 pt-3 border-t" style={{ borderColor: `${teamColor}1a` }}>
+                <PlayerDnaStrip rungs={dnaRungs} teamColor={teamColor} signature={dnaSignature} />
+              </div>
+            )}
           </Card>
         )}
 
