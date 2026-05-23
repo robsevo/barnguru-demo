@@ -661,26 +661,30 @@ function StatRow({ label, value, tier, sub, tip }: {
 function Card({ title, icon, children, className = "", style }: {
   title: string; icon?: string; children: React.ReactNode; className?: string; style?: React.CSSProperties;
 }) {
-  // HUD-styled card chrome: corner brackets, mono title bar, optional scan
-  // line. Preserves the legacy `style` prop so callers passing team-tinted
-  // cardStyle keep their brand glow.
+  // HUD-styled card chrome: corner brackets, mono title bar, scan-band on
+  // mount, pulse dot in the header. Tighter padding than before so cards
+  // pack tighter on dense tabs. Each Card boots in via jarvis-boot +
+  // jarvis-shimmer so the page actually feels alive on tab switch.
   return (
-    <div className={`hud-panel hud-panel--all-corners ${className}`} style={style}>
+    <div className={`hud-panel hud-panel--all-corners jarvis-boot jarvis-shimmer relative overflow-hidden ${className}`} style={style}>
       <span className="hud-panel__corner-tr" />
       <span className="hud-panel__corner-bl" />
-      <div className="px-3 py-2 border-b border-white/[0.05] flex items-center gap-2">
-        <span className="hud-mono text-[10px] uppercase tracking-[0.18em] text-[var(--brand-hex)] opacity-80 select-none" aria-hidden>
+      <div className="hud-scan" aria-hidden />
+      <div className="px-2.5 py-1.5 border-b border-white/[0.05] flex items-center gap-2">
+        <span className="hud-pulse-dot shrink-0" style={{ background: "var(--brand-hex)", boxShadow: "0 0 4px var(--brand-hex)" }} aria-hidden />
+        <span className="hud-mono text-[10px] uppercase tracking-[0.18em] text-[var(--brand-hex)] opacity-90 select-none" aria-hidden>
           ◢
         </span>
         {icon ? <span className="text-[11px] opacity-70" aria-hidden>{icon}</span> : null}
-        <p className="hud-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-primary)] truncate">
+        <p className="hud-mono text-[10px] font-semibold uppercase tracking-[0.20em] text-[var(--text-primary)] truncate"
+          style={{ textShadow: "0 0 6px var(--brand-hex)33" }}>
           {title}
         </p>
-        <span className="ml-auto hud-mono text-[10px] uppercase tracking-[0.18em] text-[var(--brand-hex)] opacity-80 select-none" aria-hidden>
+        <span className="ml-auto hud-mono text-[10px] uppercase tracking-[0.18em] text-[var(--brand-hex)] opacity-90 select-none" aria-hidden>
           ◣
         </span>
       </div>
-      <div className="p-3 sm:p-4">{children}</div>
+      <div className="p-2.5 sm:p-3">{children}</div>
     </div>
   );
 }
@@ -6172,51 +6176,56 @@ export default function PlayerProfilePage() {
           </div>
         )}
 
-        {/* ── Zone Tendencies — stacked, centered ── */}
+        {/* ── Zone Tendencies — 3D rink LEFT, ICE TIME + EDGE METRICS
+            stacked on the RIGHT so the card actually fills the page width
+            instead of stranding narrow columns in the middle. */}
         {!isGoalie && telemetryTab === "zones" && (
           <div className="sm:col-span-2">
             <Card title="Zone Tendencies" style={cardStyle}>
-              <div className="flex flex-col items-stretch gap-4 w-full">
-                {/* Offensive Zone Tendency — 3D rink with 2D fallback */}
-                {data.nn_shoot_slot_pct != null ? (
-                  <>
-                    <p className="hud-mono text-[9px] uppercase tracking-[0.22em] text-[var(--text-secondary)] text-center">
-                      ◢ OFFENSIVE ZONE TENDENCY · 3D
-                    </p>
-                    <Zone3D
-                      activations={{
-                        slot:    data.nn_shoot_slot_pct ?? 0,
-                        perim:   data.nn_shoot_perimeter_pct ?? 0,
-                        net:     data.nn_drive_net_pct ?? 0,
-                        cornerL: data.nn_battle_corner_pct ?? 0,
-                        cornerR: data.nn_hold_corner_pct ?? 0,
-                      }}
-                      themeColor={teamColor}
-                      fallback={
-                        <div className="max-w-md mx-auto">
-                          <ZoneTendencyMap data={data} teamColor={teamColor} />
-                        </div>
-                      }
-                    />
-                  </>
-                ) : (
-                  <div className="flex flex-col items-center justify-center py-6 gap-1.5">
-                    <p className="hud-mono text-[9px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Model not yet trained</p>
-                  </div>
-                )}
-                {/* Ice Time By Zone bars */}
-                {data.skating_zone_time_oz_pct != null ? (
-                  <div className="w-full max-w-[420px] mx-auto">
-                    <IceTimeByZoneBars data={data} />
-                  </div>
-                ) : null}
-                {/* NHL EDGE-style top speed / shot speed / distance rankings */}
-                <div className="w-full max-w-[520px] mx-auto">
-                  <EdgeMetricsCard data={data} teamColor={teamColor} />
+              <div className="grid gap-3 lg:grid-cols-[1.35fr_1fr] items-start">
+                {/* LEFT — 3D rink with 2D fallback. Fills the column. */}
+                <div className="min-w-0">
+                  {data.nn_shoot_slot_pct != null ? (
+                    <>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="hud-mono text-[9px] uppercase tracking-[0.22em]" style={{ color: teamColor }}>
+                          ◢ OFFENSIVE ZONE · 3D
+                        </span>
+                        <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                          drag · scroll
+                        </span>
+                      </div>
+                      <Zone3D
+                        activations={{
+                          slot:    data.nn_shoot_slot_pct ?? 0,
+                          perim:   data.nn_shoot_perimeter_pct ?? 0,
+                          net:     data.nn_drive_net_pct ?? 0,
+                          cornerL: data.nn_battle_corner_pct ?? 0,
+                          cornerR: data.nn_hold_corner_pct ?? 0,
+                        }}
+                        themeColor={teamColor}
+                        fallback={<ZoneTendencyMap data={data} teamColor={teamColor} />}
+                      />
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-10 gap-1.5">
+                      <p className="hud-mono text-[9px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Model not yet trained</p>
+                    </div>
+                  )}
                 </div>
-                <p className="hud-mono text-[8px] uppercase tracking-[0.18em] text-center text-[var(--text-muted)]">
-                  drag the 3D rink to rotate · scroll to zoom
-                </p>
+
+                {/* RIGHT — telemetry stack. ICE TIME bars on top, EDGE
+                    METRICS underneath. Both fill the column (no max-w). */}
+                <div className="min-w-0 space-y-3">
+                  {data.skating_zone_time_oz_pct != null && (
+                    <div className="w-full">
+                      <IceTimeByZoneBars data={data} />
+                    </div>
+                  )}
+                  <div className="w-full">
+                    <EdgeMetricsCard data={data} teamColor={teamColor} />
+                  </div>
+                </div>
               </div>
             </Card>
           </div>
@@ -6995,26 +7004,39 @@ export default function PlayerProfilePage() {
           </div>
         )}
 
-        {/* Goalie — save% by zone */}
+        {/* Goalie — save% by zone. NET heatmap LEFT, SHOT-LOCATION map RIGHT
+            so the goalie zones tab fills the page width instead of stacking
+            two narrow viz columns. Falls back to single-col when shot
+            sample is too thin for the rink heatmap. */}
         {isGoalie && telemetryTab === "zones" && (data.hdsv_pct != null || data.mdsv_pct != null || data.ldsv_pct != null) && (
           <div className="sm:col-span-2">
             <Card title="Save % by Zone" style={cardStyle}>
-              <p className="text-[9px] text-white/25 uppercase tracking-wider text-center mb-3">
-                Net heatmap · color coded vs league averages · green = above avg · red = below avg
-              </p>
-              <GoalieZoneViz data={data} teamColor={teamColor} />
-              {/* Shot-location complement: save% bucketed by where the puck was
-                  released on the ice. Renders only when we have enough shots
-                  to bucket meaningfully — small early-season samples would
-                  produce noisy "elite/awful" tiles. */}
-              {goalieShots.length >= 60 && (
-                <div className="mt-5 pt-4 border-t" style={{ borderColor: `${teamColor}1a` }}>
-                  <p className="text-[9px] text-white/25 uppercase tracking-wider text-center mb-2">
-                    Shot-location heatmap · save % by origin zone on the ice
-                  </p>
-                  <GoalieSaveLocationMap shots={goalieShots} teamColor={teamColor} />
+              <div className={`grid gap-4 ${goalieShots.length >= 60 ? "lg:grid-cols-2" : "grid-cols-1"} items-start`}>
+                <div className="min-w-0">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="hud-mono text-[9px] uppercase tracking-[0.22em]" style={{ color: teamColor }}>
+                      ◢ NET HEATMAP
+                    </span>
+                    <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                      vs league avg
+                    </span>
+                  </div>
+                  <GoalieZoneViz data={data} teamColor={teamColor} />
                 </div>
-              )}
+                {goalieShots.length >= 60 && (
+                  <div className="min-w-0">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="hud-mono text-[9px] uppercase tracking-[0.22em]" style={{ color: teamColor }}>
+                        ◢ SHOT-LOCATION HEATMAP
+                      </span>
+                      <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                        save % by origin
+                      </span>
+                    </div>
+                    <GoalieSaveLocationMap shots={goalieShots} teamColor={teamColor} />
+                  </div>
+                )}
+              </div>
             </Card>
           </div>
         )}
