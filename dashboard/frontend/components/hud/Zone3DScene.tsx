@@ -18,26 +18,31 @@ export type Zone3DSceneProps = {
   themeColor?: string;
 };
 
-// Full NHL rink: 200×85 ft, corner radius 28 ft
+// Full NHL rink: 200×85 ft, corner radius 28 ft. We render OZ-only —
+// from the centre red line (x=0) to the end boards (x=+100), so the
+// "rink shape" is the right half with a straight left edge and two
+// rounded corners on the right (where the boards curve behind the net).
 const RINK_LEN = 200;
 const RINK_WID = 85;
 const CORNER_R = 28;
 
-// ─── Rounded rink shape (matches Shot3DScene exactly) ──────────────────────
+// ─── OZ-only rink shape ──────────────────────────────────────────────
+// Half-rink covering x = 0..100 (centre red line → end boards). Straight
+// edge along x=0, rounded right corners at the goalie end.
 function rinkShape(inset = 0): THREE.Shape {
-  const halfLen = RINK_LEN / 2 - inset;
-  const halfWid = RINK_WID / 2 - inset;
+  const halfLen = RINK_LEN / 2 - inset;     // 100 → right end
+  const halfWid = RINK_WID / 2 - inset;     // 42.5
   const r = Math.max(0, CORNER_R - inset);
   const s = new THREE.Shape();
-  s.moveTo(-halfLen + r, -halfWid);
-  s.lineTo(halfLen - r, -halfWid);
-  s.absarc(halfLen - r, -halfWid + r, r, -Math.PI / 2, 0, false);
-  s.lineTo(halfLen, halfWid - r);
-  s.absarc(halfLen - r, halfWid - r, r, 0, Math.PI / 2, false);
-  s.lineTo(-halfLen + r, halfWid);
-  s.absarc(-halfLen + r, halfWid - r, r, Math.PI / 2, Math.PI, false);
-  s.lineTo(-halfLen, -halfWid + r);
-  s.absarc(-halfLen + r, -halfWid + r, r, Math.PI, 1.5 * Math.PI, false);
+  // Start at top of the centre-line edge, sweep around the right end,
+  // return down the centre-line edge.
+  s.moveTo(0, halfWid);
+  s.lineTo(halfLen - r, halfWid);
+  s.absarc(halfLen - r, halfWid - r, r, Math.PI / 2, 0, true);
+  s.lineTo(halfLen, -halfWid + r);
+  s.absarc(halfLen - r, -halfWid + r, r, 0, -Math.PI / 2, true);
+  s.lineTo(0, -halfWid);
+  s.lineTo(0, halfWid);
   return s;
 }
 
@@ -169,22 +174,20 @@ function Crease({ x }: { x: number }) {
 }
 
 function RinkMarkings() {
+  // OZ-only: centre red line (x=0) → blue line (x=25) → goal line (x=89).
+  // Faceoff: centre dot at x=0, two OZ faceoffs at x=69, two NZ dots
+  // at x=20 (just past the blue line). DZ markings dropped.
   return (
     <group position={[0, 0.02, 0]}>
-      <RinkLine x1={0} z1={-RINK_WID / 2 + 2} x2={0} z2={RINK_WID / 2 - 2} color="#e63a3a" width={0.5} />
-      <RinkLine x1={-25} z1={-RINK_WID / 2 + 2} x2={-25} z2={RINK_WID / 2 - 2} color="#3b8fd0" width={0.5} />
+      <RinkLine x1={0}   z1={-RINK_WID / 2 + 2} x2={0}   z2={RINK_WID / 2 - 2} color="#e63a3a" width={0.5} />
       <RinkLine x1={25}  z1={-RINK_WID / 2 + 2} x2={25}  z2={RINK_WID / 2 - 2} color="#3b8fd0" width={0.5} />
-      <RinkLine x1={-89} z1={-RINK_WID / 2 + 8} x2={-89} z2={RINK_WID / 2 - 8} color="#e63a3a" width={0.3} />
       <RinkLine x1={89}  z1={-RINK_WID / 2 + 8} x2={89}  z2={RINK_WID / 2 - 8} color="#e63a3a" width={0.3} />
-      <FaceoffMarking x={0} z={0} radius={15} color="#3b8fd0" dotColor="#3b8fd0" />
-      <FaceoffMarking x={-69} z={-22} radius={15} color="#e63a3a" dotColor="#e63a3a" hashes />
-      <FaceoffMarking x={-69} z={22}  radius={15} color="#e63a3a" dotColor="#e63a3a" hashes />
-      <FaceoffMarking x={69}  z={-22} radius={15} color="#e63a3a" dotColor="#e63a3a" hashes />
-      <FaceoffMarking x={69}  z={22}  radius={15} color="#e63a3a" dotColor="#e63a3a" hashes />
-      {[[-20, -22], [-20, 22], [20, -22], [20, 22]].map(([x, z], i) => (
+      <FaceoffMarking x={0}  z={0}   radius={15} color="#3b8fd0" dotColor="#3b8fd0" />
+      <FaceoffMarking x={69} z={-22} radius={15} color="#e63a3a" dotColor="#e63a3a" hashes />
+      <FaceoffMarking x={69} z={22}  radius={15} color="#e63a3a" dotColor="#e63a3a" hashes />
+      {[[20, -22], [20, 22]].map(([x, z], i) => (
         <FaceoffDot key={i} x={x} z={z} color="#e63a3a" />
       ))}
-      <Crease x={-89} />
       <Crease x={89} />
     </group>
   );
@@ -339,12 +342,13 @@ export default function Zone3DScene({ activations, themeColor = "#C9A84C" }: Zon
   const hoveredZone = hover != null ? zones.find(z => z.id === hover) : null;
   const hoveredVal = hover != null ? activations[hover] : null;
 
+  // aspectRatio updated for OZ-only render (~120w / 110h fits half-rink).
   return (
-    <div className="relative w-full" style={{ aspectRatio: "200 / 110" }}>
+    <div className="relative w-full" style={{ aspectRatio: "120 / 110" }}>
       <Canvas
         frameloop={autoRotate ? "always" : "demand"}
         dpr={dpr}
-        camera={{ position: [60, 60, 95], fov: 38, near: 1, far: 800 }}
+        camera={{ position: [55, 65, 95], fov: 40, near: 1, far: 800 }}
         gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
         style={{ background: "transparent", touchAction: "none", cursor: freePan ? "move" : "grab" }}
       >
@@ -356,7 +360,7 @@ export default function Zone3DScene({ activations, themeColor = "#C9A84C" }: Zon
         <Boards themeColor={themeColor} />
         <IceSurface />
         <RinkMarkings />
-        <Net x={-89} />
+        {/* OZ goalie net only — DZ net dropped with the OZ-only rink. */}
         <Net x={89} />
 
         {zones.map((z) => (

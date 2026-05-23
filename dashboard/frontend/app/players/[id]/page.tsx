@@ -5312,6 +5312,12 @@ export default function PlayerProfilePage() {
     railRef.current?.scrollBy({ left: dir === "left" ? -160 : 160, behavior: "smooth" });
   };
   useEffect(() => {
+    // Depend on `data` because the rail is gated behind the loading +
+    // !data early returns. On first mount data is null → railRef.current
+    // is null → no listener attached → canLeft/canRight stay false →
+    // arrow buttons get pointer-events-none and never register taps.
+    // Re-running on data change wires up the listener once the rail
+    // actually exists in the DOM.
     const el = railRef.current;
     if (!el) return;
     updateRailArrows();
@@ -5319,7 +5325,8 @@ export default function PlayerProfilePage() {
     const ro = new ResizeObserver(updateRailArrows);
     ro.observe(el);
     return () => { el.removeEventListener("scroll", updateRailArrows); ro.disconnect(); };
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
   // Cached season-derived player archetype + the effect that maintains
   // it BOTH live ABOVE the loading/!data early returns so the hook
   // order stays stable across renders. The effect callback no-ops when
@@ -6486,18 +6493,25 @@ export default function PlayerProfilePage() {
         <HudPanel title="Ratings" subtitle="aggregate engine inputs" themeColor={teamColor} scanline allCorners>
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 text-center">
             {[
-              { label: "xGF/60",     val: data.xgf_per60,            dec: 2, suffix: "", tier: data.xgf_per60     != null ? xgf60Tier(data.xgf_per60)         : null },
-              { label: "xGA/60",     val: data.rapm_xga_60,          dec: 2, suffix: "", tier: data.rapm_xga_60   != null ? xgaAllowedTier(data.rapm_xga_60)  : null },
-              { label: "CDR",        val: data.cdr,                  dec: 2, suffix: "", tier: data.cdr           != null ? defTier(data.cdr)                : null },
-              { label: "Finishing",  val: data.finishing,            dec: 1, suffix: "", tier: data.finishing     != null ? finishingTier(data.finishing)    : null },
-              { label: "PP xGF/60",  val: data.special_teams_pp,     dec: 2, suffix: "", tier: data.special_teams_pp != null ? stTier(data.special_teams_pp): null },
-              { label: "Bayes",      val: data.bayesian_rating,      dec: 3, suffix: "", tier: data.bayesian_rating != null ? bayesianTier(data.bayesian_rating) : null },
+              { label: "xGF/60",     val: data.xgf_per60,            dec: 2, suffix: "", tier: data.xgf_per60     != null ? xgf60Tier(data.xgf_per60)         : null,
+                tip: "Expected goals FOR per 60 minutes at 5v5 (RAPM model). Measures how much offense this player drives — weighs every shot by shot quality, not just count. League avg ≈ 4.1; elite forwards 5.5+; D-men 3.5+ is strong." },
+              { label: "xGA/60",     val: data.rapm_xga_60,          dec: 2, suffix: "", tier: data.rapm_xga_60   != null ? xgaAllowedTier(data.rapm_xga_60)  : null,
+                tip: "Expected goals AGAINST per 60 minutes at 5v5 (RAPM model). Lower is better — measures how much offense the opponent generates with this player on the ice. League avg ≈ 4.1; sub-3.5 = strong defensive play." },
+              { label: "CDR",        val: data.cdr,                  dec: 2, suffix: "", tier: data.cdr           != null ? defTier(data.cdr)                : null,
+                tip: "Composite Defensive Rating — blends shot suppression, defensive RAPM, hits, and blocks into one signed score. +0.5 is above-average; +1.0 is elite shutdown D-man territory; negative = liability." },
+              { label: "Finishing",  val: data.finishing,            dec: 1, suffix: "", tier: data.finishing     != null ? finishingTier(data.finishing)    : null,
+                tip: "Goals minus expected goals — pure finishing skill above what shot quality predicts. Elite finishers consistently beat the model. +5 over a season is meaningful; +10 is elite sniper level." },
+              { label: "PP xGF/60",  val: data.special_teams_pp,     dec: 2, suffix: "", tier: data.special_teams_pp != null ? stTier(data.special_teams_pp): null,
+                tip: "Expected goals generated per 60 minutes of power-play time. Measures PP unit impact. League avg ≈ 6.5 on a PP unit; 8.0+ is elite PP1 production." },
+              { label: "Bayes",      val: data.bayesian_rating,      dec: 3, suffix: "", tier: data.bayesian_rating != null ? bayesianTier(data.bayesian_rating) : null,
+                tip: "Bayesian posterior-mean skill estimate — career stats shrunk toward position average to account for sample size. The smaller the sample, the more it pulls toward average. More stable than single-season raw stats; the model's foundational prior." },
             ].map((m, i) => {
               const tierColor = m.tier ? TIER_COLOR[m.tier] : null;
               return m.val != null ? (
                 <div key={i} className="flex flex-col items-center gap-0.5">
-                  <span className="hud-mono text-[9px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+                  <span className="hud-mono text-[9px] uppercase tracking-[0.18em] text-[var(--text-secondary)] flex items-center gap-1">
                     {m.label}
+                    {m.tip && <StatInfoTip label={m.label} tip={m.tip} />}
                   </span>
                   <OdometerNumber
                     value={m.val}
@@ -8197,7 +8211,7 @@ export default function PlayerProfilePage() {
                 .slice(0, 12)
             : [];
           return (
-            <Card title="Confidence (Phase 17)" style={cardStyle}>
+            <Card title="Confidence" style={cardStyle}>
               <div className="space-y-0">
                 <StatRow
                   label="Confidence Index"
