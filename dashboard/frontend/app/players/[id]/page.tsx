@@ -2072,37 +2072,34 @@ function GoalieZoneViz({ data, teamColor = "var(--brand-hex)" }: { data: Profile
 function GoalieSaveLocationMap({ shots, teamColor = "var(--brand-hex)" }: { shots: ShotPoint[]; teamColor?: string }) {
   const [hover, setHover] = useState<string | null>(null);
 
-  // Zone polygons in the rotated child frame. Boundaries chosen to mirror
-  // the NHL EDGE shot-location breakdown: HD slot, mid-slot, L/R wings,
-  // L/R corners, point. Each polygon's `bbox` is used for shot bucketing
-  // (point-in-rect — keeps the math fast and unambiguous).
-  type Zone = {
-    id: string;
-    label: string;
-    short: string;
-    bbox: { x0: number; x1: number; y0: number; y1: number };
-  };
+  // Zone bboxes defined in the pre-rotated frame used by ZoneTendencyMap
+  // (viewBox 85×86, net at top y=11, blue line at bottom y=75) so labels
+  // read horizontally and the viz matches the OZ TENDENCY · 2D look.
+  // Coord mapping from raw NHL shot coords (x: 0→100, y: ±42.5):
+  //   preX = NHL.y + 42.5
+  //   preY = 100 - NHL.x
+  type Zone = { id: string; label: string; short: string; bbox: { x0: number; x1: number; y0: number; y1: number } };
   const zones: Zone[] = [
-    { id: "slot_hd", label: "High Slot",    short: "SLOT",   bbox: { x0: 75, x1: 89, y0: 33, y1: 52 } },
-    { id: "slot_mid",label: "Mid Slot",     short: "MID",    bbox: { x0: 55, x1: 75, y0: 30, y1: 55 } },
-    { id: "wing_l", label: "Left Wing",     short: "LW",     bbox: { x0: 55, x1: 80, y0: 10, y1: 30 } },
-    { id: "wing_r", label: "Right Wing",    short: "RW",     bbox: { x0: 55, x1: 80, y0: 55, y1: 75 } },
-    { id: "corn_l", label: "Left Corner",   short: "LC",     bbox: { x0: 80, x1: 100, y0: 0,  y1: 33 } },
-    { id: "corn_r", label: "Right Corner",  short: "RC",     bbox: { x0: 80, x1: 100, y0: 52, y1: 85 } },
-    { id: "pt_l",   label: "Left Point",    short: "LP",     bbox: { x0: 25, x1: 55, y0: 0,  y1: 42.5 } },
-    { id: "pt_r",   label: "Right Point",   short: "RP",     bbox: { x0: 25, x1: 55, y0: 42.5, y1: 85 } },
+    { id: "slot_hd",  label: "High Slot",    short: "SLOT", bbox: { x0: 32, x1: 53, y0: 11, y1: 22 } },
+    { id: "slot_mid", label: "Mid Slot",     short: "MID",  bbox: { x0: 30, x1: 55, y0: 22, y1: 45 } },
+    { id: "wing_l",   label: "Left Wing",    short: "LW",   bbox: { x0: 0,  x1: 30, y0: 22, y1: 50 } },
+    { id: "wing_r",   label: "Right Wing",   short: "RW",   bbox: { x0: 55, x1: 85, y0: 22, y1: 50 } },
+    { id: "corn_l",   label: "Left Corner",  short: "LC",   bbox: { x0: 0,  x1: 32, y0: 0,  y1: 22 } },
+    { id: "corn_r",   label: "Right Corner", short: "RC",   bbox: { x0: 53, x1: 85, y0: 0,  y1: 22 } },
+    { id: "pt_l",     label: "Left Point",   short: "LP",   bbox: { x0: 0,  x1: 42, y0: 50, y1: 75 } },
+    { id: "pt_r",     label: "Right Point",  short: "RP",   bbox: { x0: 43, x1: 85, y0: 50, y1: 75 } },
   ];
 
-  // Bucket every shot into the first zone whose bbox contains it. Shots
-  // that fall outside all zones (e.g. wraparounds behind the net) are
-  // dropped — they're already rendered as dots in the shot-map tab.
+  // Bucket each shot into the first containing zone using the pre-rotated
+  // coordinate transform. Shots from behind the net or outside the OZ are
+  // dropped (they're shown as dots in the shot-map tab anyway).
   const counts: Record<string, { shots: number; goals: number }> = {};
   for (const z of zones) counts[z.id] = { shots: 0, goals: 0 };
   for (const s of shots) {
-    const cx = s.x;
-    const cy = 42.5 - s.y;
+    const px = s.y + 42.5;
+    const py = 100 - s.x;
     for (const z of zones) {
-      if (cx >= z.bbox.x0 && cx <= z.bbox.x1 && cy >= z.bbox.y0 && cy <= z.bbox.y1) {
+      if (px >= z.bbox.x0 && px <= z.bbox.x1 && py >= z.bbox.y0 && py <= z.bbox.y1) {
         counts[z.id].shots += 1;
         if (s.goal) counts[z.id].goals += 1;
         break;
@@ -2110,140 +2107,158 @@ function GoalieSaveLocationMap({ shots, teamColor = "var(--brand-hex)" }: { shot
     }
   }
 
-  // Save% per zone — null when sample too small to color (under 8 shots),
-  // so we don't paint a green "elite" tile off a 1/1 sample.
+  // Save% per zone — null when the sample is too small to colour honestly.
   const svFor = (id: string): number | null => {
     const c = counts[id];
     if (!c || c.shots < 8) return null;
     return (c.shots - c.goals) / c.shots;
   };
 
-  // Same colour ramp as GoalieZoneViz so the two readouts feel like one viz.
+  // Colour ramp — same one used by GoalieZoneViz so the two readouts feel
+  // like instruments on the same console.
   const tone = (pct: number | null) => {
-    if (pct == null) return { fill: "rgba(120,120,120,0.10)", stroke: "rgba(120,120,120,0.40)" };
-    if (pct >= 0.92) return { fill: "rgba(74,222,128,0.34)",  stroke: "rgba(74,222,128,0.90)" };
-    if (pct >= 0.88) return { fill: `${teamColor}3a`,         stroke: teamColor };
-    if (pct >= 0.84) return { fill: "rgba(251,191,36,0.32)",  stroke: "rgba(251,191,36,0.90)" };
+    if (pct == null) return { fill: "rgba(148,163,184,0.10)", stroke: "rgba(148,163,184,0.40)" };
+    if (pct >= 0.92) return { fill: "rgba(74,222,128,0.34)",  stroke: "rgba(74,222,128,0.95)" };
+    if (pct >= 0.88) return { fill: `${teamColor}38`,         stroke: teamColor };
+    if (pct >= 0.84) return { fill: "rgba(251,191,36,0.32)",  stroke: "rgba(251,191,36,0.95)" };
     return                  { fill: "rgba(248,113,113,0.34)", stroke: "rgba(248,113,113,0.95)" };
   };
 
   const fmt = (pct: number | null) => pct == null ? "—" : `${(pct * 100).toFixed(1)}%`;
   const totalShots = shots.length;
 
-  // Find the hottest + coldest zone so the eye picks them up at a glance —
-  // hottest gets a continuous pulse ring, coldest a slow red flash. Mirrors
-  // the treatment ZoneTendencyMap uses for forwards.
+  // Hottest + coldest zone (only when populated) — drive the pulse rings.
   const ranked = zones
     .map(z => ({ id: z.id, pct: svFor(z.id) }))
     .filter(r => r.pct != null) as { id: string; pct: number }[];
   const hottest = ranked.length ? ranked.reduce((a, b) => (b.pct > a.pct ? b : a)).id : null;
   const coldest = ranked.length ? ranked.reduce((a, b) => (b.pct < a.pct ? b : a)).id : null;
 
+  // Half-rink ice path — net at TOP, rounded boards on the top corners,
+  // straight on the bottom (blue-line edge). Identical silhouette to
+  // ZoneTendencyMap so the goalie viz feels like part of the same set.
+  const icePath = "M 0,85 L 0,14 Q 0,0 14,0 L 71,0 Q 85,0 85,14 L 85,85 Z";
+
   return (
-    <div className="relative w-full max-w-[460px] mx-auto"
-      style={{ ["--gnz-color" as string]: teamColor }}>
-      <svg viewBox="0 0 85 100" width="100%" className="block"
-        style={{
-          filter: `drop-shadow(0 8px 18px rgba(0,0,0,0.65)) drop-shadow(0 0 18px ${teamColor}33)`,
-        }}>
+    <div className="relative w-full max-w-[420px] mx-auto"
+      style={{ ["--gsl-color" as string]: teamColor }}>
+      <svg viewBox="0 0 85 86" width="100%" className="block"
+        style={{ filter: `drop-shadow(0 6px 14px rgba(0,0,0,0.55)) drop-shadow(0 0 14px ${teamColor}22)` }}>
         <defs>
-          {/* Diagonal grid overlay so the "ice" reads as a sensor surface,
-              not flat white. Same vibe as the goalie net HUD. */}
-          <pattern id="gslGrid" width="3" height="3" patternUnits="userSpaceOnUse">
-            <path d="M 0 3 L 3 0" stroke="rgba(96,165,250,0.10)" strokeWidth="0.18" fill="none" />
-          </pattern>
+          <clipPath id="gslClip">
+            <path d={icePath} />
+          </clipPath>
+          <radialGradient id="gslIceGlow" cx="50%" cy="30%" r="55%">
+            <stop offset="0%"  stopColor={teamColor} stopOpacity="0.12" />
+            <stop offset="100%" stopColor={teamColor} stopOpacity="0" />
+          </radialGradient>
         </defs>
-        <g transform="translate(0,100) rotate(-90)">
-          <HalfRinkMarkings />
-          {/* Sensor-grid wash over the ice — clips to the half-rink path so
-              the boards/corners stay clean. */}
-          <rect x="0" y="0" width="100" height="85" fill="url(#gslGrid)" opacity="0.7" />
 
-          {/* Zone tiles (drawn over the rink so save% colour reads first) */}
-          {zones.map((z, i) => {
-            const pct = svFor(z.id);
-            const t = tone(pct);
-            const isHover = hover === z.id;
-            const isHot = z.id === hottest && pct != null && pct >= 0.85;
-            const isCold = z.id === coldest && pct != null && pct < 0.85;
-            const cx = (z.bbox.x0 + z.bbox.x1) / 2;
-            const cy = (z.bbox.y0 + z.bbox.y1) / 2;
-            const w  = z.bbox.x1 - z.bbox.x0;
-            const h  = z.bbox.y1 - z.bbox.y0;
-            return (
-              <g key={z.id}
-                onMouseEnter={() => setHover(z.id)}
-                onMouseLeave={() => setHover(null)}
+        {/* HUD-themed dark ice surface — matches ZoneTendencyMap palette */}
+        <path d={icePath} fill="#0b0f1a" stroke={teamColor} strokeOpacity="0.55" strokeWidth="0.6" />
+        <path d={icePath} fill="url(#gslIceGlow)" />
+        {/* Faint background grid — sensor-deck texture, not a real rink */}
+        {[20, 40, 60].map((y) => (
+          <line key={`hg${y}`} x1="0" y1={y} x2="85" y2={y} stroke="rgba(255,255,255,0.04)" strokeWidth="0.2" clipPath="url(#gslClip)" />
+        ))}
+        {[20, 40, 60].map((x) => (
+          <line key={`vg${x}`} x1={x} y1="0" x2={x} y2="86" stroke="rgba(255,255,255,0.04)" strokeWidth="0.2" clipPath="url(#gslClip)" />
+        ))}
+
+        {/* Zone tiles — coloured by save%, hover-glow + hot/cold pulse */}
+        {zones.map((z, i) => {
+          const pct = svFor(z.id);
+          const t = tone(pct);
+          const isHover = hover === z.id;
+          const isHot   = z.id === hottest && pct != null && pct >= 0.88;
+          const isCold  = z.id === coldest && pct != null && pct < 0.85;
+          const cx = (z.bbox.x0 + z.bbox.x1) / 2;
+          const cy = (z.bbox.y0 + z.bbox.y1) / 2;
+          const w  = z.bbox.x1 - z.bbox.x0;
+          const h  = z.bbox.y1 - z.bbox.y0;
+          return (
+            <g key={z.id}
+              onMouseEnter={() => setHover(z.id)}
+              onMouseLeave={() => setHover(null)}
+              style={{
+                cursor: "pointer",
+                transformOrigin: `${cx}px ${cy}px`,
+                animation: `gslZoneIn 500ms cubic-bezier(0.22,1,0.36,1) ${i * 70}ms both`,
+              }}>
+              <rect x={z.bbox.x0} y={z.bbox.y0} width={w} height={h}
+                fill={t.fill}
+                stroke={t.stroke}
+                strokeOpacity={isHover ? 1 : 0.78}
+                strokeWidth={isHover ? "1.0" : "0.7"}
+                clipPath="url(#gslClip)"
                 style={{
-                  cursor: "pointer",
-                  transformOrigin: `${cx}px ${cy}px`,
-                  animation: `gslZoneIn 500ms cubic-bezier(0.22,1,0.36,1) ${i * 70}ms both`,
-                }}>
-                <rect
-                  x={z.bbox.x0} y={z.bbox.y0} width={w} height={h}
-                  fill={t.fill}
-                  stroke={t.stroke}
-                  strokeOpacity={isHover ? 1 : 0.62}
-                  strokeWidth={isHover ? 1.0 : 0.45}
+                  transition: "stroke-opacity 200ms ease, stroke-width 200ms ease, fill-opacity 200ms ease",
+                  filter: isHover ? `drop-shadow(0 0 4px ${t.stroke})` : (isHot ? `drop-shadow(0 0 3px ${t.stroke}aa)` : undefined),
+                }} />
+              {(isHot || isCold) && (
+                <rect x={z.bbox.x0} y={z.bbox.y0} width={w} height={h}
+                  fill="none" stroke={t.stroke} strokeWidth="0.5"
+                  clipPath="url(#gslClip)"
                   style={{
-                    transition: "stroke-opacity 200ms ease, stroke-width 200ms ease, fill-opacity 200ms ease",
-                    filter: isHover ? `drop-shadow(0 0 5px ${t.stroke})` : (isHot ? `drop-shadow(0 0 3px ${t.stroke}aa)` : undefined),
+                    transformOrigin: `${cx}px ${cy}px`,
+                    animation: `gslPulse ${isHot ? "2.6s" : "3.4s"} ease-in-out infinite`,
                   }} />
-                {/* Hot/cold pulse — matches the ZoneTendencyMap treatment so
-                    the goalie viz feels like part of the same instrument. */}
-                {(isHot || isCold) && (
-                  <rect x={z.bbox.x0} y={z.bbox.y0} width={w} height={h}
-                    fill="none" stroke={t.stroke} strokeWidth="0.6"
-                    style={{
-                      transformOrigin: `${cx}px ${cy}px`,
-                      animation: `gslPulse ${isHot ? "2.6s" : "3.4s"} ease-in-out infinite`,
-                    }} />
-                )}
-                {/* Top-left corner ticks per tile — tiny but the eye picks
-                    them up. They're the same idiom HudGrid uses. */}
-                <g stroke={t.stroke} strokeWidth="0.18" opacity={isHover ? 0.95 : 0.55}>
-                  <line x1={z.bbox.x0 + 0.4} y1={z.bbox.y0 + 0.4} x2={z.bbox.x0 + 2.4} y2={z.bbox.y0 + 0.4} />
-                  <line x1={z.bbox.x0 + 0.4} y1={z.bbox.y0 + 0.4} x2={z.bbox.x0 + 0.4} y2={z.bbox.y0 + 2.4} />
-                  <line x1={z.bbox.x1 - 0.4} y1={z.bbox.y1 - 0.4} x2={z.bbox.x1 - 2.4} y2={z.bbox.y1 - 0.4} />
-                  <line x1={z.bbox.x1 - 0.4} y1={z.bbox.y1 - 0.4} x2={z.bbox.x1 - 0.4} y2={z.bbox.y1 - 2.4} />
-                </g>
-                <text x={cx} y={cy - 0.8} textAnchor="middle"
-                  fontSize={isHover ? "5.2" : "4.6"} fontWeight="700"
-                  fill={t.stroke}
-                  style={{
-                    fontFamily: "var(--font-mono)", letterSpacing: "0.12em",
-                    textShadow: `0 0 4px ${t.stroke}`,
-                    transition: "font-size 200ms ease",
-                  }}>
-                  {z.short}
-                </text>
-                <text x={cx} y={cy + 4.8} textAnchor="middle"
-                  fontSize="3.6" fontWeight="700"
-                  fill="rgba(255,255,255,0.92)"
-                  style={{ fontFamily: "var(--font-mono)", letterSpacing: "0.10em" }}>
-                  {pct == null ? "—" : `${(pct * 100).toFixed(1)}%`}
-                </text>
-              </g>
-            );
-          })}
+              )}
+              {/* Zone label + save% — drawn horizontally so they read like
+                  HUD readouts, not sideways text. Slot-zone gets the team
+                  colour, all others get the same tone as their stroke. */}
+              <text x={cx} y={cy - 1.2} textAnchor="middle"
+                fontSize="2.6" fontWeight="600"
+                fill={pct == null ? "rgba(255,255,255,0.55)" : t.stroke}
+                style={{ fontFamily: "var(--font-mono)", letterSpacing: "0.18em" }}>
+                {z.short}
+              </text>
+              <text x={cx} y={cy + 3.2} textAnchor="middle"
+                fontSize="3.6" fontWeight="800"
+                fill={pct == null ? "rgba(255,255,255,0.50)" : "rgba(255,255,255,0.95)"}
+                style={{ fontFamily: "var(--font-mono)" }}>
+                {pct == null ? "—" : `${(pct * 100).toFixed(1)}%`}
+              </text>
+            </g>
+          );
+        })}
 
-          {/* Sweep scan band over the rink — matches netScan / ztScan idiom */}
-          <rect x="0" y="0" width="100" height="2"
-            fill={teamColor} fillOpacity="0.22"
-            style={{ mixBlendMode: "screen", animation: "gslScan 5.2s linear infinite" }} />
+        {/* Ice markings — blue line at the bottom of the OZ, faint red
+            goal line at the top so the orientation reads immediately. */}
+        <line x1="0.5" y1="75" x2="84.5" y2="75" stroke="#60a5fa" strokeWidth="1.0" opacity="0.55" />
+        <line x1="0.5" y1="11" x2="84.5" y2="11" stroke="#f87171" strokeWidth="0.7" opacity="0.65" />
+        {/* Trapezoid behind the goal line */}
+        <polygon points="28.5,0 56.5,0 51.5,11 33.5,11"
+          fill="none" stroke="#f87171" strokeWidth="0.4" opacity="0.35" clipPath="url(#gslClip)" />
+        {/* Crease — D-shape opening up into the slot */}
+        <path d="M 36.5 11 A 6 6 0 0 0 48.5 11 Z"
+          fill={teamColor} fillOpacity="0.10" stroke="#60a5fa" strokeWidth="0.6" opacity="0.7" />
+        {/* Net rectangle */}
+        <rect x="39.5" y="8.5" width="6" height="2.5" rx="0.5"
+          fill="rgba(255,255,255,0.10)" stroke={teamColor} strokeWidth="0.5" opacity="0.85" />
+        {/* OZ faceoff circles — left + right */}
+        <circle cx="20.5" cy="31" r="15" fill="none" stroke="#f87171" strokeWidth="0.4" opacity="0.28" clipPath="url(#gslClip)" />
+        <circle cx="64.5" cy="31" r="15" fill="none" stroke="#f87171" strokeWidth="0.4" opacity="0.28" clipPath="url(#gslClip)" />
+        <circle cx="20.5" cy="31" r="0.85" fill="#f87171" opacity="0.6" />
+        <circle cx="64.5" cy="31" r="0.85" fill="#f87171" opacity="0.6" />
 
-          {/* Corner reticles — push the chrome edge of the panel out so the
-              rink looks instrument-grade. Two corners on each side. */}
-          <g fill={teamColor} fillOpacity="0.80">
-            <rect x="0.4" y="0.4" width="3" height="0.4" />
-            <rect x="0.4" y="0.4" width="0.4" height="3" />
-            <rect x="96.6" y="0.4" width="3" height="0.4" />
-            <rect x="99.2" y="0.4" width="0.4" height="3" />
-            <rect x="0.4" y="81.6" width="3" height="0.4" />
-            <rect x="0.4" y="81.6" width="0.4" height="3" />
-            <rect x="96.6" y="81.6" width="3" height="0.4" />
-            <rect x="99.2" y="81.6" width="0.4" height="3" />
-          </g>
+        {/* Animated scan band — same idiom as ZoneTendencyMap's ztScan */}
+        <rect x="0" y="0" width="85" height="2"
+          fill={teamColor} fillOpacity="0.18"
+          clipPath="url(#gslClip)"
+          style={{ mixBlendMode: "screen", animation: "gslScan 4.8s linear infinite" }} />
+
+        {/* Corner reticles outside the ice border so the panel feels
+            instrument-grade — matches ZoneTendencyMap exactly. */}
+        <g fill={teamColor} fillOpacity="0.75">
+          <rect x="0.5" y="0.5" width="3" height="0.4" />
+          <rect x="0.5" y="0.5" width="0.4" height="3" />
+          <rect x="81" y="0.5" width="3" height="0.4" />
+          <rect x="84.1" y="0.5" width="0.4" height="3" />
+          <rect x="0.5" y="82" width="3" height="0.4" />
+          <rect x="0.5" y="82" width="0.4" height="3" />
+          <rect x="81" y="82" width="3" height="0.4" />
+          <rect x="84.1" y="82" width="0.4" height="3" />
         </g>
       </svg>
 
@@ -5194,23 +5209,53 @@ export default function PlayerProfilePage() {
               isGoalie={!!isGoalie}
               teamColor={teamColor}
               bodyIntensity={bodyIntensity}
-              telemetryLeft={!isGoalie ? [
+              telemetryLeft={isGoalie ? [
+                // Goalies: callouts mapped onto the silhouette where the
+                // body part most associated with the stat lives — head for
+                // overall save% (reads), torso for workload, legs for the
+                // mid/low save% that test footwork and tracking.
+                { id: "sv",     label: "SV%",       val: data.sv_pct != null ? `${(data.sv_pct * 100).toFixed(1)}%` : (nhlStats?.sv_pct != null ? `${(nhlStats.sv_pct * 100).toFixed(1)}%` : null), target: "head" as const,
+                  tip: "Overall save percentage this season. NHL avg ~.905; .920+ is starter-quality." },
+                { id: "hdsv",   label: "HD SV%",    val: data.hdsv_pct != null ? `${(data.hdsv_pct * 100).toFixed(1)}%` : null, target: "head" as const,
+                  tip: "High-danger save percentage — most predictive goalie metric. League avg ~.800; elite goalies clear .830." },
+                { id: "shots",  label: "SHOTS",     val: data.shots_against != null ? `${data.shots_against}` : null, target: "torso" as const,
+                  tip: "Shots faced this season — workload proxy. Pair with GP to read minutes." },
+              ].filter(c => c.val !== null) : [
                 { id: "speed",    label: "MAX SPEED",  val: data.skating_max_speed_kmh != null ? `${data.skating_max_speed_kmh.toFixed(1)} km/h` : null, target: "legs" as const,
                   tip: "Peak skating speed from NHL EDGE puck-and-player tracking, averaged across this season's games. NHL average tops out around 32–34 km/h; elite skaters hit 36+." },
                 { id: "hits",     label: "HITS/60",    val: data.hits_per60 != null ? data.hits_per60.toFixed(1) : null, target: "arms" as const,
                   tip: "Hits thrown per 60 minutes of even-strength play. 3+ is a clear physical role; below 1 is a finesse profile." },
                 { id: "blocks",   label: "BLOCKS/60",  val: data.blocks_per60 != null ? data.blocks_per60.toFixed(1) : null, target: "torso" as const,
                   tip: "Shots blocked per 60 minutes — proxy for shot-lane defending. Defensemen routinely 4+; forwards rarely above 2." },
-              ].filter(c => c.val !== null) : []}
-              telemetryRight={!isGoalie ? [
+              ].filter(c => c.val !== null)}
+              telemetryRight={isGoalie ? [
+                { id: "gsax",   label: "GSAx",      val: data.gsax != null ? `${data.gsax > 0 ? "+" : ""}${data.gsax.toFixed(1)}` : null, target: "head" as const,
+                  tip: "Goals saved above expected — value-added vs an average goalie given the same shot diet. >+10 over a season is elite; negative means letting in more than the model expects." },
+                { id: "gaa",    label: "GAA",       val: nhlStats?.gaa != null ? nhlStats.gaa.toFixed(2) : null, target: "torso" as const,
+                  tip: "Goals against per 60 mins. Sub-2.50 is starter-tier. Heavily team-dependent — pair with GSAx for an honest read." },
+                { id: "record", label: "W-L",       val: (nhlStats?.wins != null && nhlStats?.losses != null) ? `${nhlStats.wins}-${nhlStats.losses}${nhlStats?.ot_losses != null ? `-${nhlStats.ot_losses}` : ""}` : null, target: "torso" as const,
+                  tip: "Win-Loss-OT record this season. Counting stat — useful for context, not for evaluating performance." },
+              ].filter(c => c.val !== null) : [
                 { id: "battle",   label: "BATTLE",     val: data.battle_percentile != null ? `${data.battle_percentile.toFixed(0)}th` : null, target: "torso" as const,
                   tip: "Puck-battle percentile across hits, blocks, and contested zone battles combined. 85th pct = wins more pucks than 85% of skaters." },
                 { id: "toi",      label: "EV TOI",     val: data.toi_ev != null ? `${data.toi_ev.toFixed(0)}m` : null, target: "head" as const,
                   tip: "Total 5v5 even-strength minutes this season. Higher = more coach trust. All per-60 metrics on the page normalize against this." },
                 { id: "edge",     label: "EDGE Δ",     val: phase3?.edge_load != null ? `${phase3.edge_load >= 0 ? "+" : ""}${(phase3.edge_load * 100).toFixed(1)}%` : null, target: "legs" as const,
                   tip: "EDGE skating-load degradation vs the player's own baseline. Negative = moving slower/shorter distance than their norm — fatigue showing in the legs." },
-              ].filter(c => c.val !== null) : []}
-              tickerLine={[
+              ].filter(c => c.val !== null)}
+              tickerLine={isGoalie ? [
+                data.sv_pct != null ? `SV ${(data.sv_pct * 100).toFixed(1)}%` : (nhlStats?.sv_pct != null ? `SV ${(nhlStats.sv_pct * 100).toFixed(1)}%` : null),
+                data.hdsv_pct != null ? `HD ${(data.hdsv_pct * 100).toFixed(1)}%` : null,
+                data.mdsv_pct != null ? `MD ${(data.mdsv_pct * 100).toFixed(1)}%` : null,
+                data.ldsv_pct != null ? `LD ${(data.ldsv_pct * 100).toFixed(1)}%` : null,
+                data.gsax != null ? `GSAx ${data.gsax > 0 ? "+" : ""}${data.gsax.toFixed(1)}` : null,
+                nhlStats?.gaa != null ? `GAA ${nhlStats.gaa.toFixed(2)}` : null,
+                data.shots_against != null ? `SA ${data.shots_against}` : null,
+                data.games_played != null ? `GP ${data.games_played}` : null,
+                nhlStats?.shutouts != null ? `SO ${nhlStats.shutouts}` : null,
+                fi != null ? `FI ${fi.toFixed(2)}` : null,
+                ci != null ? `CI ${ci >= 0 ? "+" : ""}${ci.toFixed(2)}` : null,
+              ].filter((s): s is string => Boolean(s)) : [
                 fi != null ? `FI ${fi.toFixed(2)}` : null,
                 ci != null ? `CI ${ci >= 0 ? "+" : ""}${ci.toFixed(2)}` : null,
                 hhs != null ? `HHS ${hhs >= 0 ? "+" : ""}${hhs.toFixed(2)}` : null,
