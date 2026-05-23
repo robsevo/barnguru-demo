@@ -2564,8 +2564,14 @@ function ZoneTendencyMap({ data, teamColor }: { data: ProfileData; teamColor: st
       <text x="42.5" y="37" textAnchor="middle" fontSize="2" fontWeight="600" fill={teamColor} fillOpacity="0.85" fontFamily="var(--font-mono)" letterSpacing="0.4">SLOT</text>
       <text x="42.5" y="42" textAnchor="middle" fontSize="4" fontWeight="800" fill={teamColor} fontFamily="var(--font-mono)">{slot.toFixed(0)}%</text>
 
-      <text x="42.5" y="20" textAnchor="middle" fontSize="1.7" fontWeight="600" fill="#fbbf24" fillOpacity="0.85" fontFamily="var(--font-mono)" letterSpacing="0.3">NET FRONT</text>
-      <text x="42.5" y="23.5" textAnchor="middle" fontSize="2.8" fontWeight="800" fill="#fbbf24" fontFamily="var(--font-mono)">{net.toFixed(0)}%</text>
+      {/* NET FRONT label — moved INSIDE the rect (centred vertically) so
+          it doesn't clip into the SLOT row below. Stacked tight: label
+          on top, value on bottom, both fit in the 11px-tall rect. */}
+      <text x="42.5" y="14.5" textAnchor="middle" fontSize="1.6" fontWeight="600"
+        fill="#fbbf24" fillOpacity="0.85" fontFamily="var(--font-mono)" letterSpacing="0.3">NET FRONT</text>
+      <text x="42.5" y="20" textAnchor="middle" fontSize="3.2" fontWeight="800"
+        fill="#fbbf24" fontFamily="var(--font-mono)"
+        style={{ textShadow: "0 0 4px rgba(251,191,36,0.6)" }}>{net.toFixed(0)}%</text>
 
       {/* Animated scan line sweeping the rink */}
       <rect x="0" y="0" width="85" height="2"
@@ -8025,46 +8031,65 @@ export default function PlayerProfilePage() {
                 )}
               </div>
 
-              {/* Component breakdown bars */}
+              {/* FI Component breakdown — HUD bars matching Top Contributors */}
               {sortedComps.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-white/[0.05] space-y-2">
-                  <div className="flex items-baseline justify-between">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/40">
-                      FI Component Breakdown
-                    </p>
-                    <p className="text-[8px] font-mono text-white/25">
-                      bar saturates at 0.30
-                    </p>
+                <div className="mt-4 pt-3 border-t space-y-1.5"
+                  style={{ borderColor: `${teamColor}1a` }}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="hud-mono text-[9px] uppercase tracking-[0.22em] flex items-center gap-1.5"
+                      style={{ color: colorHex, textShadow: `0 0 4px ${colorHex}55` }}>
+                      <span className="hud-pulse-dot" style={{ background: colorHex, boxShadow: `0 0 3px ${colorHex}` }} />
+                      ◢ FI COMPONENT BREAKDOWN
+                    </span>
+                    <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)] tabular-nums">
+                      0.30 sat
+                    </span>
                   </div>
-                  {sortedComps.map(([k, v]) => (
-                    <div key={k} className="flex items-center gap-2">
-                      <span className="text-[10px] text-white/55 w-32 shrink-0 truncate">
-                        {k.replace(/_/g, " ").replace(/ load$/, "")}
-                      </span>
-                      <div className="flex-1 h-1.5 rounded-full bg-white/[0.04] overflow-hidden relative">
-                        <div
-                          className="h-full"
+                  {sortedComps.map(([k, v], i) => {
+                    const widthPct = Math.min(100, (v / 0.3) * 100);
+                    return (
+                      <div key={k} className="flex items-center gap-2">
+                        <span aria-hidden className="w-1 h-1 rounded-full shrink-0"
+                          style={{ background: colorHex, boxShadow: `0 0 3px ${colorHex}` }} />
+                        <span className="hud-mono text-[9px] uppercase tracking-[0.14em] text-white/75 w-28 shrink-0 truncate">
+                          {k.replace(/_/g, " ").replace(/ load$/, "")}
+                        </span>
+                        <div className="relative flex-1 h-2 overflow-hidden"
                           style={{
-                            width: `${Math.min(100, (v / 0.3) * 100)}%`,
-                            backgroundColor: colorHex,
-                            opacity: 0.85,
-                          }}
-                        />
-                        {/* 50% midpoint tick */}
-                        <div className="absolute top-0 bottom-0 w-px bg-white/[0.10]" style={{ left: "50%" }} />
+                            background: "rgba(255,255,255,0.025)",
+                            border: `1px solid ${colorHex}33`,
+                            boxShadow: `inset 0 0 4px ${colorHex}22`,
+                          }}>
+                          <div className="h-full origin-left"
+                            style={{
+                              width: `${widthPct}%`,
+                              background: `linear-gradient(90deg, ${colorHex}aa 0%, ${colorHex} 100%)`,
+                              boxShadow: `0 0 6px ${colorHex}88, inset 0 0 4px ${colorHex}66`,
+                              animation: `topContribFill 750ms cubic-bezier(0.22,1,0.36,1) ${80 + i * 60}ms both`,
+                            }} />
+                          <div className="absolute top-0 bottom-0 w-5 pointer-events-none"
+                            style={{
+                              background: `linear-gradient(90deg, transparent, ${colorHex}, transparent)`,
+                              animation: `topContribScan 4.2s linear infinite ${i * 0.35}s`,
+                              mixBlendMode: "screen",
+                              opacity: widthPct > 4 ? 0.55 : 0,
+                            }} />
+                          <span className="absolute top-0 bottom-0 w-px pointer-events-none" style={{ left: "25%", background: "rgba(255,255,255,0.08)" }} />
+                          <span className="absolute top-0 bottom-0 w-px pointer-events-none" style={{ left: "50%", background: "rgba(255,255,255,0.18)" }} />
+                          <span className="absolute top-0 bottom-0 w-px pointer-events-none" style={{ left: "75%", background: "rgba(255,255,255,0.08)" }} />
+                        </div>
+                        <span className="hud-mono text-[10px] tabular-nums font-semibold w-12 text-right shrink-0"
+                          style={{ color: colorHex, textShadow: `0 0 4px ${colorHex}55` }}>
+                          {v.toFixed(3)}
+                        </span>
                       </div>
-                      <span className="text-[10px] font-mono text-white/65 w-12 text-right shrink-0">
-                        {v.toFixed(3)}
-                      </span>
-                    </div>
-                  ))}
-                  {/* Scale legend */}
-                  <div className="flex items-center gap-2 pt-1">
-                    <span className="w-32 shrink-0" />
-                    <div className="flex-1 flex justify-between text-[8px] font-mono text-white/25">
-                      <span>0</span>
-                      <span>0.15</span>
-                      <span>0.30+</span>
+                    );
+                  })}
+                  <div className="flex items-center gap-2 pt-0.5">
+                    <span className="w-1 shrink-0" />
+                    <span className="w-28 shrink-0" />
+                    <div className="flex-1 flex justify-between hud-mono text-[7px] uppercase tracking-[0.16em] text-[var(--text-muted)] tabular-nums">
+                      <span>0</span><span>0.15</span><span>0.30+</span>
                     </div>
                     <span className="w-12 shrink-0" />
                   </div>
@@ -8192,52 +8217,87 @@ export default function PlayerProfilePage() {
               </div>
 
               {sortedComps.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-white/[0.05] space-y-2">
-                  <div className="flex items-baseline justify-between">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/40">
-                      Top Contributors
-                    </p>
-                    <p className="text-[8px] font-mono text-white/25">
-                      bar saturates at ±0.15
-                    </p>
+                <div className="mt-4 pt-3 border-t space-y-1.5"
+                  style={{ borderColor: `${teamColor}1a` }}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="hud-mono text-[9px] uppercase tracking-[0.22em] flex items-center gap-1.5"
+                      style={{ color: teamColor, textShadow: `0 0 4px ${teamColor}55` }}>
+                      <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 3px ${teamColor}` }} />
+                      ◢ TOP CONTRIBUTORS
+                    </span>
+                    <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)] tabular-nums">
+                      ±0.15 sat
+                    </span>
                   </div>
-                  {sortedComps.map(([k, v]) => {
+                  {sortedComps.map(([k, v], i) => {
                     const isTeam = k.startsWith("team:");
                     const label = k.replace(/^team:/, "").replace(/_/g, " ");
-                    const color = v >= 0 ? "#4ade80" : "#f87171";
+                    const color = v >= 0 ? "#5ee08a" : "#f87171";
+                    const widthPct = Math.min(100, (Math.abs(v) / 0.15) * 100);
                     return (
-                      <div key={k} className="flex items-center gap-2">
-                        <span className={`text-[10px] w-32 shrink-0 truncate ${isTeam ? "text-white/40" : "text-white/55"}`}>
-                          {isTeam ? `(team) ${label}` : label}
+                      <div key={k} className="flex items-center gap-2 group">
+                        {/* Team-vs-player marker dot */}
+                        <span aria-hidden className="w-1 h-1 rounded-full shrink-0"
+                          style={{ background: isTeam ? "#a78bfa" : teamColor, boxShadow: `0 0 3px ${isTeam ? "#a78bfa" : teamColor}` }} />
+                        <span className={`hud-mono text-[9px] uppercase tracking-[0.14em] w-28 shrink-0 truncate ${isTeam ? "text-white/50" : "text-white/75"}`}>
+                          {isTeam ? `(T) ${label}` : label}
                         </span>
-                        <div className="flex-1 h-1.5 rounded-full bg-white/[0.04] overflow-hidden relative">
-                          <div
-                            className="h-full"
+                        {/* HUD bar — gradient fill, inner glow, scan sweep */}
+                        <div className="relative flex-1 h-2 overflow-hidden"
+                          style={{
+                            background: "rgba(255,255,255,0.025)",
+                            border: `1px solid ${color}33`,
+                            boxShadow: `inset 0 0 4px ${color}22`,
+                          }}>
+                          <div className="h-full origin-left"
                             style={{
-                              width: `${Math.min(100, (Math.abs(v) / 0.15) * 100)}%`,
-                              backgroundColor: color,
-                              opacity: 0.85,
-                            }}
-                          />
-                          {/* 50% midpoint tick */}
-                          <div className="absolute top-0 bottom-0 w-px bg-white/[0.10]" style={{ left: "50%" }} />
+                              width: `${widthPct}%`,
+                              background: `linear-gradient(90deg, ${color}aa 0%, ${color} 100%)`,
+                              boxShadow: `0 0 6px ${color}88, inset 0 0 4px ${color}66`,
+                              animation: `topContribFill 750ms cubic-bezier(0.22,1,0.36,1) ${80 + i * 60}ms both`,
+                            }} />
+                          {/* Sweeping highlight */}
+                          <div className="absolute top-0 bottom-0 w-5 pointer-events-none"
+                            style={{
+                              background: `linear-gradient(90deg, transparent, ${color}, transparent)`,
+                              animation: `topContribScan 4.2s linear infinite ${i * 0.35}s`,
+                              mixBlendMode: "screen",
+                              opacity: widthPct > 4 ? 0.55 : 0,
+                            }} />
+                          {/* Tick marks at quartile + midpoint */}
+                          <span className="absolute top-0 bottom-0 w-px pointer-events-none" style={{ left: "25%", background: "rgba(255,255,255,0.08)" }} />
+                          <span className="absolute top-0 bottom-0 w-px pointer-events-none" style={{ left: "50%", background: "rgba(255,255,255,0.18)" }} />
+                          <span className="absolute top-0 bottom-0 w-px pointer-events-none" style={{ left: "75%", background: "rgba(255,255,255,0.08)" }} />
                         </div>
-                        <span className="text-[10px] font-mono text-white/65 w-14 text-right shrink-0">
+                        {/* Signed value chip */}
+                        <span className="hud-mono text-[10px] tabular-nums font-semibold w-14 text-right shrink-0"
+                          style={{ color, textShadow: `0 0 4px ${color}55` }}>
                           {v >= 0 ? "+" : ""}{v.toFixed(3)}
                         </span>
                       </div>
                     );
                   })}
-                  {/* Scale legend */}
-                  <div className="flex items-center gap-2 pt-1">
-                    <span className="w-32 shrink-0" />
-                    <div className="flex-1 flex justify-between text-[8px] font-mono text-white/25">
-                      <span>0</span>
-                      <span>0.075</span>
-                      <span>0.15+</span>
+                  <div className="flex items-center gap-2 pt-0.5">
+                    <span className="w-1 shrink-0" />
+                    <span className="w-28 shrink-0" />
+                    <div className="flex-1 flex justify-between hud-mono text-[7px] uppercase tracking-[0.16em] text-[var(--text-muted)] tabular-nums">
+                      <span>0</span><span>0.075</span><span>0.15+</span>
                     </div>
                     <span className="w-14 shrink-0" />
                   </div>
+                  <style jsx>{`
+                    @keyframes topContribFill {
+                      from { transform: scaleX(0); opacity: 0.2; }
+                      to   { transform: scaleX(1); opacity: 1;   }
+                    }
+                    @keyframes topContribScan {
+                      0%   { transform: translateX(-30px); }
+                      100% { transform: translateX(520px); }
+                    }
+                    @media (prefers-reduced-motion: reduce) {
+                      div { animation: none !important; }
+                    }
+                  `}</style>
                 </div>
               )}
             </Card>

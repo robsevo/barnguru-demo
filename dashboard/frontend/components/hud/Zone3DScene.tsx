@@ -388,12 +388,10 @@ export default function Zone3DScene({ activations, themeColor = "#C9A84C" }: Zon
         />
       </Canvas>
 
-      <div className="absolute top-2 left-2 flex items-center gap-2 pointer-events-none">
-        <span className="hud-mono text-[9px] uppercase tracking-[0.18em] px-2 py-0.5 rounded"
-          style={{ color: themeColor, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}>
-          ◢ ZONE TENDENCY · 3D
-        </span>
-      </div>
+      {/* Inner "ZONE TENDENCY · 3D" label removed — the wrapping Card
+          title "Zone Tendencies" already names the section, and the
+          parent Zone3D component ships a 2D/3D toggle at top-left that
+          this label was colliding with. */}
 
       <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
         <button
