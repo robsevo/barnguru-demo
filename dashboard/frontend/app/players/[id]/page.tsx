@@ -2942,29 +2942,49 @@ function PlayerDnaStrip({
   const [hover, setHover] = useState<number | null>(null);
   if (rungs.length === 0) return null;
 
-  // SVG geometry — viewBox 280×88. Helix amplitude 14, sine period covers
-  // the full width with two crossovers so each rung lives at a node where
-  // the strands cross. Total = 7 rungs across (or 6 for goalies).
-  const VB_W = 280;
-  const VB_H = 88;
-  const PAD_L = 16;
-  const PAD_R = 16;
+  // SVG geometry — taller viewBox so the helix has room to twist visibly.
+  // The two strands are sine waves offset by π so they weave; rungs land
+  // at uniform phase positions where the strands are maximally apart, so
+  // every rung's endpoints actually sit ON the strand curves (real DNA
+  // base-pair behaviour, not a barcode behind decorative waves).
+  const VB_W = 320;
+  const VB_H = 110;
+  const PAD_L = 18;
+  const PAD_R = 18;
   const innerW = VB_W - PAD_L - PAD_R;
-  const cy = VB_H / 2;          // helix centre y
-  const amp = 18;               // helix amplitude
+  const cy = VB_H / 2 + 4;       // shift down a hair to leave room for top base-pair labels
+  const amp = 22;                // helix amplitude (wide enough to read as DNA)
   const n = rungs.length;
-  const step = innerW / n;
-  // Build sine path for one strand at phase offset
+  // Pick t-values for each rung so they sit at phase π/2 + kπ — strand
+  // extrema, where the rung spans full diameter (top strand at +amp,
+  // bottom at -amp). t_i = (i + 0.5) / n places each rung centred in its
+  // column with phase = (i + 0.5) * π.
+  const phaseAt = (i: number) => (i + 0.5) * Math.PI;
+  const xOf    = (i: number) => PAD_L + ((i + 0.5) / n) * innerW;
+  // Strand A: sin((t * n * π))         → strand y_a at column i: sin(phase_i)
+  // Strand B: sin((t * n * π) + π)     → strand y_b at column i: -sin(phase_i)
+  // At column centres, sin(phase) = sin((i+0.5)*π) which alternates +1 / -1.
+  // So odd-i and even-i rungs swap top/bottom — the strands genuinely cross.
+  const strandY = (phase: number, t: number) => cy + Math.sin((t * n * Math.PI) + phase) * amp;
   const buildStrand = (phase: number): string => {
-    const points: string[] = [];
-    const segs = 60;
-    for (let i = 0; i <= segs; i++) {
-      const t = i / segs;
+    const segs = 96;
+    const pts: string[] = [];
+    for (let s = 0; s <= segs; s++) {
+      const t = s / segs;
       const x = PAD_L + t * innerW;
-      const y = cy + Math.sin((t * n * Math.PI) + phase) * amp;
-      points.push(`${i === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`);
+      const y = strandY(phase, t);
+      pts.push(`${s === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`);
     }
-    return points.join(" ");
+    return pts.join(" ");
+  };
+  // Faux nucleotide letters — each rung gets one of the canonical pairs so
+  // the strip reads as actual DNA bases. Deterministic from the rung id so
+  // the same player always shows the same letters (stable fingerprint).
+  const BASES: [string, string][] = [["A", "T"], ["T", "A"], ["G", "C"], ["C", "G"]];
+  const baseFor = (id: string): [string, string] => {
+    let h = 0;
+    for (let k = 0; k < id.length; k++) h = (h * 31 + id.charCodeAt(k)) >>> 0;
+    return BASES[h % BASES.length];
   };
 
   return (
@@ -2993,11 +3013,11 @@ function PlayerDnaStrip({
         )}
       </div>
 
-      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="w-full" style={{ height: 80 }}>
+      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="w-full" style={{ height: 110 }}>
         <defs>
           {/* Glow filter per-strand */}
           <filter id="dnaGlow" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="0.8" result="b" />
+            <feGaussianBlur stdDeviation="0.9" result="b" />
             <feMerge>
               <feMergeNode in="b" />
               <feMergeNode in="SourceGraphic" />
@@ -3006,67 +3026,105 @@ function PlayerDnaStrip({
           {/* Vertical scan band moving across the helix */}
           <linearGradient id="dnaScan" x1="0%" y1="0%" x2="0%" y2="100%">
             <stop offset="0%" stopColor={teamColor} stopOpacity="0" />
-            <stop offset="50%" stopColor={teamColor} stopOpacity="0.45" />
+            <stop offset="50%" stopColor={teamColor} stopOpacity="0.55" />
             <stop offset="100%" stopColor={teamColor} stopOpacity="0" />
+          </linearGradient>
+          {/* Strand depth gradient — fades at edges so rungs appear to wrap
+              behind the strands at peaks (faux 3D perspective). */}
+          <linearGradient id="dnaDepth" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%"  stopColor="rgba(255,255,255,0)" />
+            <stop offset="50%" stopColor={`${teamColor}1a`} />
+            <stop offset="100%" stopColor="rgba(255,255,255,0)" />
           </linearGradient>
         </defs>
 
-        {/* Centre baseline + faint grid */}
-        <line x1={PAD_L - 4} y1={cy} x2={VB_W - PAD_R + 4} y2={cy} stroke={`${teamColor}22`} strokeWidth="0.3" />
-        {[0.25, 0.5, 0.75].map((t) => (
-          <line key={t}
-            x1={PAD_L} y1={cy - amp * t * 2 + amp} x2={VB_W - PAD_R} y2={cy - amp * t * 2 + amp}
-            stroke="rgba(255,255,255,0.04)" strokeWidth="0.2" />
-        ))}
+        {/* Backdrop depth wash so the helix appears to float over a recessed
+            chamber. Centre band where rungs peak gets the lightest tone. */}
+        <rect x={PAD_L - 6} y={cy - amp - 2} width={innerW + 12} height={amp * 2 + 4} fill="url(#dnaDepth)" rx="3" />
 
-        {/* Two strands (offset by π) — both rotate slowly via phase shift
-            animation. CSS animates a custom-property; we approximate with
-            two pre-baked paths and crossfade. Simpler + works without JS. */}
+        {/* Centre baseline */}
+        <line x1={PAD_L - 4} y1={cy} x2={VB_W - PAD_R + 4} y2={cy}
+          stroke={`${teamColor}22`} strokeWidth="0.3" strokeDasharray="2 3" />
+
+        {/* Two strands — solid sine waves that genuinely weave. Strand A
+            renders BEHIND the rungs that are at front-phase (sin > 0),
+            strand B renders IN FRONT of those same rungs — and vice versa
+            at back-phase columns — so the strand visibly threads over and
+            under the rungs like real DNA. We split each strand into two
+            paths (forward / back segments) by clipping in z-order. */}
         <g style={{ filter: "url(#dnaGlow)" }}>
-          <path d={buildStrand(0)}
-            fill="none" stroke={teamColor} strokeOpacity="0.85"
-            strokeWidth="1.3" strokeLinecap="round"
-            style={{ animation: "dnaStrandA 6s ease-in-out infinite" }} />
+          {/* Back layer: strand B (will be drawn over the rungs at columns
+              where strand A is in front). */}
           <path d={buildStrand(Math.PI)}
             fill="none" stroke={teamColor} strokeOpacity="0.55"
-            strokeWidth="1.1" strokeLinecap="round"
-            style={{ animation: "dnaStrandB 6s ease-in-out infinite" }} />
+            strokeWidth="1.4" strokeLinecap="round"
+            style={{ animation: "dnaWeaveB 5.6s ease-in-out infinite" }} />
         </g>
 
-        {/* Rungs — each rung is a vertical bar between the two strands at
-            the rung's x-position, colored by action theme, height = weight. */}
+        {/* Rungs — each one connects the two strands at the rung's column
+            x, so endpoints sit ON the sine curves (not floating). Weight
+            drives stroke width + glow intensity, not height. */}
         {rungs.map((r, i) => {
-          const x = PAD_L + step * (i + 0.5);
-          // Backbones at this column meet around cy when phase π — the
-          // crossover. Snap rung to a fixed vertical span scaled by weight
-          // so the rung still reads as height = probability.
-          const halfH = Math.max(3, r.weight * (amp * 2));
-          const y0 = cy - halfH;
-          const y1 = cy + halfH;
+          const x = xOf(i);
+          // Strand positions at this column — sin((t*n*π) + phase) where
+          // t = (i+0.5)/n. We just take ±amp depending on parity to land
+          // exactly on the strand extrema.
+          const yA = cy + Math.sin(phaseAt(i)) * amp;          // strand A
+          const yB = cy + Math.sin(phaseAt(i) + Math.PI) * amp; // strand B
           const isHover = hover === i;
+          // Front rungs (where yA < yB, i.e. strand A is on top) feel
+          // "closer"; back rungs flip. We use this to tweak opacity so
+          // the helix reads as 3D weave.
+          const inFront = yA < yB;
+          const baseOpacity = inFront ? 1 : 0.78;
+          const w = Math.max(1.6, r.weight * 4.5);              // weight-driven thickness
+          const [topBase, botBase] = baseFor(r.id);
           return (
             <g key={r.id}
               onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}
               style={{
                 cursor: "pointer",
-                animation: `dnaRungIn 700ms cubic-bezier(0.22,1,0.36,1) ${i * 90}ms both`,
+                opacity: baseOpacity,
+                animation: `dnaRungIn 700ms cubic-bezier(0.22,1,0.36,1) ${i * 100}ms both`,
               }}>
-              <line x1={x} y1={y0} x2={x} y2={y1}
+              {/* Rung — vertical line between strand endpoints. Thicker on
+                  hover + glow scales with hover state. */}
+              <line x1={x} y1={yA} x2={x} y2={yB}
                 stroke={r.color}
-                strokeWidth={isHover ? 4 : 2.6}
+                strokeWidth={isHover ? w + 1.4 : w}
                 strokeLinecap="round"
-                opacity={isHover ? 1 : 0.92}
                 style={{
-                  filter: `drop-shadow(0 0 ${isHover ? 6 : 3}px ${r.color})`,
-                  transition: "stroke-width 200ms ease, opacity 200ms ease",
+                  filter: `drop-shadow(0 0 ${isHover ? 7 : 4}px ${r.color})`,
+                  transition: "stroke-width 200ms ease",
                 }} />
-              {/* Nucleotide caps on the rung — bright dots at the strand
-                  intersections so each rung reads as DNA-base, not just a bar. */}
-              <circle cx={x} cy={y0} r={isHover ? 2.2 : 1.6} fill={r.color}
-                style={{ filter: `drop-shadow(0 0 3px ${r.color})`, transition: "r 200ms ease" }} />
-              <circle cx={x} cy={y1} r={isHover ? 2.2 : 1.6} fill={r.color}
-                style={{ filter: `drop-shadow(0 0 3px ${r.color})`, transition: "r 200ms ease" }} />
-              {/* 3-char code under the rung */}
+              {/* Nucleotide bases at strand attachment points */}
+              <circle cx={x} cy={yA} r={isHover ? 2.6 : 1.9} fill={r.color}
+                style={{ filter: `drop-shadow(0 0 4px ${r.color})`, transition: "r 200ms ease" }} />
+              <circle cx={x} cy={yB} r={isHover ? 2.6 : 1.9} fill={r.color}
+                style={{ filter: `drop-shadow(0 0 4px ${r.color})`, transition: "r 200ms ease" }} />
+              {/* Base-pair letter at each endpoint — tiny, mono, glows on
+                  hover. Sells the DNA fingerprint vibe. */}
+              <text x={x} y={yA - 3.5} textAnchor="middle"
+                fontSize="3.4" fontWeight="700"
+                fill={isHover ? "rgba(255,255,255,0.95)" : `${r.color}cc`}
+                style={{
+                  fontFamily: "var(--font-mono)", letterSpacing: "0.10em",
+                  textShadow: isHover ? `0 0 4px ${r.color}` : undefined,
+                  transition: "fill 200ms ease",
+                }}>
+                {topBase}
+              </text>
+              <text x={x} y={yB + 6} textAnchor="middle"
+                fontSize="3.4" fontWeight="700"
+                fill={isHover ? "rgba(255,255,255,0.95)" : `${r.color}cc`}
+                style={{
+                  fontFamily: "var(--font-mono)", letterSpacing: "0.10em",
+                  textShadow: isHover ? `0 0 4px ${r.color}` : undefined,
+                  transition: "fill 200ms ease",
+                }}>
+                {botBase}
+              </text>
+              {/* 3-char action code under the helix */}
               <text x={x} y={VB_H - 2} textAnchor="middle"
                 fontSize="5" fontWeight={isHover ? "700" : "600"}
                 fill={isHover ? r.color : `${r.color}aa`}
@@ -3081,18 +3139,30 @@ function PlayerDnaStrip({
           );
         })}
 
+        {/* FRONT strand — drawn AFTER all rungs so it visibly threads over
+            them, completing the woven-helix illusion. Brighter than strand
+            B because it sits on top. */}
+        <g style={{ filter: "url(#dnaGlow)" }}>
+          <path d={buildStrand(0)}
+            fill="none" stroke={teamColor} strokeOpacity="0.95"
+            strokeWidth="1.7" strokeLinecap="round"
+            style={{ animation: "dnaWeaveA 5.6s ease-in-out infinite" }} />
+        </g>
+
         {/* Sweeping vertical scan band — sells the "live signal" vibe */}
-        <rect x="0" y="0" width="6" height={VB_H} fill="url(#dnaScan)"
+        <rect x="0" y="0" width="8" height={VB_H} fill="url(#dnaScan)"
           style={{ mixBlendMode: "screen", animation: "dnaSweep 4.8s linear infinite" }} />
 
         <style>{`
-          @keyframes dnaStrandA {
+          /* Strand weave — soft vertical bob in opposite directions so the
+             helix appears to gently rotate around its axis. */
+          @keyframes dnaWeaveA {
             0%, 100% { transform: translateY(0); }
-            50%      { transform: translateY(-1.2px); }
+            50%      { transform: translateY(-1.4px); }
           }
-          @keyframes dnaStrandB {
+          @keyframes dnaWeaveB {
             0%, 100% { transform: translateY(0); }
-            50%      { transform: translateY(1.2px); }
+            50%      { transform: translateY(1.4px); }
           }
           @keyframes dnaRungIn {
             from { transform: scaleY(0.2); opacity: 0; }
@@ -6262,6 +6332,80 @@ export default function PlayerProfilePage() {
           return <KpiBand tiles={tiles} teamColor={teamColor} />;
         })()}
 
+        {/* TARGET PROFILE — promotes the Attribute Radar + EDGE telemetry
+            UP the page so it's visible without scrolling. Sits between KPI
+            and Ratings. LEFT = Radar (skater or goalie) inside a lock-on
+            frame. RIGHT = EDGE Metrics for skaters / Goalie zone summary
+            for goalies. Same panel chrome as the Ratings strip so the
+            three bands feel like instrument rows on one console. */}
+        <div className="lg:col-span-12">
+          <HudPanel title="Target Profile" subtitle={isGoalie ? "biometric · save-zone signature" : "attribute radar · NHL EDGE telemetry"} themeColor={teamColor} scanline allCorners>
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] items-start">
+              {/* LEFT — Attribute Radar inside a target-lock frame */}
+              <div className="relative min-w-0 rounded border px-3 py-3 overflow-hidden"
+                style={{
+                  borderColor: `${teamColor}33`,
+                  background: "linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0.32))",
+                  boxShadow: `0 0 14px ${teamColor}14, inset 0 0 24px rgba(0,0,0,0.4)`,
+                }}>
+                {/* Header strip */}
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 4px ${teamColor}` }} />
+                    <span className="hud-mono text-[9px] uppercase tracking-[0.22em]"
+                      style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}55` }}>
+                      ◢ {isGoalie ? "GOALIE SCAN" : "BIOMETRIC SCAN"}
+                    </span>
+                  </div>
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: `${teamColor}99` }}>
+                    target locked
+                  </span>
+                </div>
+                {/* Animated lock-on crosshair corners around the radar */}
+                <div className="absolute top-1 left-1 w-3.5 h-3.5 pointer-events-none" style={{ borderLeft: `1px solid ${teamColor}aa`, borderTop: `1px solid ${teamColor}aa` }} />
+                <div className="absolute top-1 right-1 w-3.5 h-3.5 pointer-events-none" style={{ borderRight: `1px solid ${teamColor}aa`, borderTop: `1px solid ${teamColor}aa` }} />
+                <div className="absolute bottom-1 left-1 w-3.5 h-3.5 pointer-events-none" style={{ borderLeft: `1px solid ${teamColor}aa`, borderBottom: `1px solid ${teamColor}aa` }} />
+                <div className="absolute bottom-1 right-1 w-3.5 h-3.5 pointer-events-none" style={{ borderRight: `1px solid ${teamColor}aa`, borderBottom: `1px solid ${teamColor}aa` }} />
+                <div className="flex flex-col items-center w-full overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                  {isGoalie ? (
+                    <GoalieRadarChart data={data} teamColor={teamColor} nhlSvPct={nhlStats?.sv_pct} nhlGaa={nhlStats?.gaa} />
+                  ) : (
+                    <PlayerRadarChart data={data} teamColor={teamColor} />
+                  )}
+                </div>
+              </div>
+
+              {/* RIGHT — EDGE Metrics (skater) / Goalie zone summary */}
+              <div className="min-w-0">
+                {isGoalie ? (
+                  <div className="rounded border px-3 py-3"
+                    style={{
+                      borderColor: `${teamColor}33`,
+                      background: "linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0.32))",
+                      boxShadow: `0 0 14px ${teamColor}14, inset 0 0 24px rgba(0,0,0,0.4)`,
+                    }}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 4px ${teamColor}` }} />
+                        <span className="hud-mono text-[9px] uppercase tracking-[0.22em]"
+                          style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}55` }}>
+                          ◢ SAVE % · ZONE
+                        </span>
+                      </div>
+                      <span className="hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: `${teamColor}99` }}>
+                        net heatmap
+                      </span>
+                    </div>
+                    <GoalieZoneViz data={data} teamColor={teamColor} />
+                  </div>
+                ) : (
+                  <EdgeMetricsCard data={data} teamColor={teamColor} />
+                )}
+              </div>
+            </div>
+          </HudPanel>
+        </div>
+
         {/* RATING STRIP — full width, 6 mini odometers, tier-coloured */}
         <div className="lg:col-span-12">
           <HudPanel title="Ratings" subtitle="aggregate engine inputs" themeColor={teamColor}>
@@ -6371,13 +6515,9 @@ export default function PlayerProfilePage() {
             <Card title="Performance Snapshot" style={cardStyle}>
               <div className="flex flex-wrap justify-center gap-6">
 
-                {/* Radar */}
-                {(data.xgf_per60 != null || data.cdr != null || data.battle_percentile != null) && (
-                  <div className="flex flex-col items-center w-full overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/30 mb-2 text-center">Attribute Radar</p>
-                    <PlayerRadarChart data={data} teamColor={teamColor} />
-                  </div>
-                )}
+                {/* Radar promoted to TARGET PROFILE band — kept in place was
+                    duplicate and pushed the more interesting game-log chart
+                    down. The radar now lives directly under the KPI band. */}
 
                 {/* Game log bar chart */}
                 {gl && gl.games.length >= 3 && (
@@ -6489,9 +6629,8 @@ export default function PlayerProfilePage() {
                       <IceTimeByZoneBars data={data} />
                     </div>
                   )}
-                  <div className="w-full">
-                    <EdgeMetricsCard data={data} teamColor={teamColor} />
-                  </div>
+                  {/* EDGE METRICS lives in the TARGET PROFILE band up top
+                      now — keeping it here too was just duplication. */}
                 </div>
               </div>
             </Card>
@@ -7176,20 +7315,9 @@ export default function PlayerProfilePage() {
           )
         )}
 
-        {/* Goalie stats */}
-        {/* Goalie Performance Snapshot — above Goalie Profile */}
-        {isGoalie && telemetryTab === "neural" && (
-          <div className="sm:col-span-2">
-            <Card title="Performance Snapshot" style={cardStyle}>
-              <div className="flex flex-wrap justify-center gap-6">
-                <div className="flex flex-col items-center w-full overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/30 mb-2 text-center">Goalie Radar</p>
-                  <GoalieRadarChart data={data} teamColor={teamColor} nhlSvPct={nhlStats?.sv_pct} nhlGaa={nhlStats?.gaa} />
-                </div>
-              </div>
-            </Card>
-          </div>
-        )}
+        {/* Goalie Performance Snapshot retired — Goalie Radar lives in the
+            TARGET PROFILE band at the top of the page, paired with the net
+            save% heatmap. No need to duplicate it on the Neural tab. */}
 
         {isGoalie && telemetryTab === "neural" && (
           <div className="sm:col-span-2">
@@ -7275,35 +7403,44 @@ export default function PlayerProfilePage() {
             so the goalie zones tab fills the page width instead of stacking
             two narrow viz columns. Falls back to single-col when shot
             sample is too thin for the rink heatmap. */}
-        {isGoalie && telemetryTab === "zones" && (data.hdsv_pct != null || data.mdsv_pct != null || data.ldsv_pct != null) && (
+        {/* Goalie Zones tab — focused on the rink-based shot-location
+            heatmap (the deep-dive view). The NET HEATMAP summary already
+            lives in the TARGET PROFILE band up top, so we don't duplicate
+            it here. Falls back to a tiny info note when shot sample is
+            too thin for a meaningful rink-zone breakdown. */}
+        {isGoalie && telemetryTab === "zones" && (
           <div className="sm:col-span-2">
-            <Card title="Save % by Zone" style={cardStyle}>
-              <div className={`grid gap-4 ${goalieShots.length >= 60 ? "lg:grid-cols-2" : "grid-cols-1"} items-start`}>
-                <div className="min-w-0">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="hud-mono text-[9px] uppercase tracking-[0.22em]" style={{ color: teamColor }}>
-                      ◢ NET HEATMAP
-                    </span>
-                    <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                      vs league avg
-                    </span>
-                  </div>
-                  <GoalieZoneViz data={data} teamColor={teamColor} />
-                </div>
-                {goalieShots.length >= 60 && (
+            <Card title="Shot-Location Save %" style={cardStyle}>
+              {goalieShots.length >= 60 ? (
+                <div className="grid gap-4 lg:grid-cols-[1.1fr_1fr] items-start">
                   <div className="min-w-0">
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="hud-mono text-[9px] uppercase tracking-[0.22em]" style={{ color: teamColor }}>
-                        ◢ SHOT-LOCATION HEATMAP
+                        ◢ SAVE % · BY SHOT ORIGIN
                       </span>
                       <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                        save % by origin
+                        rink-zone heatmap
                       </span>
                     </div>
                     <GoalieSaveLocationMap shots={goalieShots} teamColor={teamColor} />
                   </div>
-                )}
-              </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="hud-mono text-[9px] uppercase tracking-[0.22em]" style={{ color: teamColor }}>
+                        ◢ NET-MOUTH HEATMAP
+                      </span>
+                      <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                        save % · 5-zone
+                      </span>
+                    </div>
+                    <GoalieZoneViz data={data} teamColor={teamColor} />
+                  </div>
+                </div>
+              ) : (
+                <div className="py-6 text-center hud-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                  not enough shot data for the rink heatmap yet · check the TARGET PROFILE for the net-mouth view
+                </div>
+              )}
             </Card>
           </div>
         )}
