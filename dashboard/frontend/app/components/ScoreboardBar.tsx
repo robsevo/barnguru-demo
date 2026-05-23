@@ -593,11 +593,14 @@ export default function ScoreboardBar() {
       </div>
 
       {games.length > 0 && (
-        <div className="flex items-center border-b border-[#C9A84C]/[0.14] py-1" style={{ background: "linear-gradient(to bottom, rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.025), transparent)" }}>
+        <div className="flex items-center border-b border-[#C9A84C]/[0.14]" style={{ background: "linear-gradient(to bottom, rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.025), transparent)" }}>
           <Arrow dir="left" onClick={() => scroll("left")} visible={canLeft} />
+          {/* py-3 here gives the card's own drop shadow + the hud-interactive
+              hover lift (-2px) and press scale (0.985) room to render fully
+              without overflow-x-auto clipping the top or bottom of the card. */}
           <div
             ref={scrollRef}
-            className="scroll-smooth-x flex items-center flex-1 overflow-x-auto gap-1.5 px-1 [justify-content:safe_center] sm:justify-start"
+            className="scroll-smooth-x flex items-center flex-1 overflow-x-auto gap-1.5 px-1 py-3 [justify-content:safe_center] sm:justify-start"
           >
             {games.map(g => {
               const isNew  = g.date && !seenDates.has(g.date);
