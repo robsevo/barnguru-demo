@@ -5740,15 +5740,13 @@ export default function PlayerProfilePage() {
       </div>
 
 
-      {/* ── DASHBOARD SHELL — wraps the WHOLE page so the left rail is
-          the always-visible section nav. Right pane swaps content per
-          tab. Mobile: rail collapses to a horizontal strip above the
-          content so phones still get one-tap section switching. */}
-      <div className="mt-3 grid gap-3 sm:gap-4 lg:grid-cols-[210px_minmax(0,1fr)]">
+      {/* ── DASHBOARD SHELL — vertical rail on LEFT at all viewports.
+          Mobile: rail is icon-only at 52px; tablet+ expands to ~210px
+          with labels + subtitles. Sticky on lg+ so it follows scroll. */}
+      <div className="mt-3 grid gap-2 sm:gap-3 lg:gap-4 grid-cols-[52px_minmax(0,1fr)] lg:grid-cols-[210px_minmax(0,1fr)]">
 
-        {/* Left rail — sticky vertical nav on lg; horizontal scroll strip
-            on smaller. HUD glyph + label + active state. */}
-        <aside className="lg:sticky lg:top-3 self-start z-20">
+        {/* Left rail — icon-only on mobile, expanded on lg+. */}
+        <aside className="sticky top-2 lg:top-3 self-start z-20 max-h-[calc(100vh-1rem)] overflow-y-auto overflow-x-hidden">
           <div className="hud-panel hud-panel--all-corners jarvis-boot jarvis-shimmer relative overflow-hidden"
             style={{
               ["--hud-corner" as string]: teamColor,
@@ -5758,14 +5756,16 @@ export default function PlayerProfilePage() {
             <span className="hud-panel__corner-tr" />
             <span className="hud-panel__corner-bl" />
             <div className="hud-scan" aria-hidden />
-            <div className="flex items-center gap-2 px-3 py-2 border-b" style={{ borderColor: `${teamColor}22` }}>
+            {/* Header — collapsed on mobile (just pulse dot), label on lg+. */}
+            <div className="flex items-center justify-center lg:justify-start gap-2 px-2 lg:px-3 py-1.5 lg:py-2 border-b"
+              style={{ borderColor: `${teamColor}22` }}>
               <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 4px ${teamColor}` }} />
-              <span className="hud-mono text-[9px] uppercase tracking-[0.24em] font-semibold"
+              <span className="hud-mono text-[9px] uppercase tracking-[0.24em] font-semibold hidden lg:inline"
                 style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}55` }}>
                 ▌ TELEMETRY
               </span>
             </div>
-            <nav className="flex lg:flex-col p-1.5 gap-1 overflow-x-auto lg:overflow-visible">
+            <nav className="flex flex-col p-1 lg:p-1.5 gap-1">
               {(() => {
                 const glyph: Record<string, string> = {
                   overview: "◈", neural: "◆", "shot-map": "⌖",
@@ -5784,7 +5784,9 @@ export default function PlayerProfilePage() {
                   return (
                     <button key={tab.id}
                       onClick={() => setTelemetryTab(tab.id as TelemetryTab)}
-                      className="relative group flex items-center gap-2.5 lg:gap-3 px-2.5 py-2 lg:py-2.5 rounded-sm transition-all shrink-0 lg:shrink min-w-[140px] lg:min-w-0"
+                      title={`${tab.label} — ${subtitle[tab.id] ?? ""}`}
+                      aria-label={tab.label}
+                      className="relative group flex items-center justify-center lg:justify-start gap-3 px-2 lg:px-2.5 py-2 lg:py-2.5 rounded-sm transition-all"
                       style={{
                         background: isActive
                           ? `linear-gradient(90deg, ${teamColor}28 0%, ${teamColor}08 100%)`
@@ -5800,15 +5802,17 @@ export default function PlayerProfilePage() {
                             mixBlendMode: "screen",
                           }} />
                       )}
-                      <span className="hud-mono text-[16px] leading-none shrink-0"
+                      <span className="hud-mono text-[18px] lg:text-[16px] leading-none shrink-0"
                         style={{
-                          color: isActive ? teamColor : "rgba(255,255,255,0.45)",
+                          color: isActive ? teamColor : "rgba(255,255,255,0.55)",
                           textShadow: isActive ? `0 0 8px ${teamColor}` : "none",
                           transition: "color 200ms, text-shadow 200ms",
                         }}>
                         {glyph[tab.id] ?? "▸"}
                       </span>
-                      <span className="flex flex-col items-start min-w-0">
+                      {/* Label stack — desktop only. Mobile = icon only with
+                          tooltip on hover/long-press for label. */}
+                      <span className="hidden lg:flex flex-col items-start min-w-0">
                         <span className="hud-mono text-[10px] uppercase tracking-[0.20em] font-semibold leading-tight"
                           style={{
                             color: isActive ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.70)",
@@ -5831,7 +5835,8 @@ export default function PlayerProfilePage() {
                 });
               })()}
             </nav>
-            <div className="px-3 py-1.5 border-t flex items-center justify-between"
+            {/* Footer — desktop only. Mobile drops it to save vertical space. */}
+            <div className="hidden lg:flex px-3 py-1.5 border-t items-center justify-between"
               style={{ borderColor: `${teamColor}22` }}>
               <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">live</span>
               <span className="hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: `${teamColor}99` }}>60Hz</span>
@@ -5851,12 +5856,9 @@ export default function PlayerProfilePage() {
         {/* Right content pane — wraps overview block + tab content grid */}
         <div className="min-w-0">
 
-      {/* ── OVERVIEW SECTION — hero + ratings + command deck. Hidden when
-          another tab is active so the page reads as a true dashboard
-          (one section on screen at a time). ── */}
-      <div style={{ display: telemetryTab === "overview" ? undefined : "none" }}>
-
-      {/* ── Hero section — HUD-styled identity panel ── */}
+      {/* ── Hero section — ALWAYS VISIBLE so the player you're looking
+          at never leaves the screen when you switch tabs. Only RATINGS +
+          HUD Command Deck below it swap with the overview tab. ── */}
       <div className="relative jarvis-shimmer rounded-2xl overflow-hidden mb-4 shadow-[0_16px_60px_rgba(0,0,0,0.75)]"
         style={{ border: `1.5px solid ${teamColor}55`, background: `linear-gradient(175deg, ${teamDarkBg} 0%, #060708 60%)` }}>
 
@@ -5920,11 +5922,10 @@ export default function PlayerProfilePage() {
           </div>
         )}
 
-        {/* ── Compact horizontal hero — headshot LEFT, identity CENTER,
-            attribute radar RIGHT. Three-column flex so the radar sits in
-            line with the player's identity card, not dangling somewhere
-            below the bio rows. */}
-        <div className={`flex items-start gap-4 sm:gap-5 px-4 sm:px-5 pb-3 ${data.hero_image ? "-mt-12 relative z-10" : "pt-4"}`}>
+        {/* ── Compact horizontal hero — headshot LEFT, identity stack
+            RIGHT. Mobile: tighter gap + padding so the rail+content fit
+            phone widths cleanly. */}
+        <div className={`flex items-start gap-3 sm:gap-5 px-3 sm:px-5 pb-3 ${data.hero_image ? "-mt-10 sm:-mt-12 relative z-10" : "pt-3 sm:pt-4"}`}>
 
           {/* Circular headshot — smaller, side-positioned */}
           <div className="relative shrink-0">
@@ -6292,6 +6293,11 @@ export default function PlayerProfilePage() {
           </div>
         )}
       </div>
+
+      {/* ── OVERVIEW SECTION — RATINGS + HUD Command Deck. Hidden when
+          another tab is active so each tab fills the viewport. The hero
+          stays above so the player photo never leaves the screen. ── */}
+      <div style={{ display: telemetryTab === "overview" ? undefined : "none" }}>
 
       {/* ─────────── RATINGS STRIP ─────────── */}
       {/* Engine-output summary — sits between the player hero (TARGET
