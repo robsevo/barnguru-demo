@@ -1323,63 +1323,108 @@ function EwmaTrendChart({ xgf60, leagueAvg = 4.09, teamColor }: {
 interface ShotPoint { x: number; y: number; xg: number; goal: boolean; type: string; }
 
 /** Half-rink SVG shot map — proper ice surface, dots coloured by xG, goals as rings */
-/** Shared half-rink SVG markings — ice surface, lines, net. Used by both shot map variants. */
-function HalfRinkMarkings() {
+/** Shared half-rink SVG markings — HUD-themed dark-ice palette matching the
+ *  2D Zone Tendency map: deep navy ice (#0b0f1a) with team-color glow, faint
+ *  sensor grid lines, blue/red line theme constants. teamColor optional —
+ *  defaults to the brand variable so legacy callers stay tinted. */
+function HalfRinkMarkings({ teamColor = "var(--brand-hex)" }: { teamColor?: string } = {}) {
+  // Unique IDs scoped per render so multiple HalfRinkMarkings instances on
+  // the same page (skater + goalie maps) don't collide on the glow gradient.
+  const idSuffix = useRef(`hrm-${Math.random().toString(36).slice(2, 8)}`).current;
   return (
     <>
-      {/* Ice surface */}
+      <defs>
+        <radialGradient id={`${idSuffix}-glow`} cx="50%" cy="50%" r="55%">
+          <stop offset="0%" stopColor={teamColor} stopOpacity="0.12" />
+          <stop offset="100%" stopColor={teamColor} stopOpacity="0" />
+        </radialGradient>
+        <clipPath id={`${idSuffix}-clip`}>
+          <path d="M 0,0 L 86,0 Q 100,0 100,14 L 100,71 Q 100,85 86,85 L 0,85 Z" />
+        </clipPath>
+      </defs>
+
+      {/* Ice surface — HUD-dark + team-color radial glow */}
       <path d="M 0,0 L 86,0 Q 100,0 100,14 L 100,71 Q 100,85 86,85 L 0,85 Z"
-        fill="#f8fbff" stroke="#94b4cc" strokeWidth="1.8" />
-      {/* Blue line */}
-      <line x1="25" y1="0.5" x2="25" y2="84.5" stroke="#1155bb" strokeWidth="1.4" opacity="0.7" />
-      {/* Goal line — extended to boards */}
-      <line x1="89" y1="0.5" x2="89" y2="84.5" stroke="#cc2222" strokeWidth="0.9" opacity="0.8" />
+        fill="#0b0f1a" stroke={teamColor} strokeOpacity="0.55" strokeWidth="0.7" />
+      <path d="M 0,0 L 86,0 Q 100,0 100,14 L 100,71 Q 100,85 86,85 L 0,85 Z"
+        fill={`url(#${idSuffix}-glow)`} />
+
+      {/* Faint background grid — sensor-deck texture (clipped to rink) */}
+      {[14, 28, 42.5, 57, 71].map((y) => (
+        <line key={`hg${y}`} x1="0" y1={y} x2="100" y2={y}
+          stroke="rgba(255,255,255,0.04)" strokeWidth="0.2"
+          clipPath={`url(#${idSuffix}-clip)`} />
+      ))}
+      {[20, 40, 60, 80].map((x) => (
+        <line key={`vg${x}`} x1={x} y1="0" x2={x} y2="85"
+          stroke="rgba(255,255,255,0.04)" strokeWidth="0.2"
+          clipPath={`url(#${idSuffix}-clip)`} />
+      ))}
+
+      {/* Blue line — bright blue, thinner stroke */}
+      <line x1="25" y1="0.5" x2="25" y2="84.5" stroke="#60a5fa" strokeWidth="1.2" opacity="0.65" />
+      {/* Goal line — red */}
+      <line x1="89" y1="0.5" x2="89" y2="84.5" stroke="#f87171" strokeWidth="0.7" opacity="0.65" />
       {/* Trapezoid */}
       <polygon points="100,28.5 89,33.5 89,51.5 100,56.5"
-        fill="none" stroke="#cc2222" strokeWidth="0.5" opacity="0.4" />
-      {/* Crease — filled D-shape, r=6, sweeps toward center ice (sweep=0 = left/CCW) */}
+        fill="none" stroke="#f87171" strokeWidth="0.4" opacity="0.35" />
+      {/* Crease — D-shape with team-color tint */}
       <path d="M 89 36.5 A 6 6 0 0 0 89 48.5 Z"
-        fill="rgba(30,100,200,0.13)" stroke="#1155bb" strokeWidth="0.8" opacity="0.75" />
-      {/* Net — narrow depth, 6ft post-to-post */}
+        fill={teamColor} fillOpacity="0.10" stroke="#60a5fa" strokeWidth="0.6" opacity="0.7" />
+      {/* Net — team-color stroke instead of grey */}
       <rect x="89" y="39.5" width="2.5" height="6" rx="0.5"
-        fill="rgba(180,180,180,0.5)" stroke="#777" strokeWidth="0.6" />
-      {/* Faceoff circles */}
-      <circle cx="69" cy="20.5" r="15" fill="none" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <circle cx="69" cy="64.5" r="15" fill="none" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <circle cx="69" cy="20.5" r="0.85" fill="#cc2222" opacity="0.55" />
-      <circle cx="69" cy="64.5" r="0.85" fill="#cc2222" opacity="0.55" />
-      {/* Interior hashmarks — top OZ circle (⊞, tight around dot) */}
-      <line x1="67.5" y1="16.5" x2="67.5" y2="19.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <line x1="70.5" y1="16.5" x2="70.5" y2="19.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <line x1="67.5" y1="21.5" x2="67.5" y2="24.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <line x1="70.5" y1="21.5" x2="70.5" y2="24.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <line x1="65" y1="19" x2="68" y2="19" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <line x1="70" y1="19" x2="73" y2="19" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <line x1="65" y1="22" x2="68" y2="22" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <line x1="70" y1="22" x2="73" y2="22" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      {/* Exterior hashmarks — top OZ circle (2 marks outside ring, top & bottom) */}
-      <line x1="67.5" y1="3" x2="67.5" y2="5.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <line x1="70.5" y1="3" x2="70.5" y2="5.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <line x1="67.5" y1="35.5" x2="67.5" y2="38" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <line x1="70.5" y1="35.5" x2="70.5" y2="38" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
+        fill="rgba(255,255,255,0.10)" stroke={teamColor} strokeWidth="0.5" opacity="0.85" />
+
+      {/* Faceoff circles — same red as goal line, dimmed */}
+      <circle cx="69" cy="20.5" r="15" fill="none" stroke="#f87171" strokeWidth="0.45" opacity="0.32" />
+      <circle cx="69" cy="64.5" r="15" fill="none" stroke="#f87171" strokeWidth="0.45" opacity="0.32" />
+      <circle cx="69" cy="20.5" r="0.85" fill="#f87171" opacity="0.6" />
+      <circle cx="69" cy="64.5" r="0.85" fill="#f87171" opacity="0.6" />
+      {/* Interior hashmarks — top OZ circle */}
+      <line x1="67.5" y1="16.5" x2="67.5" y2="19.5" stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      <line x1="70.5" y1="16.5" x2="70.5" y2="19.5" stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      <line x1="67.5" y1="21.5" x2="67.5" y2="24.5" stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      <line x1="70.5" y1="21.5" x2="70.5" y2="24.5" stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      <line x1="65" y1="19" x2="68" y2="19" stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      <line x1="70" y1="19" x2="73" y2="19" stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      <line x1="65" y1="22" x2="68" y2="22" stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      <line x1="70" y1="22" x2="73" y2="22" stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      {/* Exterior hashmarks — top OZ circle */}
+      <line x1="67.5" y1="3"    x2="67.5" y2="5.5"  stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      <line x1="70.5" y1="3"    x2="70.5" y2="5.5"  stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      <line x1="67.5" y1="35.5" x2="67.5" y2="38"   stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      <line x1="70.5" y1="35.5" x2="70.5" y2="38"   stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
       {/* Interior hashmarks — bottom OZ circle */}
-      <line x1="67.5" y1="60.5" x2="67.5" y2="63.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <line x1="70.5" y1="60.5" x2="70.5" y2="63.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <line x1="67.5" y1="65.5" x2="67.5" y2="68.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <line x1="70.5" y1="65.5" x2="70.5" y2="68.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <line x1="65" y1="63" x2="68" y2="63" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <line x1="70" y1="63" x2="73" y2="63" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <line x1="65" y1="66" x2="68" y2="66" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <line x1="70" y1="66" x2="73" y2="66" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      {/* Exterior hashmarks — bottom OZ circle (2 marks outside ring, top & bottom) */}
-      <line x1="67.5" y1="47" x2="67.5" y2="49.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <line x1="70.5" y1="47" x2="70.5" y2="49.5" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <line x1="67.5" y1="79.5" x2="67.5" y2="82" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <line x1="70.5" y1="79.5" x2="70.5" y2="82" stroke="#cc2222" strokeWidth="0.6" opacity="0.4" />
-      <circle cx="20" cy="20.5" r="0.85" fill="#cc2222" opacity="0.35" />
-      <circle cx="20" cy="64.5" r="0.85" fill="#cc2222" opacity="0.35" />
+      <line x1="67.5" y1="60.5" x2="67.5" y2="63.5" stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      <line x1="70.5" y1="60.5" x2="70.5" y2="63.5" stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      <line x1="67.5" y1="65.5" x2="67.5" y2="68.5" stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      <line x1="70.5" y1="65.5" x2="70.5" y2="68.5" stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      <line x1="65"   y1="63"   x2="68"   y2="63"   stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      <line x1="70"   y1="63"   x2="73"   y2="63"   stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      <line x1="65"   y1="66"   x2="68"   y2="66"   stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      <line x1="70"   y1="66"   x2="73"   y2="66"   stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      {/* Exterior hashmarks — bottom OZ circle */}
+      <line x1="67.5" y1="47"   x2="67.5" y2="49.5" stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      <line x1="70.5" y1="47"   x2="70.5" y2="49.5" stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      <line x1="67.5" y1="79.5" x2="67.5" y2="82"   stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      <line x1="70.5" y1="79.5" x2="70.5" y2="82"   stroke="#f87171" strokeWidth="0.5" opacity="0.35" />
+      {/* NZ faceoff dots */}
+      <circle cx="20" cy="20.5" r="0.85" fill="#f87171" opacity="0.45" />
+      <circle cx="20" cy="64.5" r="0.85" fill="#f87171" opacity="0.45" />
       {/* Center ice boundary */}
-      <line x1="0" y1="0" x2="0" y2="85" stroke="#cc2222" strokeWidth="1.2" opacity="0.85" />
+      <line x1="0" y1="0" x2="0" y2="85" stroke={teamColor} strokeWidth="1.0" opacity="0.65" />
+
+      {/* Corner reticles — match ZoneTendencyMap chrome */}
+      <g fill={teamColor} fillOpacity="0.75">
+        <rect x="0.5" y="0.5" width="3" height="0.4" />
+        <rect x="0.5" y="0.5" width="0.4" height="3" />
+        <rect x="96.5" y="0.5" width="3" height="0.4" />
+        <rect x="99.1" y="0.5" width="0.4" height="3" />
+        <rect x="0.5" y="81.6" width="3" height="0.4" />
+        <rect x="0.5" y="81.6" width="0.4" height="3" />
+        <rect x="96.5" y="81.6" width="3" height="0.4" />
+        <rect x="99.1" y="81.6" width="0.4" height="3" />
+      </g>
     </>
   );
 }
@@ -5769,8 +5814,43 @@ export default function PlayerProfilePage() {
                 ▌ TELEMETRY
               </span>
             </div>
-            <nav className="flex lg:flex-col p-1 lg:p-1.5 gap-1 overflow-x-auto lg:overflow-visible"
-              style={{ scrollbarWidth: "none" }}>
+            <div className="relative">
+              {/* Scroll hint arrows + fade gradients — mobile only. Tells
+                  the user there's more nav off-screen. The right arrow
+                  hides once the user scrolls to the end; left arrow
+                  hides at the start. Pure CSS hint here (no JS), so the
+                  hint is always-on for small viewports where the strip
+                  overflows — good enough for first-impression UX. */}
+              <span aria-hidden
+                className="lg:hidden absolute left-0 top-0 bottom-0 w-8 pointer-events-none z-[5]"
+                style={{
+                  background: "linear-gradient(90deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0) 100%)",
+                }} />
+              <span aria-hidden
+                className="lg:hidden absolute right-0 top-0 bottom-0 w-8 pointer-events-none z-[5]"
+                style={{
+                  background: "linear-gradient(270deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0) 100%)",
+                }} />
+              <span aria-hidden
+                className="lg:hidden absolute left-0.5 top-1/2 -translate-y-1/2 z-[6] hud-mono text-[12px] pointer-events-none"
+                style={{
+                  color: teamColor,
+                  textShadow: `0 0 4px ${teamColor}`,
+                  animation: "railChevL 1.8s ease-in-out infinite",
+                }}>
+                ◂
+              </span>
+              <span aria-hidden
+                className="lg:hidden absolute right-0.5 top-1/2 -translate-y-1/2 z-[6] hud-mono text-[12px] pointer-events-none"
+                style={{
+                  color: teamColor,
+                  textShadow: `0 0 4px ${teamColor}`,
+                  animation: "railChevR 1.8s ease-in-out infinite",
+                }}>
+                ▸
+              </span>
+              <nav className="flex lg:flex-col p-1 lg:p-1.5 gap-1 overflow-x-auto lg:overflow-visible"
+                style={{ scrollbarWidth: "none" }}>
               {(() => {
                 const glyph: Record<string, string> = {
                   overview: "◈", neural: "◆", "shot-map": "⌖",
@@ -5844,7 +5924,8 @@ export default function PlayerProfilePage() {
                   );
                 });
               })()}
-            </nav>
+              </nav>
+            </div>
             {/* Footer — desktop only. */}
             <div className="hidden lg:flex px-3 py-1.5 border-t items-center justify-between"
               style={{ borderColor: `${teamColor}22` }}>
@@ -5855,6 +5936,14 @@ export default function PlayerProfilePage() {
               @keyframes railScan {
                 0%   { transform: translateX(-100%); }
                 100% { transform: translateX(100%);  }
+              }
+              @keyframes railChevL {
+                0%, 100% { transform: translate(0, -50%);   opacity: 0.85; }
+                50%      { transform: translate(-3px, -50%); opacity: 0.35; }
+              }
+              @keyframes railChevR {
+                0%, 100% { transform: translate(0, -50%);  opacity: 0.85; }
+                50%      { transform: translate(3px, -50%); opacity: 0.35; }
               }
               @media (prefers-reduced-motion: reduce) {
                 span { animation: none !important; }
