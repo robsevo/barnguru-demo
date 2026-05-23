@@ -5868,12 +5868,12 @@ export default function PlayerProfilePage() {
             (order-3, also right pane). To make this work the right pane
             is split below; rail row uses col-span to span both grid
             columns on mobile, and on lg+ collapses to column 1. */}
-        <aside className="order-2 lg:order-none lg:col-start-1 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-3 self-start z-20 mb-2 lg:mb-0 lg:max-h-[calc(100vh-1rem)] lg:overflow-y-auto">
+        <aside className="order-2 lg:order-none lg:col-start-1 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-3 z-20 mb-2 lg:mb-0 w-full lg:w-auto max-w-full lg:max-w-none min-w-0 lg:self-start lg:max-h-[calc(100vh-1rem)] lg:overflow-y-auto">
           {/* Outer wrapper — PLAIN div, NO .hud-panel class. The .hud-panel
               class has `overflow: hidden` baked in (globals.css line 347)
               which kills the inner nav's overflow-x-auto. Style the chrome
               inline so we keep the HUD look without the overflow trap. */}
-          <div className="jarvis-boot relative rounded-md border lg:overflow-hidden"
+          <div className="jarvis-boot relative rounded-md border w-full max-w-full min-w-0 overflow-hidden"
             style={{
               ["--hud-corner" as string]: teamColor,
               borderColor: `${teamColor}3a`,
