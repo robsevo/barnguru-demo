@@ -5175,8 +5175,11 @@ export default function PlayerProfilePage() {
           </div>
         )}
 
-        {/* ── Compact horizontal hero — headshot left, identity stack right ── */}
-        <div className={`flex items-center gap-4 sm:gap-5 px-4 sm:px-5 pb-3 ${data.hero_image ? "-mt-12 relative z-10" : "pt-4"}`}>
+        {/* ── Compact horizontal hero — headshot LEFT, identity CENTER,
+            attribute radar RIGHT. Three-column flex so the radar sits in
+            line with the player's identity card, not dangling somewhere
+            below the bio rows. */}
+        <div className={`flex items-start gap-4 sm:gap-5 px-4 sm:px-5 pb-3 ${data.hero_image ? "-mt-12 relative z-10" : "pt-4"}`}>
 
           {/* Circular headshot — smaller, side-positioned */}
           <div className="relative shrink-0">
@@ -5290,6 +5293,39 @@ export default function PlayerProfilePage() {
               );
             })()}
           </div>
+          </div>
+
+          {/* RIGHT — Attribute Radar in a target-lock frame. Hidden on
+              narrow screens (where it would push identity stack to wrap);
+              renders inline at md+ so the radar sits beside the player. */}
+          <div className="hidden md:flex flex-col items-center justify-center shrink-0 relative rounded border px-2 pt-1 pb-2 overflow-hidden"
+            style={{
+              width: 240,
+              borderColor: `${teamColor}33`,
+              background: "linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0.32))",
+              boxShadow: `0 0 12px ${teamColor}14, inset 0 0 16px rgba(0,0,0,0.4)`,
+            }}>
+            <div className="absolute top-1 left-1 w-2.5 h-2.5 pointer-events-none" style={{ borderLeft: `1px solid ${teamColor}aa`, borderTop: `1px solid ${teamColor}aa` }} />
+            <div className="absolute top-1 right-1 w-2.5 h-2.5 pointer-events-none" style={{ borderRight: `1px solid ${teamColor}aa`, borderTop: `1px solid ${teamColor}aa` }} />
+            <div className="absolute bottom-1 left-1 w-2.5 h-2.5 pointer-events-none" style={{ borderLeft: `1px solid ${teamColor}aa`, borderBottom: `1px solid ${teamColor}aa` }} />
+            <div className="absolute bottom-1 right-1 w-2.5 h-2.5 pointer-events-none" style={{ borderRight: `1px solid ${teamColor}aa`, borderBottom: `1px solid ${teamColor}aa` }} />
+            <div className="flex items-center justify-between w-full px-1 mb-0.5">
+              <span className="hud-mono text-[8px] uppercase tracking-[0.22em] flex items-center gap-1"
+                style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}55` }}>
+                <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 4px ${teamColor}` }} />
+                ⌖ {isGoalie ? "GOALIE" : "BIOMETRIC"}
+              </span>
+              <span className="hud-mono text-[7px] uppercase tracking-[0.18em]" style={{ color: `${teamColor}99` }}>
+                locked
+              </span>
+            </div>
+            <div className="w-full flex items-center justify-center [&>div]:!w-full">
+              {isGoalie ? (
+                <GoalieRadarChart data={data} teamColor={teamColor} nhlSvPct={nhlStats?.sv_pct} nhlGaa={nhlStats?.gaa} />
+              ) : (
+                <PlayerRadarChart data={data} teamColor={teamColor} />
+              )}
+            </div>
           </div>
         </div>
 
@@ -5512,49 +5548,16 @@ export default function PlayerProfilePage() {
 
           if (rows.length === 0) return null;
           return (
-            <div className="border-t" style={{ borderColor: `${teamColor}12` }}>
-              {/* Bio rows LEFT, Attribute Radar RIGHT — the radar lives in
-                  the TARGET PROFILE header next to the picture/bio so the
-                  player's signature is the first graph you see, not buried
-                  on a tab three scrolls down. */}
-              <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] gap-4 px-5 py-4">
-                <div className="space-y-1.5 min-w-0">
-                  {rows.map(([label, value]) => (
-                    <div key={label} className="flex items-baseline gap-2">
-                      <span className="text-[11px] text-white/30 w-24 shrink-0">{label}:</span>
-                      <span className="text-[13px] font-medium text-white/75">{value}</span>
-                    </div>
-                  ))}
-                </div>
-                <div className="relative min-w-0 rounded border px-2 py-2 overflow-hidden flex flex-col items-center"
-                  style={{
-                    borderColor: `${teamColor}33`,
-                    background: "linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0.32))",
-                    boxShadow: `0 0 12px ${teamColor}14, inset 0 0 18px rgba(0,0,0,0.4)`,
-                  }}>
-                  {/* Lock-on corner cross-hairs around the radar */}
-                  <div className="absolute top-1 left-1 w-3 h-3 pointer-events-none" style={{ borderLeft: `1px solid ${teamColor}aa`, borderTop: `1px solid ${teamColor}aa` }} />
-                  <div className="absolute top-1 right-1 w-3 h-3 pointer-events-none" style={{ borderRight: `1px solid ${teamColor}aa`, borderTop: `1px solid ${teamColor}aa` }} />
-                  <div className="absolute bottom-1 left-1 w-3 h-3 pointer-events-none" style={{ borderLeft: `1px solid ${teamColor}aa`, borderBottom: `1px solid ${teamColor}aa` }} />
-                  <div className="absolute bottom-1 right-1 w-3 h-3 pointer-events-none" style={{ borderRight: `1px solid ${teamColor}aa`, borderBottom: `1px solid ${teamColor}aa` }} />
-                  <div className="flex items-center justify-between w-full px-1 mb-1">
-                    <span className="hud-mono text-[9px] uppercase tracking-[0.22em] flex items-center gap-1.5"
-                      style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}55` }}>
-                      <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 4px ${teamColor}` }} />
-                      ⌖ {isGoalie ? "GOALIE SCAN" : "BIOMETRIC SCAN"}
-                    </span>
-                    <span className="hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: `${teamColor}99` }}>
-                      target locked
-                    </span>
+            <div className="border-t px-5 py-3" style={{ borderColor: `${teamColor}12` }}>
+              {/* Condensed bio — 2-col on tablet, 3-col on desktop so the
+                  data doesn't waste vertical real-estate as a stacked list. */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-1.5">
+                {rows.map(([label, value]) => (
+                  <div key={label} className="flex items-baseline gap-2 min-w-0">
+                    <span className="text-[11px] text-white/30 w-20 shrink-0">{label}:</span>
+                    <span className="text-[12px] font-medium text-white/75 truncate">{value}</span>
                   </div>
-                  <div className="w-full overflow-hidden flex justify-center">
-                    {isGoalie ? (
-                      <GoalieRadarChart data={data} teamColor={teamColor} nhlSvPct={nhlStats?.sv_pct} nhlGaa={nhlStats?.gaa} />
-                    ) : (
-                      <PlayerRadarChart data={data} teamColor={teamColor} />
-                    )}
-                  </div>
-                </div>
+                ))}
               </div>
             </div>
           );
@@ -5701,31 +5704,36 @@ export default function PlayerProfilePage() {
               teamColor={teamColor}
               bodyIntensity={bodyIntensity}
               telemetryLeft={isGoalie ? [
-                // Goalies: callouts mapped onto the silhouette where the
-                // body part most associated with the stat lives — head for
-                // overall save% (reads), torso for workload, legs for the
-                // mid/low save% that test footwork and tracking.
-                { id: "sv",     label: "SV%",       val: data.sv_pct != null ? `${(data.sv_pct * 100).toFixed(1)}%` : (nhlStats?.sv_pct != null ? `${(nhlStats.sv_pct * 100).toFixed(1)}%` : null), target: "head" as const,
-                  tip: "Overall save percentage this season. NHL avg ~.905; .920+ is starter-quality." },
+                // Goalies: callouts surface ONLY stats that aren't already
+                // in the TARGET PROFILE strip (SV%, GAA, W-L, SO, GP). The
+                // hologram leans into the 3-zone save breakdown + GSAx +
+                // shots faced so it tells a different story than the
+                // header stats.
                 { id: "hdsv",   label: "HD SV%",    val: data.hdsv_pct != null ? `${(data.hdsv_pct * 100).toFixed(1)}%` : null, target: "head" as const,
                   tip: "High-danger save percentage — most predictive goalie metric. League avg ~.800; elite goalies clear .830." },
-                { id: "shots",  label: "SHOTS",     val: data.shots_against != null ? `${data.shots_against}` : null, target: "torso" as const,
-                  tip: "Shots faced this season — workload proxy. Pair with GP to read minutes." },
+                { id: "mdsv",   label: "MD SV%",    val: data.mdsv_pct != null ? `${(data.mdsv_pct * 100).toFixed(1)}%` : null, target: "torso" as const,
+                  tip: "Medium-danger save percentage. League avg ~.905. Reads tracking + rebound control on mid-range shots." },
+                { id: "ldsv",   label: "LD SV%",    val: data.ldsv_pct != null ? `${(data.ldsv_pct * 100).toFixed(1)}%` : null, target: "legs" as const,
+                  tip: "Low-danger save percentage. League avg ~.965. Anything below means soft goals leaking through." },
               ].filter(c => c.val !== null) : [
-                { id: "speed",    label: "MAX SPEED",  val: data.skating_max_speed_kmh != null ? `${data.skating_max_speed_kmh.toFixed(1)} km/h` : null, target: "legs" as const,
-                  tip: "Peak skating speed from NHL EDGE puck-and-player tracking, averaged across this season's games. NHL average tops out around 32–34 km/h; elite skaters hit 36+." },
+                // Skater hologram L — MAX SPEED moved to EDGE TELEMETRY band
+                // (where it carries rank + percentile). Hologram surfaces
+                // physical-role stats only so the silhouette tells the body's
+                // story, not the engine's.
                 { id: "hits",     label: "HITS/60",    val: data.hits_per60 != null ? data.hits_per60.toFixed(1) : null, target: "arms" as const,
                   tip: "Hits thrown per 60 minutes of even-strength play. 3+ is a clear physical role; below 1 is a finesse profile." },
                 { id: "blocks",   label: "BLOCKS/60",  val: data.blocks_per60 != null ? data.blocks_per60.toFixed(1) : null, target: "torso" as const,
                   tip: "Shots blocked per 60 minutes — proxy for shot-lane defending. Defensemen routinely 4+; forwards rarely above 2." },
+                { id: "netfront", label: "NET FRONT",  val: data.net_front_pct != null ? `${(data.net_front_pct).toFixed(0)}%` : null, target: "torso" as const,
+                  tip: "Share of OZ shots taken from net-front. High = crashes the slot; low = perimeter/cycle profile." },
               ].filter(c => c.val !== null)}
               telemetryRight={isGoalie ? [
                 { id: "gsax",   label: "GSAx",      val: data.gsax != null ? `${data.gsax > 0 ? "+" : ""}${data.gsax.toFixed(1)}` : null, target: "head" as const,
                   tip: "Goals saved above expected — value-added vs an average goalie given the same shot diet. >+10 over a season is elite; negative means letting in more than the model expects." },
-                { id: "gaa",    label: "GAA",       val: nhlStats?.gaa != null ? nhlStats.gaa.toFixed(2) : null, target: "torso" as const,
-                  tip: "Goals against per 60 mins. Sub-2.50 is starter-tier. Heavily team-dependent — pair with GSAx for an honest read." },
-                { id: "record", label: "W-L",       val: (nhlStats?.wins != null && nhlStats?.losses != null) ? `${nhlStats.wins}-${nhlStats.losses}${nhlStats?.ot_losses != null ? `-${nhlStats.ot_losses}` : ""}` : null, target: "torso" as const,
-                  tip: "Win-Loss-OT record this season. Counting stat — useful for context, not for evaluating performance." },
+                { id: "xga",    label: "xGA",       val: data.xga != null ? data.xga.toFixed(1) : null, target: "torso" as const,
+                  tip: "Expected goals against — the model's read on shot quality faced. Pair with goals_against for the GSAx delta." },
+                { id: "shots",  label: "SA",        val: data.shots_against != null ? `${data.shots_against}` : null, target: "arms" as const,
+                  tip: "Shots faced this season — workload proxy. Pair with GP for shots-per-game." },
               ].filter(c => c.val !== null) : [
                 { id: "battle",   label: "BATTLE",     val: data.battle_percentile != null ? `${data.battle_percentile.toFixed(0)}th` : null, target: "torso" as const,
                   tip: "Puck-battle percentile across hits, blocks, and contested zone battles combined. 85th pct = wins more pucks than 85% of skaters." },
@@ -6327,52 +6335,11 @@ export default function PlayerProfilePage() {
           </HudPanel>
         </div>
 
-        {/* KPI BAND — box-score / goalie headline totals. Sits between hero
-            and Ratings so the dashboard reads: who → what → engine outputs
-            → drill-down tabs. Tiles flip skater↔goalie. */}
-        {(() => {
-          const fmtNum = (v: number | null | undefined, dec = 0) => v == null ? "—" : (dec > 0 ? v.toFixed(dec) : Math.round(v).toString());
-          const tiles: KpiTile[] = isGoalie ? (() => {
-            const gp = nhlStats?.gp ?? data.games_played ?? null;
-            const w  = nhlStats?.wins ?? null;
-            const l  = nhlStats?.losses ?? null;
-            const ot = nhlStats?.ot_losses ?? null;
-            const svp = data.sv_pct ?? nhlStats?.sv_pct ?? null;
-            const gsax = data.gsax ?? null;
-            const gaa = nhlStats?.gaa ?? null;
-            const so = nhlStats?.shutouts ?? null;
-            const svTone = svp == null ? "neutral" : svp >= 0.920 ? "good" : svp >= 0.905 ? "neutral" : "bad";
-            const gsxTone = gsax == null ? "neutral" : gsax >= 5 ? "good" : gsax >= -2 ? "neutral" : "bad";
-            const gaaTone = gaa == null ? "neutral" : gaa <= 2.50 ? "good" : gaa <= 2.90 ? "neutral" : "bad";
-            return [
-              { label: "GP",     value: fmtNum(gp), tip: "Games played this season." },
-              { label: "Record", value: (w != null && l != null) ? `${w}-${l}${ot != null ? `-${ot}` : ""}` : "—", sub: "W-L-OT", tip: "Win-Loss-OT record. Team-dependent, useful for context only." },
-              { label: "SV%",    value: svp != null ? `${(svp * 100).toFixed(1)}%` : "—", tone: svTone as KpiTile["tone"], tip: "Overall save percentage. .920+ is starter-quality." },
-              { label: "GSAx",   value: gsax != null ? `${gsax > 0 ? "+" : ""}${gsax.toFixed(1)}` : "—", tone: gsxTone as KpiTile["tone"], tip: "Goals saved above expected. +10 over a season is elite." },
-              { label: "GAA",    value: gaa != null ? gaa.toFixed(2) : "—", tone: gaaTone as KpiTile["tone"], tip: "Goals against per 60 mins. Pair with GSAx for an honest read." },
-              { label: "SO",     value: fmtNum(so), tip: "Shutouts this season." },
-            ];
-          })() : (() => {
-            const gp = nhlStats?.gp ?? data.game_log?.summary.n_games ?? null;
-            const g  = nhlStats?.goals  ?? data.game_log?.summary.goals  ?? null;
-            const a  = nhlStats?.assists ?? data.game_log?.summary.assists ?? null;
-            const p  = nhlStats?.points  ?? data.game_log?.summary.points  ?? null;
-            const pm = nhlStats?.plus_minus ?? null;
-            const fiTone = fi == null ? "neutral" : fi < 0.40 ? "good" : fi > 0.65 ? "bad" : "neutral";
-            const ciTone = ci == null ? "neutral" : ci >= 0.20 ? "good" : ci <= -0.20 ? "bad" : "neutral";
-            return [
-              { label: "GP",      value: fmtNum(gp), tip: "Games played this season." },
-              { label: "G",       value: fmtNum(g),  tip: "Goals this season." },
-              { label: "A",       value: fmtNum(a),  tip: "Assists this season." },
-              { label: "P",       value: fmtNum(p),  sub: gp ? `${(((p ?? 0) / Math.max(gp, 1))).toFixed(2)} P/G` : undefined, tip: "Points (goals + assists)." },
-              { label: "+/-",     value: pm == null ? "—" : `${pm > 0 ? "+" : ""}${pm}`, tone: pm == null ? "neutral" : pm > 5 ? "good" : pm < -5 ? "bad" : "neutral", tip: "Plus-minus this season. Heavily team-dependent." },
-              { label: "WAR",     value: warVal != null ? `${warVal > 0 ? "+" : ""}${warVal.toFixed(2)}` : "—", tier: warVal != null ? warTier(warVal) : null, tip: "Wins Above Replacement. Single-number player value, blends offense + defense + special teams." },
-            ];
-          })();
-          return <KpiBand tiles={tiles} teamColor={teamColor} />;
-        })()}
+        {/* KPI band was duplicating the TARGET PROFILE stats strip
+            (GP/G/A/P/+/-/FI for skaters, GP/W/L/SV%/GAA/SO for goalies)
+            — removed. The headline totals live in the top hero. */}
 
-        {/* EDGE / SAVE TELEMETRY band — sits between KPI and Ratings.
+        {/* EDGE / SAVE TELEMETRY band — sits between hero and Ratings.
             Radar is now in the TARGET PROFILE header (top of the page)
             next to the picture, so this row carries the OTHER half: NHL
             EDGE metrics for skaters, NET SAVE % heatmap for goalies. */}
