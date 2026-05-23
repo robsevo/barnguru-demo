@@ -559,8 +559,13 @@ export default function ScoreboardBar() {
 
   return (
     <div className="select-none">
-      {/* Label strip */}
-      <div className="flex items-center justify-center gap-2 border-b border-[#C9A84C]/[0.18] h-6 relative" style={{ background: "linear-gradient(to bottom, rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.04), transparent)" }}>
+      {/* Label strip — border tints with the active team theme instead of
+          always rendering gold. Uses --brand-* CSS vars set by ThemeProvider. */}
+      <div className="flex items-center justify-center gap-2 h-6 relative"
+        style={{
+          borderBottom: "1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.20)",
+          background: "linear-gradient(to bottom, rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.04), transparent)",
+        }}>
         {theme && (
           <button
             onClick={clearTheme}
@@ -581,11 +586,21 @@ export default function ScoreboardBar() {
         {hasLive && (
           <button
             onClick={toggleHideAll}
-            className={`absolute right-4 top-1/2 -translate-y-1/2 hud-mono text-[8px] font-black uppercase tracking-[0.10em] px-1.5 py-[1px] leading-none rounded-md border transition-all duration-200 whitespace-nowrap ${
-              hideAll
-                ? "text-[#C9A84C] border-[#C9A84C]/50 bg-[#C9A84C]/[0.12] shadow-[0_0_8px_rgba(201,168,76,0.15)]"
-                : "text-[#C9A84C]/55 border-[#C9A84C]/22 bg-[#C9A84C]/[0.04] hover:text-[#C9A84C]/85 hover:border-[#C9A84C]/35 hover:bg-[#C9A84C]/[0.08]"
-            }`}
+            className="absolute right-4 top-1/2 -translate-y-1/2 hud-mono text-[8px] font-black uppercase tracking-[0.10em] px-1.5 py-[1px] leading-none rounded-md border transition-all duration-200 whitespace-nowrap"
+            style={{
+              color: hideAll
+                ? "rgb(var(--brand-r), var(--brand-g), var(--brand-b))"
+                : "rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.6)",
+              borderColor: hideAll
+                ? "rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.55)"
+                : "rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.25)",
+              background: hideAll
+                ? "rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.14)"
+                : "rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.05)",
+              boxShadow: hideAll
+                ? "0 0 8px rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.20)"
+                : "none",
+            }}
           >
             {hideAll ? "show" : "hide"}
           </button>
@@ -593,7 +608,11 @@ export default function ScoreboardBar() {
       </div>
 
       {games.length > 0 && (
-        <div className="flex items-center border-b border-[#C9A84C]/[0.14]" style={{ background: "linear-gradient(to bottom, rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.025), transparent)" }}>
+        <div className="flex items-center"
+          style={{
+            borderBottom: "1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.16)",
+            background: "linear-gradient(to bottom, rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.025), transparent)",
+          }}>
           <Arrow dir="left" onClick={() => scroll("left")} visible={canLeft} />
           {/* py-3 here gives the card's own drop shadow + the hud-interactive
               hover lift (-2px) and press scale (0.985) room to render fully
