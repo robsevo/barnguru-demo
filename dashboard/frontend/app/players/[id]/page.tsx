@@ -7006,32 +7006,138 @@ export default function PlayerProfilePage() {
 
       </div>
 
-      {/* ── Telemetry tab bar — sticky so the section nav stays accessible
-          as cards scroll. Backdrop blur + team-tinted background so it
-          reads as a HUD layer, not a floating bar. */}
-      <div className="sticky top-0 z-30 mt-5 mb-3 px-1 -mx-1 py-1.5 flex items-center gap-2"
-        style={{
-          borderBottom: `1px solid ${teamColor}33`,
-          background: `linear-gradient(180deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.72) 100%)`,
-          backdropFilter: "blur(8px)",
-          WebkitBackdropFilter: "blur(8px)",
-          boxShadow: `0 4px 14px rgba(0,0,0,0.45), 0 0 8px ${teamColor}1c`,
-        }}>
-        <span className="hud-mono text-[9px] uppercase tracking-[0.2em] text-[var(--text-secondary)] shrink-0 pr-2 flex items-center gap-1.5">
-          <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 4px ${teamColor}` }} />
-          <span>▌ TELEMETRY</span>
-        </span>
-        <HudTabBar
-          tabs={telemetryTabs}
-          active={telemetryTab}
-          onChange={(id) => setTelemetryTab(id as TelemetryTab)}
-          themeColor={teamColor}
-          scroll
-        />
-      </div>
+      {/* ── DASHBOARD SHELL ──────────────────────────────────────────
+          Hero (TARGET PROFILE / Ratings / Command Deck) stays up top.
+          Below it, the page splits into a left vertical icon rail + a
+          right content pane that renders ONLY the active section.
+          Replaces the long-scroll tab approach so each view fills the
+          viewport instead of stacking. On mobile the rail collapses to
+          a horizontal scrolling strip. */}
+      <div className="mt-5 grid gap-4 lg:grid-cols-[210px_minmax(0,1fr)]">
 
-      {/* ── Cards grid ── */}
-      <div className="grid gap-4 sm:grid-cols-2 min-w-0 overflow-x-hidden">
+        {/* ── Left rail — sticky vertical nav. Each item is a button with
+            HUD glyph + label + active state (left accent bar + scan band
+            + team-color glow). On <lg it collapses to a horizontal strip
+            so phones still get one-tap section switching. */}
+        <aside className="lg:sticky lg:top-3 self-start">
+          <div className="hud-panel hud-panel--all-corners jarvis-boot jarvis-shimmer relative overflow-hidden"
+            style={{
+              ["--hud-corner" as string]: teamColor,
+              background: "linear-gradient(180deg, rgba(0,0,0,0.62), rgba(0,0,0,0.40))",
+              boxShadow: `0 0 14px ${teamColor}1a, inset 0 0 18px rgba(0,0,0,0.45)`,
+            }}>
+            <span className="hud-panel__corner-tr" />
+            <span className="hud-panel__corner-bl" />
+            <div className="hud-scan" aria-hidden />
+            {/* Header */}
+            <div className="flex items-center gap-2 px-3 py-2 border-b" style={{ borderColor: `${teamColor}22` }}>
+              <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 4px ${teamColor}` }} />
+              <span className="hud-mono text-[9px] uppercase tracking-[0.24em] font-semibold"
+                style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}55` }}>
+                ▌ TELEMETRY
+              </span>
+            </div>
+            {/* Nav items — vertical on lg, horizontal scroll on smaller */}
+            <nav className="flex lg:flex-col p-1.5 gap-1 overflow-x-auto lg:overflow-visible">
+              {(() => {
+                // Glyph map — pure unicode (no emoji per CLAUDE.md rule)
+                const glyph: Record<string, string> = {
+                  neural:   "◆",   // behavior / play DNA
+                  "shot-map": "⌖", // crosshair
+                  zones:    "▦",   // grid
+                  fatigue:  "◭",   // wedge / fatigue gauge
+                  advanced: "◉",   // bullseye / deep dive
+                };
+                const subtitle: Record<string, string> = {
+                  neural:   "play dna · patterns",
+                  "shot-map": "shot locations · 3D",
+                  zones:    "ice time · tendencies",
+                  fatigue:  "FI · confidence",
+                  advanced: "engine outputs · context",
+                };
+                return telemetryTabs.map(tab => {
+                  const isActive = telemetryTab === tab.id;
+                  return (
+                    <button key={tab.id}
+                      onClick={() => setTelemetryTab(tab.id as TelemetryTab)}
+                      className="relative group flex items-center gap-2.5 lg:gap-3 px-2.5 py-2 lg:py-2.5 rounded-sm transition-all shrink-0 lg:shrink min-w-[140px] lg:min-w-0"
+                      style={{
+                        background: isActive
+                          ? `linear-gradient(90deg, ${teamColor}28 0%, ${teamColor}08 100%)`
+                          : "transparent",
+                        borderLeft: `2px solid ${isActive ? teamColor : "transparent"}`,
+                        boxShadow: isActive ? `inset 0 0 14px ${teamColor}22, 0 0 8px ${teamColor}1a` : "none",
+                      }}>
+                      {/* Active row scan-line — slow horizontal sweep on
+                          the active button only. Pure CSS so no extra JS. */}
+                      {isActive && (
+                        <span aria-hidden className="absolute inset-y-0 left-0 right-0 pointer-events-none"
+                          style={{
+                            background: `linear-gradient(90deg, transparent, ${teamColor}33, transparent)`,
+                            animation: "railScan 3.6s linear infinite",
+                            mixBlendMode: "screen",
+                          }} />
+                      )}
+                      {/* Glyph */}
+                      <span className="hud-mono text-[16px] leading-none shrink-0"
+                        style={{
+                          color: isActive ? teamColor : "rgba(255,255,255,0.45)",
+                          textShadow: isActive ? `0 0 8px ${teamColor}` : "none",
+                          transition: "color 200ms, text-shadow 200ms",
+                        }}>
+                        {glyph[tab.id] ?? "▸"}
+                      </span>
+                      {/* Label stack */}
+                      <span className="flex flex-col items-start min-w-0">
+                        <span className="hud-mono text-[10px] uppercase tracking-[0.20em] font-semibold leading-tight"
+                          style={{
+                            color: isActive ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.70)",
+                            textShadow: isActive ? `0 0 4px ${teamColor}55` : "none",
+                          }}>
+                          {tab.label}
+                        </span>
+                        <span className="hud-mono text-[7px] uppercase tracking-[0.18em] text-[var(--text-muted)] leading-tight truncate">
+                          {subtitle[tab.id] ?? ""}
+                        </span>
+                      </span>
+                      {/* Right-edge arrow indicator on active */}
+                      {isActive && (
+                        <span aria-hidden className="ml-auto hud-mono text-[10px] hidden lg:block"
+                          style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}` }}>
+                          ▸
+                        </span>
+                      )}
+                    </button>
+                  );
+                });
+              })()}
+            </nav>
+            {/* Footer chip — live indicator so the rail reads as an
+                instrument, not a static nav. */}
+            <div className="px-3 py-1.5 border-t flex items-center justify-between"
+              style={{ borderColor: `${teamColor}22` }}>
+              <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                live
+              </span>
+              <span className="hud-mono text-[8px] uppercase tracking-[0.18em]"
+                style={{ color: `${teamColor}99` }}>
+                60Hz
+              </span>
+            </div>
+            <style jsx>{`
+              @keyframes railScan {
+                0%   { transform: translateX(-100%); }
+                100% { transform: translateX(100%);  }
+              }
+              @media (prefers-reduced-motion: reduce) {
+                span { animation: none !important; }
+              }
+            `}</style>
+          </div>
+        </aside>
+
+        {/* ── Right content pane — renders only the active section. */}
+        <div className="min-w-0 grid gap-4 sm:grid-cols-2 overflow-x-hidden self-start">
 
         {/* Tier legend — worst → best */}
         {(telemetryTab === "advanced" || telemetryTab === "fatigue") && (
@@ -8072,7 +8178,9 @@ export default function PlayerProfilePage() {
           </div>
         )}
 
+        </div>
       </div>
+      {/* /DASHBOARD SHELL */}
 
       {/* Footer */}
       <p className="mt-4 text-[9px] text-white/15 font-mono text-center">
