@@ -2915,6 +2915,219 @@ function IceTimeByZoneBars({ data }: { data: ProfileData }) {
 }
 
 // ---------------------------------------------------------------------------
+// PlayerDnaStrip — "neural DNA" double-helix signature.
+//
+// The behavior NN already has 7 action heads (carry / dump / slot / perim /
+// drive / battle / hold). Each becomes one rung of a helix; rung height =
+// the action's probability, rung colour = the action's theme. Two sine-wave
+// backbones cross over the rungs and slowly phase-shift so the strand reads
+// as live signal rather than a static bar chart. The result is a per-player
+// fingerprint that visually screams "this is who they are on the ice."
+//
+// Goalie variant swaps the 7 skater actions for 6 goalie axes (HD / MD / LD
+// save %, GSAx, workload, overall SV%) drawn against the same helix.
+// ---------------------------------------------------------------------------
+
+interface DnaRung {
+  id: string;
+  label: string;       // 3-char code shown under the rung
+  weight: number;      // 0-1 height
+  color: string;       // theme color
+  tip?: string;
+}
+
+function PlayerDnaStrip({
+  rungs, teamColor, signature,
+}: { rungs: DnaRung[]; teamColor: string; signature?: string }) {
+  const [hover, setHover] = useState<number | null>(null);
+  if (rungs.length === 0) return null;
+
+  // SVG geometry — viewBox 280×88. Helix amplitude 14, sine period covers
+  // the full width with two crossovers so each rung lives at a node where
+  // the strands cross. Total = 7 rungs across (or 6 for goalies).
+  const VB_W = 280;
+  const VB_H = 88;
+  const PAD_L = 16;
+  const PAD_R = 16;
+  const innerW = VB_W - PAD_L - PAD_R;
+  const cy = VB_H / 2;          // helix centre y
+  const amp = 18;               // helix amplitude
+  const n = rungs.length;
+  const step = innerW / n;
+  // Build sine path for one strand at phase offset
+  const buildStrand = (phase: number): string => {
+    const points: string[] = [];
+    const segs = 60;
+    for (let i = 0; i <= segs; i++) {
+      const t = i / segs;
+      const x = PAD_L + t * innerW;
+      const y = cy + Math.sin((t * n * Math.PI) + phase) * amp;
+      points.push(`${i === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`);
+    }
+    return points.join(" ");
+  };
+
+  return (
+    <div className="mt-2 rounded border px-2 py-2 relative overflow-hidden"
+      style={{
+        borderColor: `${teamColor}33`,
+        background: "linear-gradient(180deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.32) 100%)",
+        boxShadow: `0 0 12px ${teamColor}1a, inset 0 0 18px rgba(0,0,0,0.4)`,
+      }}>
+      {/* Header strip */}
+      <div className="flex items-center justify-between mb-1 px-1">
+        <div className="flex items-center gap-2">
+          <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 4px ${teamColor}` }} />
+          <span className="hud-mono text-[9px] uppercase tracking-[0.22em]"
+            style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}55` }}>
+            ◢ NEURAL DNA
+          </span>
+          <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+            · BNN signature
+          </span>
+        </div>
+        {signature && (
+          <span className="hud-mono text-[8px] uppercase tracking-[0.18em] tabular-nums" style={{ color: `${teamColor}99` }}>
+            {signature}
+          </span>
+        )}
+      </div>
+
+      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="w-full" style={{ height: 80 }}>
+        <defs>
+          {/* Glow filter per-strand */}
+          <filter id="dnaGlow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="0.8" result="b" />
+            <feMerge>
+              <feMergeNode in="b" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          {/* Vertical scan band moving across the helix */}
+          <linearGradient id="dnaScan" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor={teamColor} stopOpacity="0" />
+            <stop offset="50%" stopColor={teamColor} stopOpacity="0.45" />
+            <stop offset="100%" stopColor={teamColor} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+
+        {/* Centre baseline + faint grid */}
+        <line x1={PAD_L - 4} y1={cy} x2={VB_W - PAD_R + 4} y2={cy} stroke={`${teamColor}22`} strokeWidth="0.3" />
+        {[0.25, 0.5, 0.75].map((t) => (
+          <line key={t}
+            x1={PAD_L} y1={cy - amp * t * 2 + amp} x2={VB_W - PAD_R} y2={cy - amp * t * 2 + amp}
+            stroke="rgba(255,255,255,0.04)" strokeWidth="0.2" />
+        ))}
+
+        {/* Two strands (offset by π) — both rotate slowly via phase shift
+            animation. CSS animates a custom-property; we approximate with
+            two pre-baked paths and crossfade. Simpler + works without JS. */}
+        <g style={{ filter: "url(#dnaGlow)" }}>
+          <path d={buildStrand(0)}
+            fill="none" stroke={teamColor} strokeOpacity="0.85"
+            strokeWidth="1.3" strokeLinecap="round"
+            style={{ animation: "dnaStrandA 6s ease-in-out infinite" }} />
+          <path d={buildStrand(Math.PI)}
+            fill="none" stroke={teamColor} strokeOpacity="0.55"
+            strokeWidth="1.1" strokeLinecap="round"
+            style={{ animation: "dnaStrandB 6s ease-in-out infinite" }} />
+        </g>
+
+        {/* Rungs — each rung is a vertical bar between the two strands at
+            the rung's x-position, colored by action theme, height = weight. */}
+        {rungs.map((r, i) => {
+          const x = PAD_L + step * (i + 0.5);
+          // Backbones at this column meet around cy when phase π — the
+          // crossover. Snap rung to a fixed vertical span scaled by weight
+          // so the rung still reads as height = probability.
+          const halfH = Math.max(3, r.weight * (amp * 2));
+          const y0 = cy - halfH;
+          const y1 = cy + halfH;
+          const isHover = hover === i;
+          return (
+            <g key={r.id}
+              onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}
+              style={{
+                cursor: "pointer",
+                animation: `dnaRungIn 700ms cubic-bezier(0.22,1,0.36,1) ${i * 90}ms both`,
+              }}>
+              <line x1={x} y1={y0} x2={x} y2={y1}
+                stroke={r.color}
+                strokeWidth={isHover ? 4 : 2.6}
+                strokeLinecap="round"
+                opacity={isHover ? 1 : 0.92}
+                style={{
+                  filter: `drop-shadow(0 0 ${isHover ? 6 : 3}px ${r.color})`,
+                  transition: "stroke-width 200ms ease, opacity 200ms ease",
+                }} />
+              {/* Nucleotide caps on the rung — bright dots at the strand
+                  intersections so each rung reads as DNA-base, not just a bar. */}
+              <circle cx={x} cy={y0} r={isHover ? 2.2 : 1.6} fill={r.color}
+                style={{ filter: `drop-shadow(0 0 3px ${r.color})`, transition: "r 200ms ease" }} />
+              <circle cx={x} cy={y1} r={isHover ? 2.2 : 1.6} fill={r.color}
+                style={{ filter: `drop-shadow(0 0 3px ${r.color})`, transition: "r 200ms ease" }} />
+              {/* 3-char code under the rung */}
+              <text x={x} y={VB_H - 2} textAnchor="middle"
+                fontSize="5" fontWeight={isHover ? "700" : "600"}
+                fill={isHover ? r.color : `${r.color}aa`}
+                style={{
+                  fontFamily: "var(--font-mono)", letterSpacing: "0.18em",
+                  textShadow: isHover ? `0 0 4px ${r.color}` : undefined,
+                  transition: "fill 200ms ease",
+                }}>
+                {r.label}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* Sweeping vertical scan band — sells the "live signal" vibe */}
+        <rect x="0" y="0" width="6" height={VB_H} fill="url(#dnaScan)"
+          style={{ mixBlendMode: "screen", animation: "dnaSweep 4.8s linear infinite" }} />
+
+        <style>{`
+          @keyframes dnaStrandA {
+            0%, 100% { transform: translateY(0); }
+            50%      { transform: translateY(-1.2px); }
+          }
+          @keyframes dnaStrandB {
+            0%, 100% { transform: translateY(0); }
+            50%      { transform: translateY(1.2px); }
+          }
+          @keyframes dnaRungIn {
+            from { transform: scaleY(0.2); opacity: 0; }
+            to   { transform: scaleY(1);   opacity: 1; }
+          }
+          @keyframes dnaSweep {
+            0%   { transform: translateX(0px); }
+            100% { transform: translateX(${VB_W}px); }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            path, g, rect { animation: none !important; }
+          }
+        `}</style>
+      </svg>
+
+      {/* Hover detail — appears below the strip when a rung is focused */}
+      {hover != null && (
+        <div className="absolute bottom-1 left-1 right-1 flex items-center justify-between pointer-events-none">
+          <span className="hud-mono text-[9px] uppercase tracking-[0.18em] tabular-nums px-2 py-0.5 rounded border"
+            style={{
+              color: rungs[hover].color,
+              borderColor: `${rungs[hover].color}66`,
+              background: "rgba(0,0,0,0.7)",
+              backdropFilter: "blur(4px)",
+              boxShadow: `0 0 8px ${rungs[hover].color}33`,
+            }}>
+            ▸ {rungs[hover].tip ?? rungs[hover].label} · {(rungs[hover].weight * 100).toFixed(1)}%
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // HologramScanner — interactive Iron Man-style body scanner
 // ---------------------------------------------------------------------------
 type HoloZone = "head" | "torso" | "arms" | "legs";
@@ -2935,6 +3148,8 @@ function HologramScanner({
   telemetryLeft,
   telemetryRight,
   tickerLine,
+  dnaRungs,
+  dnaSignature,
 }: {
   isGoalie: boolean;
   teamColor: string;
@@ -2942,6 +3157,11 @@ function HologramScanner({
   telemetryLeft: HoloCallout[];
   telemetryRight: HoloCallout[];
   tickerLine: string[];
+  // Optional neural-DNA strip — surfaces the player's BNN action signature
+  // (or goalie save-zone fingerprint) below the silhouette so the hologram
+  // panel feels like a player-DNA scanner, not just a body diagram.
+  dnaRungs?: DnaRung[];
+  dnaSignature?: string;
 }) {
   const [active, setActive] = useState<HoloZone | null>(null);
 
@@ -3224,6 +3444,11 @@ function HologramScanner({
           </div>
         )}
       </div>
+
+      {/* Neural DNA strip — player fingerprint between silhouette and ticker */}
+      {dnaRungs && dnaRungs.length > 0 && (
+        <PlayerDnaStrip rungs={dnaRungs} teamColor={teamColor} signature={dnaSignature} />
+      )}
 
       {/* Bottom ticker — separate row, outside the canvas, no overlap */}
       {tickerLine.length > 0 && (
@@ -5422,6 +5647,48 @@ export default function PlayerProfilePage() {
                 data.bayesian_rating != null ? `BAYES ${data.bayesian_rating.toFixed(3)}` : null,
                 phase3?.fi_multiplier != null ? `MULT ${phase3.fi_multiplier.toFixed(3)}` : null,
               ].filter((s): s is string => Boolean(s))}
+              dnaRungs={(() => {
+                // Neural DNA strip — one rung per behavior NN dimension for
+                // skaters (CRY / DMP / SLT / PRM / DRV / BTL / HLD), and one
+                // rung per goalie save-zone axis for goalies. Weight is the
+                // probability / save% scaled to 0-1 so the helix encodes
+                // the player's identity as a visible fingerprint.
+                const r = (id: string, label: string, weight: number | null, tip: string): DnaRung | null =>
+                  weight == null ? null : {
+                    id,
+                    label,
+                    weight: Math.max(0.05, Math.min(1, weight)),
+                    color: ACTION_THEME[id]?.color ?? teamColor,
+                    tip,
+                  };
+                if (isGoalie) {
+                  const rg = (id: string, label: string, weight: number | null, color: string, tip: string): DnaRung | null =>
+                    weight == null ? null : { id, label, weight: Math.max(0.05, Math.min(1, weight)), color, tip };
+                  // Re-scale save% to 0-1 against a useful band so weak vs
+                  // strong zones actually look different on the helix.
+                  const normSv = (v: number | null, lo: number, hi: number) =>
+                    v == null ? null : Math.max(0, Math.min(1, (v - lo) / (hi - lo)));
+                  const gsaxNorm = data.gsax != null ? Math.max(0, Math.min(1, (data.gsax + 10) / 30)) : null;
+                  return [
+                    rg("hd",  "HDV", normSv(data.hdsv_pct ?? null, 0.70, 0.90), "#f87171", "High-danger save %"),
+                    rg("md",  "MDV", normSv(data.mdsv_pct ?? null, 0.82, 0.96), "#fbbf24", "Mid-danger save %"),
+                    rg("ld",  "LDV", normSv(data.ldsv_pct ?? null, 0.94, 1.00), "#5ee08a", "Low-danger save %"),
+                    rg("ovr", "SVP", normSv(data.sv_pct  ?? null, 0.880, 0.925), teamColor, "Overall save %"),
+                    rg("gsx", "GSX", gsaxNorm, "#a78bfa", "Goals saved above expected"),
+                    rg("vol", "VOL", data.xga != null ? Math.min(1, data.xga / 80) : null, "#38bdf8", "Workload (xGA)"),
+                  ].filter((x): x is DnaRung => x !== null);
+                }
+                return [
+                  r("carry",  "CRY", data.nn_carry_in_pct        != null ? data.nn_carry_in_pct        / 60 : null, "Carry-in rate"),
+                  r("dump",   "DMP", data.nn_dump_pct            != null ? data.nn_dump_pct            / 60 : null, "Dump-in rate"),
+                  r("slot",   "SLT", data.nn_shoot_slot_pct      != null ? data.nn_shoot_slot_pct      / 40 : null, "Slot shot rate"),
+                  r("perim",  "PRM", data.nn_shoot_perimeter_pct != null ? data.nn_shoot_perimeter_pct / 40 : null, "Perimeter shot rate"),
+                  r("drive",  "DRV", data.nn_drive_net_pct       != null ? data.nn_drive_net_pct       / 30 : null, "Drive-net rate"),
+                  r("battle", "BTL", data.nn_battle_corner_pct   != null ? data.nn_battle_corner_pct   / 30 : null, "Battle-corner rate"),
+                  r("hold",   "HLD", data.nn_hold_corner_pct     != null ? data.nn_hold_corner_pct     / 30 : null, "Hold-possession rate"),
+                ].filter((x): x is DnaRung => x !== null);
+              })()}
+              dnaSignature={isGoalie ? "G · save-zone v1" : "S · BNN v2.22"}
             />
             {/* Legacy hologram canvas (replaced by HologramScanner above) */}
             <div className="hidden">
