@@ -7663,6 +7663,64 @@ export default function PlayerProfilePage() {
                   </span>
                 </div>
               )}
+
+              {/* Goalie-specific context rows — fill the section for
+                  goalies (most skater fields above are null for them).
+                  Pulls already-fetched goalie stats. */}
+              {isGoalie && data.shots_against != null && (
+                <div className="flex items-baseline gap-2">
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)] w-16 shrink-0">Shots</span>
+                  <span className="hud-mono text-[10px] tabular-nums" style={{ color: teamColor }}>
+                    {data.shots_against} faced · {data.saves ?? "?"} saved
+                  </span>
+                </div>
+              )}
+              {isGoalie && data.xga != null && data.goals_against != null && (
+                <div className="flex items-baseline gap-2">
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)] w-16 shrink-0">vs xGA</span>
+                  <span className="hud-mono text-[10px] tabular-nums"
+                    style={{ color: data.xga - data.goals_against > 0 ? "#5ee08a" : "#f87171" }}>
+                    {data.xga - data.goals_against > 0 ? "+" : ""}{(data.xga - data.goals_against).toFixed(1)} saved vs expected
+                  </span>
+                </div>
+              )}
+              {isGoalie && data.hd_shots != null && data.hd_saves != null && (
+                <div className="flex items-baseline gap-2">
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)] w-16 shrink-0">HD Pace</span>
+                  <span className="hud-mono text-[10px] tabular-nums" style={{ color: `${teamColor}cc` }}>
+                    {data.hd_saves}/{data.hd_shots} ({data.hd_shots > 0 ? ((data.hd_saves / data.hd_shots) * 100).toFixed(1) : "—"}%)
+                  </span>
+                </div>
+              )}
+              {isGoalie && nhlStats?.gaa != null && (
+                <div className="flex items-baseline gap-2">
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)] w-16 shrink-0">GAA</span>
+                  <span className="hud-mono text-[10px] tabular-nums"
+                    style={{ color: nhlStats.gaa <= 2.50 ? "#5ee08a" : nhlStats.gaa <= 2.90 ? teamColor : "#f87171" }}>
+                    {nhlStats.gaa.toFixed(2)} · GA/60
+                  </span>
+                </div>
+              )}
+              {isGoalie && (nhlStats?.wins != null || nhlStats?.losses != null) && (
+                <div className="flex items-baseline gap-2">
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)] w-16 shrink-0">Record</span>
+                  <span className="hud-mono text-[10px] tabular-nums" style={{ color: `${teamColor}cc` }}>
+                    {nhlStats?.wins ?? 0}-{nhlStats?.losses ?? 0}{nhlStats?.ot_losses != null ? `-${nhlStats.ot_losses}` : ""}
+                    {nhlStats?.shutouts != null ? ` · ${nhlStats.shutouts} SO` : ""}
+                  </span>
+                </div>
+              )}
+              {/* Contract / cap — applies to both skaters + goalies */}
+              {contract?.cap_hit && (
+                <div className="flex items-baseline gap-2">
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)] w-16 shrink-0">Cap</span>
+                  <span className="hud-mono text-[10px] tabular-nums truncate" style={{ color: `${teamColor}cc` }}>
+                    {contract.cap_hit >= 1_000_000 ? `$${(contract.cap_hit / 1_000_000).toFixed(2)}M` : `$${(contract.cap_hit / 1_000).toFixed(0)}K`}
+                    {contract.contract_type ? ` · ${contract.contract_type}` : ""}
+                    {contract.expiry_year ? ` · '${String(contract.expiry_year).slice(-2)}` : ""}
+                  </span>
+                </div>
+              )}
             </div>
           </HudPanel>
         </div>
