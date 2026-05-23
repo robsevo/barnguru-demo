@@ -5299,9 +5299,10 @@ export default function PlayerProfilePage() {
   // Ref for the mobile telemetry rail — used by the left/right scroll
   // buttons below the rail to programmatically scroll the nav.
   const railRef = useRef<HTMLElement | null>(null);
-  // Cached season-derived player archetype — set by an effect later in
-  // the component. Declared HERE (above the loading/!data early returns)
-  // so the hook order stays stable across renders (Rules of Hooks).
+  // Cached season-derived player archetype + the effect that maintains
+  // it BOTH live ABOVE the loading/!data early returns so the hook
+  // order stays stable across renders. The effect callback no-ops when
+  // data is null (first render) and updates after data + nhlStats land.
   const [cachedSeasonType, setCachedSeasonType] = useState<string | null>(null);
 
   useEffect(() => {
@@ -5310,6 +5311,20 @@ export default function PlayerProfilePage() {
       .then(d => setAllPlayers(d.players ?? []))
       .catch(() => {});
   }, []);
+
+  // Cache the season-derived archetype as soon as data lands under
+  // non-playoff context. No-op when data is null or context is playoffs
+  // so the badge stays stable through the season/playoffs toggle.
+  // MUST live up here (above the early returns) — see hook-placement
+  // memory note about prior Application-error crashes from this exact
+  // pattern.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!data) return;
+    if (data.context_applied === "playoffs") return;
+    const t = derivePlayerType(data, nhlStats);
+    if (t) setCachedSeasonType(t);
+  }, [data, nhlStats]);
 
   const suggestions = searchQ.trim().length >= 2
     ? allPlayers.filter(p => p.name.toLowerCase().includes(searchQ.trim().toLowerCase())).slice(0, 8)
@@ -5590,17 +5605,12 @@ export default function PlayerProfilePage() {
   };
 
   const ewmaAbove  = data.ewma_xgf60 != null ? data.ewma_xgf60 - 4.09 : null;
-  // Player archetype is a season-level identity. derivePlayerType returns
-  // null when context is "playoffs"; cachedSeasonType (declared near the
-  // top of the component, ABOVE early returns to honour Rules of Hooks)
-  // keeps the badge stable when the user toggles playoff context.
+  // Player archetype: derivePlayerType returns null under playoffs
+  // context to avoid skewed reads off tiny samples. cachedSeasonType
+  // (declared + maintained by an effect at the top of the component,
+  // both ABOVE the loading/!data early returns) keeps the badge stable
+  // when the user toggles playoff context.
   const liveType = derivePlayerType(data, nhlStats);
-  useEffect(() => {
-    if (liveType && data.context_applied !== "playoffs") {
-      setCachedSeasonType(liveType);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveType, data.context_applied]);
   const playerType = liveType ?? cachedSeasonType;
 
   // "Why hot" blurb
