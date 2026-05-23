@@ -5922,7 +5922,12 @@ export default function PlayerProfilePage() {
             (order-3, also right pane). To make this work the right pane
             is split below; rail row uses col-span to span both grid
             columns on mobile, and on lg+ collapses to column 1. */}
-        <aside className="order-2 lg:order-none lg:col-start-1 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-16 z-30 mb-2 lg:mb-0 w-full lg:w-auto max-w-full lg:max-w-none min-w-0 lg:self-start lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto">
+        {/* Rail aside — sticky on lg+. No max-height clamp on the
+            container itself because the rail has only 6 items (always
+            fits in viewport); the prior max-h + overflow-y-auto combo
+            was causing the menu to scroll INTERNALLY which hid items
+            when scroll position drifted. */}
+        <aside className="order-2 lg:order-none lg:col-start-1 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-16 z-30 mb-2 lg:mb-0 w-full lg:w-auto max-w-full lg:max-w-none min-w-0 lg:self-start">
           {/* Outer wrapper — PLAIN div, NO .hud-panel class. The .hud-panel
               class has `overflow: hidden` baked in (globals.css line 347)
               which kills the inner nav's overflow-x-auto. Style the chrome
@@ -7406,8 +7411,11 @@ export default function PlayerProfilePage() {
           </HudPanel>
         </div>
 
-        {/* NEURAL CORTEX column */}
-        <div className="lg:col-span-4 flex">
+        {/* NEURAL CORTEX column — self-start so the panel sizes to its
+            content instead of stretching to match the (taller) Vitals
+            column. The empty space above the panel disappears because
+            the column no longer stretches; the panel sits at top. */}
+        <div className="lg:col-span-4 flex lg:self-start">
           <HudPanel title="Neural Cortex" subtitle="BNN v2.22" themeColor={teamColor} scanline allCorners className="w-full flex flex-col">
             {/* INFER status strip + Archetype banner BOTH removed:
                   - "INFER · BNN v2.22 · N CH" inline status duplicated the
