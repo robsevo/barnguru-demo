@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -2130,18 +2130,42 @@ function GoalieSaveLocationMap({ shots, teamColor = "var(--brand-hex)" }: { shot
   const fmt = (pct: number | null) => pct == null ? "—" : `${(pct * 100).toFixed(1)}%`;
   const totalShots = shots.length;
 
+  // Find the hottest + coldest zone so the eye picks them up at a glance —
+  // hottest gets a continuous pulse ring, coldest a slow red flash. Mirrors
+  // the treatment ZoneTendencyMap uses for forwards.
+  const ranked = zones
+    .map(z => ({ id: z.id, pct: svFor(z.id) }))
+    .filter(r => r.pct != null) as { id: string; pct: number }[];
+  const hottest = ranked.length ? ranked.reduce((a, b) => (b.pct > a.pct ? b : a)).id : null;
+  const coldest = ranked.length ? ranked.reduce((a, b) => (b.pct < a.pct ? b : a)).id : null;
+
   return (
-    <div className="relative w-full max-w-[440px] mx-auto"
+    <div className="relative w-full max-w-[460px] mx-auto"
       style={{ ["--gnz-color" as string]: teamColor }}>
       <svg viewBox="0 0 85 100" width="100%" className="block"
-        style={{ filter: `drop-shadow(0 6px 14px rgba(0,0,0,0.55)) drop-shadow(0 0 12px ${teamColor}22)` }}>
+        style={{
+          filter: `drop-shadow(0 8px 18px rgba(0,0,0,0.65)) drop-shadow(0 0 18px ${teamColor}33)`,
+        }}>
+        <defs>
+          {/* Diagonal grid overlay so the "ice" reads as a sensor surface,
+              not flat white. Same vibe as the goalie net HUD. */}
+          <pattern id="gslGrid" width="3" height="3" patternUnits="userSpaceOnUse">
+            <path d="M 0 3 L 3 0" stroke="rgba(96,165,250,0.10)" strokeWidth="0.18" fill="none" />
+          </pattern>
+        </defs>
         <g transform="translate(0,100) rotate(-90)">
           <HalfRinkMarkings />
+          {/* Sensor-grid wash over the ice — clips to the half-rink path so
+              the boards/corners stay clean. */}
+          <rect x="0" y="0" width="100" height="85" fill="url(#gslGrid)" opacity="0.7" />
+
           {/* Zone tiles (drawn over the rink so save% colour reads first) */}
-          {zones.map((z) => {
+          {zones.map((z, i) => {
             const pct = svFor(z.id);
             const t = tone(pct);
             const isHover = hover === z.id;
+            const isHot = z.id === hottest && pct != null && pct >= 0.85;
+            const isCold = z.id === coldest && pct != null && pct < 0.85;
             const cx = (z.bbox.x0 + z.bbox.x1) / 2;
             const cy = (z.bbox.y0 + z.bbox.y1) / 2;
             const w  = z.bbox.x1 - z.bbox.x0;
@@ -2150,60 +2174,143 @@ function GoalieSaveLocationMap({ shots, teamColor = "var(--brand-hex)" }: { shot
               <g key={z.id}
                 onMouseEnter={() => setHover(z.id)}
                 onMouseLeave={() => setHover(null)}
-                style={{ cursor: "pointer" }}>
+                style={{
+                  cursor: "pointer",
+                  transformOrigin: `${cx}px ${cy}px`,
+                  animation: `gslZoneIn 500ms cubic-bezier(0.22,1,0.36,1) ${i * 70}ms both`,
+                }}>
                 <rect
                   x={z.bbox.x0} y={z.bbox.y0} width={w} height={h}
                   fill={t.fill}
                   stroke={t.stroke}
-                  strokeOpacity={isHover ? 0.95 : 0.55}
-                  strokeWidth={isHover ? 0.9 : 0.4}
-                  style={{ transition: "stroke-opacity 200ms ease, stroke-width 200ms ease" }} />
-                <text x={cx} y={cy - 1} textAnchor="middle"
-                  fontSize="4.6" fontWeight="700"
+                  strokeOpacity={isHover ? 1 : 0.62}
+                  strokeWidth={isHover ? 1.0 : 0.45}
+                  style={{
+                    transition: "stroke-opacity 200ms ease, stroke-width 200ms ease, fill-opacity 200ms ease",
+                    filter: isHover ? `drop-shadow(0 0 5px ${t.stroke})` : (isHot ? `drop-shadow(0 0 3px ${t.stroke}aa)` : undefined),
+                  }} />
+                {/* Hot/cold pulse — matches the ZoneTendencyMap treatment so
+                    the goalie viz feels like part of the same instrument. */}
+                {(isHot || isCold) && (
+                  <rect x={z.bbox.x0} y={z.bbox.y0} width={w} height={h}
+                    fill="none" stroke={t.stroke} strokeWidth="0.6"
+                    style={{
+                      transformOrigin: `${cx}px ${cy}px`,
+                      animation: `gslPulse ${isHot ? "2.6s" : "3.4s"} ease-in-out infinite`,
+                    }} />
+                )}
+                {/* Top-left corner ticks per tile — tiny but the eye picks
+                    them up. They're the same idiom HudGrid uses. */}
+                <g stroke={t.stroke} strokeWidth="0.18" opacity={isHover ? 0.95 : 0.55}>
+                  <line x1={z.bbox.x0 + 0.4} y1={z.bbox.y0 + 0.4} x2={z.bbox.x0 + 2.4} y2={z.bbox.y0 + 0.4} />
+                  <line x1={z.bbox.x0 + 0.4} y1={z.bbox.y0 + 0.4} x2={z.bbox.x0 + 0.4} y2={z.bbox.y0 + 2.4} />
+                  <line x1={z.bbox.x1 - 0.4} y1={z.bbox.y1 - 0.4} x2={z.bbox.x1 - 2.4} y2={z.bbox.y1 - 0.4} />
+                  <line x1={z.bbox.x1 - 0.4} y1={z.bbox.y1 - 0.4} x2={z.bbox.x1 - 0.4} y2={z.bbox.y1 - 2.4} />
+                </g>
+                <text x={cx} y={cy - 0.8} textAnchor="middle"
+                  fontSize={isHover ? "5.2" : "4.6"} fontWeight="700"
                   fill={t.stroke}
-                  style={{ fontFamily: "var(--font-mono)", letterSpacing: "0.10em" }}>
+                  style={{
+                    fontFamily: "var(--font-mono)", letterSpacing: "0.12em",
+                    textShadow: `0 0 4px ${t.stroke}`,
+                    transition: "font-size 200ms ease",
+                  }}>
                   {z.short}
                 </text>
-                <text x={cx} y={cy + 4.4} textAnchor="middle"
-                  fontSize="3.4"
-                  fill="rgba(255,255,255,0.85)"
-                  style={{ fontFamily: "var(--font-mono)", letterSpacing: "0.08em" }}>
+                <text x={cx} y={cy + 4.8} textAnchor="middle"
+                  fontSize="3.6" fontWeight="700"
+                  fill="rgba(255,255,255,0.92)"
+                  style={{ fontFamily: "var(--font-mono)", letterSpacing: "0.10em" }}>
                   {pct == null ? "—" : `${(pct * 100).toFixed(1)}%`}
                 </text>
               </g>
             );
           })}
+
+          {/* Sweep scan band over the rink — matches netScan / ztScan idiom */}
+          <rect x="0" y="0" width="100" height="2"
+            fill={teamColor} fillOpacity="0.22"
+            style={{ mixBlendMode: "screen", animation: "gslScan 5.2s linear infinite" }} />
+
+          {/* Corner reticles — push the chrome edge of the panel out so the
+              rink looks instrument-grade. Two corners on each side. */}
+          <g fill={teamColor} fillOpacity="0.80">
+            <rect x="0.4" y="0.4" width="3" height="0.4" />
+            <rect x="0.4" y="0.4" width="0.4" height="3" />
+            <rect x="96.6" y="0.4" width="3" height="0.4" />
+            <rect x="99.2" y="0.4" width="0.4" height="3" />
+            <rect x="0.4" y="81.6" width="3" height="0.4" />
+            <rect x="0.4" y="81.6" width="0.4" height="3" />
+            <rect x="96.6" y="81.6" width="3" height="0.4" />
+            <rect x="99.2" y="81.6" width="0.4" height="3" />
+          </g>
         </g>
       </svg>
 
-      <div className="absolute top-1 left-1 hud-mono text-[9px] uppercase tracking-[0.18em] px-2 py-0.5 rounded"
-        style={{ color: teamColor, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}>
-        ◢ SAVE % BY SHOT LOCATION
+      {/* Header chip — pulse-dot + team-color label */}
+      <div className="absolute top-1.5 left-1.5 flex items-center gap-2 hud-mono text-[9px] uppercase tracking-[0.22em] px-2 py-1 border rounded-sm"
+        style={{
+          color: teamColor,
+          borderColor: `${teamColor}55`,
+          background: "rgba(0,0,0,0.62)",
+          backdropFilter: "blur(6px)",
+          boxShadow: `0 0 10px ${teamColor}22`,
+        }}>
+        <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 4px ${teamColor}` }} />
+        <span style={{ textShadow: `0 0 5px ${teamColor}77` }}>◢ SAVE % · SHOT LOCATION</span>
       </div>
+
       {hover && (() => {
         const z = zones.find(x => x.id === hover);
         if (!z) return null;
         const c = counts[z.id];
         const pct = svFor(z.id);
+        const t = tone(pct);
         return (
-          <div className="absolute top-1 right-1 hud-mono text-[10px] uppercase tracking-[0.18em] px-2 py-1 rounded border pointer-events-none"
+          <div className="absolute top-1.5 right-1.5 hud-mono text-[10px] uppercase tracking-[0.18em] px-2.5 py-1.5 border rounded-sm pointer-events-none"
             style={{
-              color: teamColor,
-              borderColor: `${teamColor}55`,
-              background: "rgba(0,0,0,0.72)",
-              backdropFilter: "blur(6px)",
+              color: t.stroke,
+              borderColor: t.stroke,
+              background: "rgba(0,0,0,0.78)",
+              backdropFilter: "blur(8px)",
+              boxShadow: `0 0 12px ${t.stroke}44`,
             }}>
-            <div className="font-semibold">▸ {z.label}</div>
-            <div className="text-[9px] tracking-[0.16em] text-white/65 mt-0.5">
-              {c.shots} shots · {c.goals} goals · {fmt(pct)}
+            <div className="font-semibold flex items-center gap-1.5">
+              <span>▸</span><span>{z.label}</span>
+            </div>
+            <div className="text-[9px] tracking-[0.16em] text-white/75 mt-0.5 tabular-nums">
+              {c.shots} sh · {c.goals} ga · {fmt(pct)}
             </div>
           </div>
         );
       })()}
 
-      <p className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-muted)] text-center mt-2">
-        {totalShots} shots faced · zones under 8 shots greyed out
-      </p>
+      <div className="flex items-center justify-between mt-2 px-1">
+        <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)] tabular-nums">
+          ▸ {totalShots} shots faced
+        </span>
+        <span className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+          zones &lt; 8 sh dimmed
+        </span>
+      </div>
+
+      <style jsx>{`
+        @keyframes gslZoneIn {
+          from { transform: scale(0.86); opacity: 0; }
+          to   { transform: scale(1);    opacity: 1; }
+        }
+        @keyframes gslScan {
+          0%   { transform: translateY(0px); }
+          100% { transform: translateY(83px); }
+        }
+        @keyframes gslPulse {
+          0%, 100% { stroke-opacity: 0.85; transform: scale(1); }
+          50%      { stroke-opacity: 0.25; transform: scale(1.03); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          rect, g { animation: none !important; }
+        }
+      `}</style>
     </div>
   );
 }
@@ -2469,7 +2576,7 @@ function ZoneTendencyMap({ data, teamColor }: { data: ProfileData; teamColor: st
 const KMH_TO_MPH = 0.621371;
 
 function EdgeStatRow({
-  label, sub, value, rank, pop, pct, teamColor, threshold,
+  label, sub, value, rank, pop, pct, teamColor, threshold, delay = 0,
 }: {
   label: string;
   sub?: string;
@@ -2479,30 +2586,48 @@ function EdgeStatRow({
   pct?: number | null;        // 0-100; higher = better
   teamColor: string;
   threshold?: { ok: boolean; text: string } | null;
+  delay?: number;             // stagger animation per row index
 }) {
   // Percentile drives both the bar fill and the colour. Above-90 = elite
   // (greens), 60-90 = solid (team accent), 40-60 = average (slate),
   // below 40 = below avg (amber/red). Matches NHL EDGE's own colour ramp.
   const pctClamped = pct == null ? null : Math.max(0, Math.min(100, pct));
   const tone = pctClamped == null
-    ? { fill: `${teamColor}55`, text: "rgba(255,255,255,0.65)" }
+    ? { fill: `${teamColor}55`, text: "rgba(255,255,255,0.78)" }
     : pctClamped >= 90 ? { fill: "#5ee08a", text: "#5ee08a" }
     : pctClamped >= 60 ? { fill: teamColor,  text: teamColor }
-    : pctClamped >= 40 ? { fill: "#94a3b8", text: "rgba(255,255,255,0.65)" }
+    : pctClamped >= 40 ? { fill: "#94a3b8", text: "rgba(255,255,255,0.75)" }
     : pctClamped >= 20 ? { fill: "#fbbf24", text: "#fbbf24" }
     :                    { fill: "#f87171", text: "#f87171" };
+  // Glow ring on elite rows — same treatment HUD panels use for "hot" cells.
+  const elite = pctClamped != null && pctClamped >= 90;
   return (
-    <div className="flex flex-col gap-1 py-1.5">
+    <div className="relative flex flex-col gap-1.5 py-2 px-2 -mx-1 rounded-sm group"
+      style={{
+        background: elite ? `linear-gradient(90deg, ${tone.fill}0a, transparent 70%)` : undefined,
+      }}>
+      {/* Left tick — colour-coded vertical accent so the eye can pick out
+          elite vs warning rows at a glance, even before reading numbers. */}
+      <span aria-hidden className="absolute left-0 top-2 bottom-2 w-px"
+        style={{ background: tone.fill, opacity: pctClamped == null ? 0.18 : 0.55, boxShadow: `0 0 4px ${tone.fill}77` }} />
       <div className="flex items-baseline justify-between gap-2">
-        <span className="hud-mono text-[9px] uppercase tracking-[0.20em] text-[var(--text-secondary)]">
-          ▸ {label}
+        <span className="hud-mono text-[9px] uppercase tracking-[0.20em] flex items-center gap-1.5"
+          style={{ color: "var(--text-secondary)" }}>
+          <span style={{ color: tone.fill, textShadow: `0 0 4px ${tone.fill}88` }}>▸</span>
+          {label}
         </span>
-        <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)] tabular-nums">
-          {rank != null && pop != null ? `rank ${rank} / ${pop}` : ""}
-        </span>
+        {rank != null && pop != null && (
+          <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)] tabular-nums">
+            rank <span style={{ color: tone.text }}>{rank}</span> / {pop}
+          </span>
+        )}
       </div>
       <div className="flex items-baseline gap-3">
-        <span className="hud-mono text-[14px] font-semibold tabular-nums" style={{ color: tone.text, textShadow: `0 0 6px ${tone.fill}33` }}>
+        <span className="hud-mono text-[16px] font-semibold tabular-nums leading-none"
+          style={{
+            color: tone.text,
+            textShadow: `0 0 10px ${tone.fill}55, 0 0 2px ${tone.fill}33`,
+          }}>
           {value}
         </span>
         {sub && (
@@ -2511,31 +2636,62 @@ function EdgeStatRow({
           </span>
         )}
         {pctClamped != null && (
-          <span className="ml-auto hud-mono text-[10px] tabular-nums" style={{ color: tone.text }}>
-            {pctClamped.toFixed(0)}<span className="text-[7px] uppercase tracking-[0.18em] ml-0.5 text-[var(--text-muted)]">pct</span>
+          <span className="ml-auto hud-mono text-[11px] tabular-nums font-semibold"
+            style={{ color: tone.text, textShadow: `0 0 6px ${tone.fill}55` }}>
+            {pctClamped.toFixed(0)}<span className="text-[7px] uppercase tracking-[0.20em] ml-0.5 opacity-60">PCTL</span>
           </span>
         )}
       </div>
       {pctClamped != null && (
-        <div className="relative h-1.5 rounded-sm overflow-hidden"
-          style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${tone.fill}33` }}>
-          <div className="h-full"
+        <div className="relative h-2 overflow-hidden"
+          style={{
+            background: "rgba(255,255,255,0.035)",
+            border: `1px solid ${tone.fill}40`,
+            boxShadow: `inset 0 0 4px ${tone.fill}22`,
+          }}>
+          {/* Animated bar fill */}
+          <div className="h-full origin-left"
             style={{
               width: `${pctClamped}%`,
-              background: `linear-gradient(90deg, ${tone.fill}aa 0%, ${tone.fill} 100%)`,
-              boxShadow: `0 0 6px ${tone.fill}55`,
+              background: `linear-gradient(90deg, ${tone.fill}cc 0%, ${tone.fill} 100%)`,
+              boxShadow: `0 0 8px ${tone.fill}88, inset 0 0 6px ${tone.fill}55`,
+              animation: `edgeBarFill 900ms cubic-bezier(0.22,1,0.36,1) ${delay}ms both`,
             }} />
-          {/* 50th-percentile tick — league median anchor */}
-          <div className="absolute top-[-1px] bottom-[-1px] w-px pointer-events-none"
-            style={{ left: "50%", background: "rgba(255,255,255,0.25)" }} />
+          {/* Sweeping highlight — same treatment as IceTimeByZoneBars */}
+          <div className="absolute top-0 bottom-0 w-6 pointer-events-none"
+            style={{
+              background: `linear-gradient(90deg, transparent, ${tone.fill}aa, transparent)`,
+              animation: `edgeBarScan 3.6s linear infinite ${delay}ms`,
+              mixBlendMode: "screen",
+              opacity: pctClamped > 5 ? 0.65 : 0,
+            }} />
+          {/* Tick marks at quartile + median + 90th — HUD reads at a glance */}
+          <span className="absolute top-0 bottom-0 w-px pointer-events-none" style={{ left: "25%", background: "rgba(255,255,255,0.10)" }} />
+          <span className="absolute top-0 bottom-0 w-px pointer-events-none" style={{ left: "50%", background: "rgba(255,255,255,0.20)" }} />
+          <span className="absolute top-0 bottom-0 w-px pointer-events-none" style={{ left: "75%", background: "rgba(255,255,255,0.10)" }} />
+          <span className="absolute top-0 bottom-0 w-px pointer-events-none" style={{ left: "90%", background: "rgba(94,224,138,0.35)" }} />
         </div>
       )}
       {threshold && (
-        <span className="hud-mono text-[8px] uppercase tracking-[0.16em]"
-          style={{ color: threshold.ok ? "#5ee08a" : "rgba(255,255,255,0.35)" }}>
-          {threshold.ok ? "▸ " : "· "}{threshold.text}
+        <span className="hud-mono text-[8px] uppercase tracking-[0.16em] flex items-center gap-1"
+          style={{ color: threshold.ok ? "#5ee08a" : "rgba(255,255,255,0.40)" }}>
+          <span style={{ textShadow: threshold.ok ? "0 0 4px #5ee08a88" : undefined }}>{threshold.ok ? "▸" : "·"}</span>
+          {threshold.text}
         </span>
       )}
+      <style jsx>{`
+        @keyframes edgeBarFill {
+          from { transform: scaleX(0); opacity: 0.2; }
+          to   { transform: scaleX(1); opacity: 1; }
+        }
+        @keyframes edgeBarScan {
+          0%   { transform: translateX(-30px); }
+          100% { transform: translateX(520px); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          div { animation: none !important; }
+        }
+      `}</style>
     </div>
   );
 }
@@ -2560,79 +2716,98 @@ function EdgeMetricsCard({ data, teamColor }: { data: ProfileData; teamColor: st
   // No EDGE data at all? Don't render the card — better than half-empty.
   if (shotMph == null && skateKmh == null && totalKm == null && perGameKm == null) return null;
 
+  // Assemble in row order so we can stagger animation delays as the panel
+  // boots — same cadence the rest of the HUD uses on mount.
+  const rows: { key: string; render: (i: number) => ReactNode }[] = [];
+  if (shotMph != null) rows.push({ key: "shot", render: (i) => (
+    <EdgeStatRow key="shot" delay={i * 90}
+      label="Top Shot Speed"
+      value={`${shotMph.toFixed(1)} mph`}
+      sub={hardShots != null ? `${hardShots} shots ≥70 mph` : undefined}
+      rank={data.edge_top_shot_speed_rank} pop={data.edge_top_shot_speed_pop} pct={data.edge_top_shot_speed_pct}
+      teamColor={teamColor} />
+  )});
+  if (skateKmh != null) rows.push({ key: "skate", render: (i) => (
+    <EdgeStatRow key="skate" delay={i * 90}
+      label="Top Skating Speed"
+      value={`${skateMph!.toFixed(1)} mph`}
+      sub={`${skateKmh.toFixed(2)} km/h`}
+      rank={data.edge_top_skating_speed_rank} pop={data.edge_top_skating_speed_pop} pct={data.edge_top_skating_speed_pct}
+      teamColor={teamColor}
+      threshold={
+        burst22 === true ? { ok: true,  text: "Cleared 22 mph burst threshold" } :
+        burst20 === true ? { ok: true,  text: "Cleared 20 mph burst threshold" } :
+        burst20 === false ? { ok: false, text: "Below 20 mph burst threshold" } : null
+      } />
+  )});
+  if (perGameKm != null || totalKm != null || avgKmh != null) rows.push({ key: "dist", render: (i) => (
+    <EdgeStatRow key="dist" delay={i * 90}
+      label="Skating Distance"
+      value={perGameKm != null ? `${perGameKm.toFixed(2)} km/g` : (totalKm != null ? `${totalKm.toFixed(1)} km` : "—")}
+      sub={[
+        totalKm != null ? `${totalKm.toFixed(1)} km total` : null,
+        avgKmh != null ? `${avgKmh.toFixed(1)} km/h avg` : null,
+      ].filter(Boolean).join(" · ") || undefined}
+      teamColor={teamColor} />
+  )});
+  if (hdShots != null) rows.push({ key: "hd", render: (i) => (
+    <EdgeStatRow key="hd" delay={i * 90}
+      label="High-Danger Shots"
+      value={`${hdShots}`}
+      sub={gp ? `${(hdShots / Math.max(gp, 1)).toFixed(2)} / game` : undefined}
+      rank={data.edge_high_danger_shots_rank} pop={data.edge_high_danger_shots_pop} pct={data.edge_high_danger_shots_pct}
+      teamColor={teamColor} />
+  )});
+  if (hardShots != null) rows.push({ key: "hard", render: (i) => (
+    <EdgeStatRow key="hard" delay={i * 90}
+      label="Hard Shots ≥70 mph"
+      value={`${hardShots}`}
+      sub={gp ? `${(hardShots / Math.max(gp, 1)).toFixed(2)} / game` : undefined}
+      teamColor={teamColor} />
+  )});
+
   return (
-    <div className="rounded border px-3 py-2.5 mt-2"
-      style={{ borderColor: `${teamColor}28`, background: "rgba(0,0,0,0.35)" }}>
-      <div className="flex items-center justify-between mb-1.5 pb-1.5 border-b" style={{ borderColor: `${teamColor}20` }}>
-        <span className="hud-mono text-[10px] uppercase tracking-[0.22em]" style={{ color: teamColor }}>
-          ◢ EDGE METRICS
-        </span>
-        <span className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
-          NHL EDGE{gp ? ` · ${gp} GP` : ""}
+    <div className="hud-panel jarvis-boot jarvis-shimmer hud-panel--all-corners relative mt-3"
+      style={{
+        ["--hud-corner" as string]: teamColor,
+        background: "linear-gradient(180deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.35) 100%)",
+        boxShadow: `0 0 20px ${teamColor}1a, inset 0 0 30px rgba(0,0,0,0.5)`,
+      }}>
+      <span className="hud-panel__corner-tr" />
+      <span className="hud-panel__corner-bl" />
+      <div className="hud-scan" aria-hidden />
+      {/* Header strip */}
+      <div className="relative flex items-center justify-between px-3 py-2 border-b" style={{ borderColor: `${teamColor}26` }}>
+        <div className="flex items-center gap-2">
+          <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 6px ${teamColor}` }} />
+          <span className="hud-mono text-[10px] uppercase tracking-[0.24em] font-semibold"
+            style={{ color: teamColor, textShadow: `0 0 6px ${teamColor}55` }}>
+            ◢ EDGE METRICS
+          </span>
+          <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+            · NHL EDGE
+          </span>
+        </div>
+        <span className="hud-mono text-[8px] uppercase tracking-[0.18em] tabular-nums"
+          style={{ color: "rgba(255,255,255,0.45)" }}>
+          {gp ? `${gp} GP` : "live"} · v1
         </span>
       </div>
-      <div className="divide-y" style={{ borderColor: `${teamColor}10` }}>
-        {shotMph != null && (
-          <EdgeStatRow
-            label="Top Shot Speed"
-            value={`${shotMph.toFixed(1)} mph`}
-            sub={hardShots != null ? `${hardShots} shots ≥70 mph` : undefined}
-            rank={data.edge_top_shot_speed_rank}
-            pop={data.edge_top_shot_speed_pop}
-            pct={data.edge_top_shot_speed_pct}
-            teamColor={teamColor}
-          />
-        )}
-        {skateKmh != null && (
-          <EdgeStatRow
-            label="Top Skating Speed"
-            value={`${skateMph!.toFixed(1)} mph`}
-            sub={`${skateKmh.toFixed(2)} km/h`}
-            rank={data.edge_top_skating_speed_rank}
-            pop={data.edge_top_skating_speed_pop}
-            pct={data.edge_top_skating_speed_pct}
-            teamColor={teamColor}
-            threshold={
-              burst22 === true ? { ok: true,  text: "Cleared 22 mph burst threshold" } :
-              burst20 === true ? { ok: true,  text: "Cleared 20 mph burst threshold" } :
-              burst20 === false ? { ok: false, text: "Below 20 mph burst threshold" } : null
-            }
-          />
-        )}
-        {(perGameKm != null || totalKm != null || avgKmh != null) && (
-          <EdgeStatRow
-            label="Skating Distance"
-            value={perGameKm != null ? `${perGameKm.toFixed(2)} km/g` : (totalKm != null ? `${totalKm.toFixed(1)} km` : "—")}
-            sub={[
-              totalKm != null ? `${totalKm.toFixed(1)} km total` : null,
-              avgKmh != null ? `${avgKmh.toFixed(1)} km/h avg` : null,
-            ].filter(Boolean).join(" · ") || undefined}
-            teamColor={teamColor}
-          />
-        )}
-        {hdShots != null && (
-          <EdgeStatRow
-            label="High-Danger Shots"
-            value={`${hdShots}`}
-            sub={gp ? `${(hdShots / Math.max(gp, 1)).toFixed(2)} / game` : undefined}
-            rank={data.edge_high_danger_shots_rank}
-            pop={data.edge_high_danger_shots_pop}
-            pct={data.edge_high_danger_shots_pct}
-            teamColor={teamColor}
-          />
-        )}
-        {hardShots != null && (
-          <EdgeStatRow
-            label="Hard Shots ≥70 mph"
-            value={`${hardShots}`}
-            sub={gp ? `${(hardShots / Math.max(gp, 1)).toFixed(2)} / game` : undefined}
-            teamColor={teamColor}
-          />
-        )}
+
+      {/* Telemetry rows — stacked with hairline dividers, no rounded edges
+          so the eye reads it as instrument cluster, not a card. */}
+      <div className="relative px-2 py-1.5 divide-y" style={{ borderColor: `${teamColor}12` }}>
+        {rows.map((r, i) => r.render(i))}
       </div>
-      <p className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-muted)] mt-2">
-        ranks vs all skaters with EDGE coverage this season
-      </p>
+
+      <div className="relative flex items-center justify-between px-3 py-1.5 border-t" style={{ borderColor: `${teamColor}1c` }}>
+        <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+          ranks vs all skaters · EDGE coverage
+        </span>
+        <span className="hud-mono text-[8px] uppercase tracking-[0.16em]" style={{ color: `${teamColor}99` }}>
+          live · 60Hz
+        </span>
+      </div>
     </div>
   );
 }
@@ -3117,7 +3292,7 @@ interface PredAction {
  *  each get their own visual treatment.
  *  kind: shot = puck flight to the goal · skate = player carrying the puck
  *  · dump = puck flung into zone · battle = contested possession */
-const ACTION_THEME: Record<string, { color: string; dash: string; kind: "shot" | "skate" | "dump" | "battle"; legend: string }> = {
+const ACTION_THEME: Record<string, { color: string; dash: string; kind: "shot" | "skate" | "dump" | "battle" | "pass"; legend: string }> = {
   carry:  { color: "#38bdf8", dash: "0",       kind: "skate",  legend: "Carry-in · skate" },
   dump:   { color: "#fb923c", dash: "5 4",     kind: "dump",   legend: "Dump-in · chip" },
   slot:   { color: "#f87171", dash: "0",       kind: "shot",   legend: "Slot · shot" },
@@ -3125,11 +3300,15 @@ const ACTION_THEME: Record<string, { color: string; dash: string; kind: "shot" |
   perim:  { color: "#fbbf24", dash: "0",       kind: "shot",   legend: "Perimeter · shot" },
   battle: { color: "#4ade80", dash: "4 3",     kind: "battle", legend: "Battle · corner" },
   hold:   { color: "#2dd4bf", dash: "1 3",     kind: "battle", legend: "Hold · possession" },
+  // Pass — not an output of the behavior NN (model has no pass head yet),
+  // synthesised at render time from assist/shot mix so playmakers get a
+  // visible route instead of looking like average shooters.
+  pass:   { color: "#e879f9", dash: "2 2.5",   kind: "pass",   legend: "Pass · setup" },
 };
 
 function PredictedPlay({
   carry, dump, slot, perim, drive, battleC, holdC, themeColor, leagueAvg,
-  position, shoots,
+  position, shoots, gpg, apg, shotsPer60, rapmOff,
 }: {
   carry?: number | null;
   dump?: number | null;
@@ -3146,6 +3325,13 @@ function PredictedPlay({
   } | null;
   position?: string | null;
   shoots?: string | null;
+  // Pass-tendency inputs. The behavior NN has no pass head yet, so we
+  // synthesise the playmaking signal from box-score mix: high assists vs.
+  // shots = setup man; high RAPM offense with low shots/60 = QB-style D.
+  gpg?: number | null;
+  apg?: number | null;
+  shotsPer60?: number | null;
+  rapmOff?: number | null;
 }) {
   // A defenseman lives at the offensive blue line — the play does not start
   // above the zone like a forward zone entry. We rewire the schematic so the
@@ -3186,6 +3372,22 @@ function PredictedPlay({
     return typeof v === "number" ? v : null;
   };
 
+  // Pass tendency — synthesised, not modelled (no pass head on behavior NN
+  // yet). High assist-share + low shots-per-60 + positive RAPM offense
+  // means the player creates more than they finish. Clamped 0-1; > 0.40
+  // is enough to surface the pass route. We expose the score upward as a
+  // pseudo-action probability so it sorts naturally next to model actions.
+  const assistShare = (apg != null && gpg != null && (apg + gpg) > 0.05)
+    ? apg / (apg + gpg)
+    : null;
+  let passTendency = 0;
+  if (assistShare != null) passTendency += Math.max(0, (assistShare - 0.50) * 1.8); // 0.50→0, 1.0→0.9
+  if (rapmOff != null && rapmOff > 0.4 && (shotsPer60 == null || shotsPer60 < 7)) passTendency += 0.25;
+  passTendency = Math.max(0, Math.min(1, passTendency));
+  // Convert to a pseudo-percentage on the same scale as the NN action %s
+  // so the legend / SEQUENCES strip can rank it alongside slot/perim/etc.
+  const passPct = passTendency * 22; // up to ~22% — comparable to model max action share
+
   // D plays already start in the OZ at the point — carry / dump don't apply.
   // Suppressing them avoids drawing a forward-style entry curve for a D.
   const entryActions: PredAction[] = isD ? [] : [
@@ -3205,12 +3407,14 @@ function PredictedPlay({
     { id: "hold",   label: "Hold Line",    pct: holdC   ?? 0 },
     { id: "drive",  label: "Pinch Net",    pct: drive   ?? 0 },
     { id: "slot",   label: "Walk-In Shot", pct: slot    ?? 0 },
+    { id: "pass",   label: "Cross-Ice Pass", pct: passPct },
   ].filter(a => a.pct > 0).sort((a, b) => b.pct - a.pct) : [
     { id: "slot",   label: "Slot Shot",     pct: slot    ?? 0 },
     { id: "drive",  label: "Drive Net",     pct: drive   ?? 0 },
     { id: "perim",  label: "Perimeter",     pct: perim   ?? 0 },
     { id: "battle", label: "Battle Corner", pct: battleC ?? 0 },
     { id: "hold",   label: "Hold Corner",   pct: holdC   ?? 0 },
+    { id: "pass",   label: "Slot Feed",     pct: passPct },
   ].filter(a => a.pct > 0).sort((a, b) => b.pct - a.pct);
 
   if (entryActions.length === 0 && inZoneActions.length === 0) return null;
@@ -3320,6 +3524,12 @@ function PredictedPlay({
         const corner = dSide === "L" ? CORNER_L : CORNER_R;
         return `M ${D_POINT.cx} ${D_POINT.cy + 4} Q ${(D_POINT.cx + corner.cx) / 2} ${(D_POINT.cy + corner.cy) / 2 + 6} ${corner.cx + (dSide === "L" ? 6 : -6)} ${corner.cy - 4}`;
       }
+      // Cross-ice pass — point-to-point pass that sets up a one-timer on the
+      // opposite side. Curve lifts slightly above the blue line so it reads
+      // as a tape-to-tape feed, not a shot.
+      if (id === "pass") {
+        return `M ${D_POINT.cx} ${D_POINT.cy} Q ${(D_POINT.cx + D_OPP.cx) / 2} ${D_POINT.cy - 18} ${D_OPP.cx - (dSide === "L" ? 3 : -3)} ${D_OPP.cy + 1}`;
+      }
       // Hold line — D walks the blue line across to the opposite point.
       /* hold */
       return `M ${D_POINT.cx} ${D_POINT.cy} Q ${(D_POINT.cx + D_OPP.cx) / 2} ${D_POINT.cy - 10} ${D_OPP.cx} ${D_OPP.cy}`;
@@ -3328,7 +3538,19 @@ function PredictedPlay({
     if (id === "drive")  return `M 140 80  Q 145 110 ${NET.cx} ${NET.y - 4}`;
     if (id === "perim")  return `M 140 80  L ${PERIM_R.cx} ${PERIM_R.cy} L ${NET.cx + 4} ${NET.y - 4}`;
     if (id === "battle") return `M 140 80  Q 60 120 ${CORNER_L.cx + 5} ${CORNER_L.cy - 5} L ${SLOT.cx - 10} ${SLOT.cy + 5}`;
+    // Slot feed — forward enters with the puck then slides a cross-seam
+    // pass into the slot for a teammate one-timer. Curves opposite the
+    // direct shot route so the two arrows don't overlap.
+    if (id === "pass")   return `M 140 80  Q 110 105 ${SLOT.cx - 18} ${SLOT.cy + 4} Q ${SLOT.cx} ${SLOT.cy + 14} ${SLOT.cx + 14} ${SLOT.cy - 2}`;
     /* hold */            return `M 140 80  Q 220 120 ${CORNER_R.cx - 5} ${CORNER_R.cy - 5} Q 245 175 230 165`;
+  }
+
+  // Endpoint of a pass route — drives the teammate-receiver marker so the
+  // arrow visibly terminates on a person, not a generic spot. Returned in
+  // SVG user units of the rink coord space.
+  function passEndpoint(): { cx: number; cy: number } {
+    if (isD) return { cx: D_OPP.cx - (dSide === "L" ? 3 : -3), cy: D_OPP.cy + 1 };
+    return { cx: SLOT.cx + 14, cy: SLOT.cy - 2 };
   }
 
   return (
@@ -3406,6 +3628,38 @@ function PredictedPlay({
           );
         })}
 
+        {/* Pass overlay — drawn even when pass isn't in the top 3 in-zone
+            actions, because the box-score signal (assist-share + RAPM off)
+            is independent of the NN action mix. The receiver marker at the
+            endpoint makes it read as a feed, not just another shot. */}
+        {passTendency >= 0.40 && (() => {
+          const t = ACTION_THEME["pass"];
+          const isPrimary = topInZone?.id === "pass";
+          const end = passEndpoint();
+          return (
+            <g style={{ animation: `ppDraw 1100ms ease-out ${isPrimary ? 900 : 1300}ms forwards` }}>
+              <path
+                d={inZonePath("pass")}
+                fill="none"
+                stroke={t.color}
+                strokeOpacity={isPrimary ? 0.95 : 0.70}
+                strokeWidth={isPrimary ? "2.2" : "1.6"}
+                strokeDasharray={t.dash}
+                strokeLinecap="round"
+                markerEnd={`url(#ppArrow-pass)`}
+                style={{ filter: `drop-shadow(0 0 5px ${t.color}aa)` }} />
+              {/* Receiver — small ringed marker at the endpoint so the pass
+                  visibly terminates on a teammate, with a soft glow ring. */}
+              <circle cx={end.cx} cy={end.cy} r="3.2"
+                fill="none" stroke={t.color} strokeOpacity="0.55"
+                strokeWidth="0.7" strokeDasharray="1.2 1.2" />
+              <circle cx={end.cx} cy={end.cy} r="1.6"
+                fill={t.color} opacity="0.85"
+                style={{ filter: `drop-shadow(0 0 4px ${t.color})` }} />
+            </g>
+          );
+        })()}
+
         {/* Primary entry path — action-coloured, kind-styled */}
         {topEntry && (() => {
           const t = ACTION_THEME[topEntry.id];
@@ -3454,16 +3708,45 @@ function PredictedPlay({
         {/* Origin marker — for forwards we drop an entry-arrow over the blue
             line; for D we plant a player puck at the strong-side point and
             ghost a teammate at the opposite point so "walk the line" reads
-            as a real route. */}
+            as a real route. The D marker pulses + glows to read as live
+            instrument lock-on rather than a static dot. */}
         {isD ? (
-          <g>
-            <circle cx={D_OPP.cx} cy={D_OPP.cy} r="3.4"
-              fill="none" stroke={themeColor} strokeOpacity="0.45" strokeWidth="0.9" strokeDasharray="1.5 1.5" />
-            <circle cx={D_POINT.cx} cy={D_POINT.cy} r="4.4" fill={themeColor} opacity="0.92"
-              style={{ filter: `drop-shadow(0 0 5px ${themeColor})` }} />
-            <text x={D_POINT.cx} y={D_POINT.cy + 1.5} textAnchor="middle"
-              fontSize="4.6" fontWeight="700" fill="rgba(0,0,0,0.75)"
-              style={{ fontFamily: "var(--font-mono)" }}>D</text>
+          <g style={{ animation: "ppDOrigin 600ms cubic-bezier(0.22,1,0.36,1) 80ms both" }}>
+            {/* Sensor ring (slow pulse) at the strong-side point */}
+            <circle cx={D_POINT.cx} cy={D_POINT.cy} r="7.5"
+              fill="none" stroke={themeColor} strokeOpacity="0.50" strokeWidth="0.5"
+              style={{
+                transformOrigin: `${D_POINT.cx}px ${D_POINT.cy}px`,
+                animation: "ppDLock 2.4s ease-in-out infinite",
+              }} />
+            {/* Crosshair brackets — sub-pixel lock-on indicator */}
+            <g stroke={themeColor} strokeWidth="0.5" strokeLinecap="round" opacity="0.85">
+              <line x1={D_POINT.cx - 6}  y1={D_POINT.cy - 6} x2={D_POINT.cx - 3.2} y2={D_POINT.cy - 6} />
+              <line x1={D_POINT.cx - 6}  y1={D_POINT.cy - 6} x2={D_POINT.cx - 6}   y2={D_POINT.cy - 3.2} />
+              <line x1={D_POINT.cx + 6}  y1={D_POINT.cy - 6} x2={D_POINT.cx + 3.2} y2={D_POINT.cy - 6} />
+              <line x1={D_POINT.cx + 6}  y1={D_POINT.cy - 6} x2={D_POINT.cx + 6}   y2={D_POINT.cy - 3.2} />
+              <line x1={D_POINT.cx - 6}  y1={D_POINT.cy + 6} x2={D_POINT.cx - 3.2} y2={D_POINT.cy + 6} />
+              <line x1={D_POINT.cx - 6}  y1={D_POINT.cy + 6} x2={D_POINT.cx - 6}   y2={D_POINT.cy + 3.2} />
+              <line x1={D_POINT.cx + 6}  y1={D_POINT.cy + 6} x2={D_POINT.cx + 3.2} y2={D_POINT.cy + 6} />
+              <line x1={D_POINT.cx + 6}  y1={D_POINT.cy + 6} x2={D_POINT.cx + 6}   y2={D_POINT.cy + 3.2} />
+            </g>
+            {/* Player puck — solid + glow + soft inner highlight */}
+            <circle cx={D_POINT.cx} cy={D_POINT.cy} r="4.6" fill={themeColor} opacity="0.96"
+              style={{ filter: `drop-shadow(0 0 7px ${themeColor}) drop-shadow(0 0 2px ${themeColor})` }} />
+            <circle cx={D_POINT.cx - 1.2} cy={D_POINT.cy - 1.2} r="1.4" fill="rgba(255,255,255,0.35)" />
+            <text x={D_POINT.cx} y={D_POINT.cy + 1.6} textAnchor="middle"
+              fontSize="4.8" fontWeight="800" fill="rgba(0,0,0,0.82)"
+              style={{ fontFamily: "var(--font-mono)", letterSpacing: "0.04em" }}>D</text>
+            {/* Ghost teammate at the opposite point — dashed ring + faint dot */}
+            <circle cx={D_OPP.cx} cy={D_OPP.cy} r="4.0"
+              fill="none" stroke={themeColor} strokeOpacity="0.42" strokeWidth="0.8" strokeDasharray="1.6 1.6" />
+            <circle cx={D_OPP.cx} cy={D_OPP.cy} r="1.4" fill={themeColor} opacity="0.32" />
+            {/* Side label so the eye binds the strong-side puck to L / R */}
+            <text x={D_POINT.cx} y={D_POINT.cy - 9.5} textAnchor="middle"
+              fontSize="2.6" fontWeight="700" fill={themeColor} opacity="0.85"
+              style={{ fontFamily: "var(--font-mono)", letterSpacing: "0.30em", textShadow: `0 0 4px ${themeColor}` }}>
+              {dSide === "L" ? "LP" : "RP"}
+            </text>
           </g>
         ) : (
           <polygon points={`${140 - 4},-3 ${140 + 4},-3 140,7`} fill={themeColor} opacity="0.85" />
@@ -3471,8 +3754,16 @@ function PredictedPlay({
 
         <style>{`
           @keyframes ppDraw { to { stroke-dashoffset: 0; } }
+          @keyframes ppDOrigin {
+            from { transform: scale(0.4); opacity: 0; }
+            to   { transform: scale(1);   opacity: 1; }
+          }
+          @keyframes ppDLock {
+            0%, 100% { stroke-opacity: 0.55; transform: scale(1);    }
+            50%      { stroke-opacity: 0.15; transform: scale(1.18); }
+          }
           @media (prefers-reduced-motion: reduce) {
-            path { animation: none !important; stroke-dashoffset: 0 !important; }
+            path, g, circle { animation: none !important; stroke-dashoffset: 0 !important; }
           }
         `}</style>
       </svg>
@@ -3539,8 +3830,12 @@ function PredictedPlay({
             perim:  "Point · shot",
             battle: "Pinch · corner",
             hold:   "Walk the line",
+            pass:   "D-to-D · feed",
           };
-          const legendText = (isD && dLegend[id]) ? dLegend[id] : t.legend;
+          const fLegend: Record<string, string> = {
+            pass:   "Slot · feed",
+          };
+          const legendText = (isD && dLegend[id]) ? dLegend[id] : (fLegend[id] ?? t.legend);
           return (
             <div key={id} className="flex items-center gap-1.5 px-1.5 py-0.5 rounded border"
               style={{ borderColor: `${t.color}33`, background: `${t.color}0e` }}>
@@ -3620,6 +3915,116 @@ function PredictedPlay({
           `}</style>
         </div>
       )}
+
+      {/* TOP SEQUENCES — derived 2-step play combinations, scored from the
+          action-probability mix + synthesised pass tendency. Each row is a
+          named "what the player tends to actually run" pattern: e.g. carry
+          + slot = "Carry-in · Slot Shot", high battle + perim = "Cycle ·
+          One-Timer". Top 3 surface in their own coloured chips so Bob can
+          read intent at a glance without parsing 7 raw percentages. */}
+      {(() => {
+        // Action lookups (all 0 when missing — combinator handles that).
+        const v = {
+          carry:  carry   ?? 0,
+          dump:   dump    ?? 0,
+          slot:   slot    ?? 0,
+          drive:  drive   ?? 0,
+          perim:  perim   ?? 0,
+          battle: battleC ?? 0,
+          hold:   holdC   ?? 0,
+          pass:   passPct,
+        };
+        // Geometric-mean weight on the two contributing actions so the
+        // sequence only ranks high when BOTH legs are real (not just one
+        // huge action with a 0 partner). Then × 100 for display.
+        const w = (a: number, b: number) => Math.sqrt(Math.max(0, a) * Math.max(0, b));
+        type Combo = { label: string; weight: number; ids: string[]; tip?: string };
+        const combos: Combo[] = isD ? [
+          { label: "Walk Line · Point Shot",      weight: w(v.hold,   v.perim),  ids: ["hold", "perim"],   tip: "QB at the blue line — walks then snaps it on net." },
+          { label: "Pinch Corner · Cycle Out",    weight: w(v.battle, v.hold),   ids: ["battle", "hold"],  tip: "Steps down the boards, cycles back to the point." },
+          { label: "Point Shot · Net-Front Tip",  weight: w(v.perim,  v.drive),  ids: ["perim", "drive"],  tip: "Throws the puck on net knowing a forward is screening." },
+          { label: "Cross-Ice · One-Timer Setup", weight: w(v.pass,   v.perim),  ids: ["pass", "perim"],   tip: "Slides it to the opposite point for a one-timer." },
+          { label: "Pinch Net · Crash",           weight: w(v.drive,  v.battle), ids: ["drive", "battle"], tip: "Activates from the point straight to the crease." },
+          { label: "Walk-In Shot · Slot",         weight: w(v.slot,   v.perim),  ids: ["slot", "perim"],   tip: "Sneaks in from the point for a high-slot wrist shot." },
+          { label: "D-to-D · Reset",              weight: w(v.hold,   v.pass),   ids: ["hold", "pass"],    tip: "Tape-to-tape D-pair pass to reset the OZ structure." },
+        ] : [
+          { label: "Carry-in · Slot Shot",        weight: w(v.carry,  v.slot),   ids: ["carry", "slot"],   tip: "Skates the puck in, beats the gap, gets a slot shot." },
+          { label: "Carry-in · Slot Feed",        weight: w(v.carry,  v.pass),   ids: ["carry", "pass"],   tip: "Carries then dishes — playmaker's favourite OZ entry." },
+          { label: "Carry-in · Perimeter Snap",   weight: w(v.carry,  v.perim),  ids: ["carry", "perim"],  tip: "Off-wing entry, snaps it on net from the half-wall." },
+          { label: "Dump · Cycle to Slot",        weight: w(v.dump,   v.battle), ids: ["dump", "battle"],  tip: "Chips it in, wins the wall, works the cycle back to the slot." },
+          { label: "Battle · Drive Net",          weight: w(v.battle, v.drive),  ids: ["battle", "drive"], tip: "Possession-first, then power move to the front of the net." },
+          { label: "Battle · Slot Feed",          weight: w(v.battle, v.pass),   ids: ["battle", "pass"],  tip: "Wall battle → low-to-high pass to a teammate in the slot." },
+          { label: "Hold Corner · One-Timer",     weight: w(v.hold,   v.perim),  ids: ["hold", "perim"],   tip: "Cycles in the corner waiting for the high-slot kick-out shot." },
+          { label: "Drive · Rebound Hunt",        weight: w(v.drive,  v.slot),   ids: ["drive", "slot"],   tip: "Net-front presence — drives the lane looking for second chances." },
+        ];
+        const top = combos
+          .filter(c => c.weight > 0.5)
+          .sort((a, b) => b.weight - a.weight)
+          .slice(0, 3);
+        if (top.length === 0) return null;
+        // Normalize weights to bar widths relative to the strongest combo.
+        const maxW = top[0].weight;
+        return (
+          <div className="mt-2 pt-2 border-t border-white/[0.05]">
+            <div className="flex items-center justify-between mb-1.5 px-1">
+              <span className="hud-mono text-[9px] uppercase tracking-[0.20em]" style={{ color: themeColor }}>
+                ▸ TOP SEQUENCES
+              </span>
+              <span className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                2-step combinations
+              </span>
+            </div>
+            <div className="space-y-1.5 px-1">
+              {top.map((c, i) => {
+                const colors = c.ids.map(id => ACTION_THEME[id]?.color ?? themeColor);
+                const grad = `linear-gradient(90deg, ${colors[0]}cc 0%, ${colors[1] ?? colors[0]} 100%)`;
+                const widthPct = Math.min(100, (c.weight / maxW) * 100);
+                return (
+                  <div key={c.label} className="flex items-center gap-2" title={c.tip ?? ""}>
+                    <span className="hud-mono text-[8px] uppercase tracking-[0.16em] w-3 text-right shrink-0"
+                      style={{ color: i === 0 ? colors[0] : "rgba(255,255,255,0.30)" }}>
+                      {i + 1}
+                    </span>
+                    {/* Combo chip — two coloured dots + label so the eye
+                        binds the sequence to the arrows on the rink. */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="inline-block w-1.5 h-1.5 rounded-full"
+                        style={{ background: colors[0], boxShadow: `0 0 4px ${colors[0]}` }} />
+                      <span className="text-[8px] text-white/30">·</span>
+                      <span className="inline-block w-1.5 h-1.5 rounded-full"
+                        style={{ background: colors[1] ?? colors[0], boxShadow: `0 0 4px ${colors[1] ?? colors[0]}` }} />
+                    </div>
+                    <span className="hud-mono text-[9px] uppercase tracking-[0.14em] truncate"
+                      style={{ color: i === 0 ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.65)" }}>
+                      {c.label}
+                    </span>
+                    <div className="flex-1 h-1 rounded-sm overflow-hidden relative ml-1"
+                      style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${colors[0]}22` }}>
+                      <div className="h-full"
+                        style={{
+                          width: `${widthPct}%`,
+                          background: grad,
+                          boxShadow: `0 0 5px ${colors[0]}66`,
+                          animation: `ppCombo 900ms cubic-bezier(0.22,1,0.36,1) ${i * 110}ms backwards`,
+                          transformOrigin: "left center",
+                        }} />
+                    </div>
+                  </div>
+                );
+              })}
+              <style jsx>{`
+                @keyframes ppCombo {
+                  from { transform: scaleX(0); opacity: 0; }
+                  to   { transform: scaleX(1); opacity: 1; }
+                }
+                @media (prefers-reduced-motion: reduce) {
+                  div { animation: none !important; }
+                }
+              `}</style>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -5204,6 +5609,10 @@ export default function PlayerProfilePage() {
                 })()}
                 position={data.position ?? null}
                 shoots={bio?.shoots_catches ?? data.shoots_catches ?? null}
+                gpg={data.game_log?.summary.gpg ?? null}
+                apg={data.game_log?.summary.apg ?? null}
+                shotsPer60={data.shots_per60 ?? null}
+                rapmOff={data.rapm_ev_off ?? null}
               />
             )}
 
