@@ -5740,13 +5740,14 @@ export default function PlayerProfilePage() {
       </div>
 
 
-      {/* ── DASHBOARD SHELL — vertical rail on LEFT at all viewports.
-          Mobile: rail is icon-only at 52px; tablet+ expands to ~210px
-          with labels + subtitles. Sticky on lg+ so it follows scroll. */}
-      <div className="mt-3 grid gap-2 sm:gap-3 lg:gap-4 grid-cols-[52px_minmax(0,1fr)] lg:grid-cols-[210px_minmax(0,1fr)]">
+      {/* ── DASHBOARD SHELL — vertical rail on LEFT at lg+, sticky
+          horizontal strip on TOP at mobile/tablet. The mobile strip
+          renders icon-only buttons that scroll horizontally; content
+          below gets the FULL viewport width. */}
+      <div className="mt-3 flex flex-col lg:grid lg:gap-4 lg:grid-cols-[210px_minmax(0,1fr)]">
 
-        {/* Left rail — icon-only on mobile, expanded on lg+. */}
-        <aside className="sticky top-2 lg:top-3 self-start z-20 max-h-[calc(100vh-1rem)] overflow-y-auto overflow-x-hidden">
+        {/* Rail — horizontal strip on <lg, vertical sticky panel on lg+ */}
+        <aside className="lg:sticky lg:top-3 self-start z-20 mb-2 lg:mb-0 lg:max-h-[calc(100vh-1rem)] lg:overflow-y-auto">
           <div className="hud-panel hud-panel--all-corners jarvis-boot jarvis-shimmer relative overflow-hidden"
             style={{
               ["--hud-corner" as string]: teamColor,
@@ -5756,16 +5757,17 @@ export default function PlayerProfilePage() {
             <span className="hud-panel__corner-tr" />
             <span className="hud-panel__corner-bl" />
             <div className="hud-scan" aria-hidden />
-            {/* Header — collapsed on mobile (just pulse dot), label on lg+. */}
-            <div className="flex items-center justify-center lg:justify-start gap-2 px-2 lg:px-3 py-1.5 lg:py-2 border-b"
+            {/* Header — hidden on mobile to keep the strip thin. */}
+            <div className="hidden lg:flex items-center gap-2 px-3 py-2 border-b"
               style={{ borderColor: `${teamColor}22` }}>
               <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 4px ${teamColor}` }} />
-              <span className="hud-mono text-[9px] uppercase tracking-[0.24em] font-semibold hidden lg:inline"
+              <span className="hud-mono text-[9px] uppercase tracking-[0.24em] font-semibold"
                 style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}55` }}>
                 ▌ TELEMETRY
               </span>
             </div>
-            <nav className="flex flex-col p-1 lg:p-1.5 gap-1">
+            <nav className="flex lg:flex-col p-1 lg:p-1.5 gap-1 overflow-x-auto lg:overflow-visible"
+              style={{ scrollbarWidth: "none" }}>
               {(() => {
                 const glyph: Record<string, string> = {
                   overview: "◈", neural: "◆", "shot-map": "⌖",
@@ -5786,7 +5788,7 @@ export default function PlayerProfilePage() {
                       onClick={() => setTelemetryTab(tab.id as TelemetryTab)}
                       title={`${tab.label} — ${subtitle[tab.id] ?? ""}`}
                       aria-label={tab.label}
-                      className="relative group flex items-center justify-center lg:justify-start gap-3 px-2 lg:px-2.5 py-2 lg:py-2.5 rounded-sm transition-all"
+                      className="relative group flex items-center gap-2 lg:gap-3 px-2.5 lg:px-2.5 py-2 lg:py-2.5 rounded-sm transition-all shrink-0 lg:shrink"
                       style={{
                         background: isActive
                           ? `linear-gradient(90deg, ${teamColor}28 0%, ${teamColor}08 100%)`
@@ -5802,7 +5804,7 @@ export default function PlayerProfilePage() {
                             mixBlendMode: "screen",
                           }} />
                       )}
-                      <span className="hud-mono text-[18px] lg:text-[16px] leading-none shrink-0"
+                      <span className="hud-mono text-[15px] lg:text-[16px] leading-none shrink-0"
                         style={{
                           color: isActive ? teamColor : "rgba(255,255,255,0.55)",
                           textShadow: isActive ? `0 0 8px ${teamColor}` : "none",
@@ -5810,8 +5812,13 @@ export default function PlayerProfilePage() {
                         }}>
                         {glyph[tab.id] ?? "▸"}
                       </span>
-                      {/* Label stack — desktop only. Mobile = icon only with
-                          tooltip on hover/long-press for label. */}
+                      {/* Mobile shows compact label; desktop shows label+subtitle stack. */}
+                      <span className="flex lg:hidden hud-mono text-[10px] uppercase tracking-[0.18em] font-semibold whitespace-nowrap"
+                        style={{
+                          color: isActive ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.65)",
+                        }}>
+                        {tab.label}
+                      </span>
                       <span className="hidden lg:flex flex-col items-start min-w-0">
                         <span className="hud-mono text-[10px] uppercase tracking-[0.20em] font-semibold leading-tight"
                           style={{
@@ -5835,7 +5842,7 @@ export default function PlayerProfilePage() {
                 });
               })()}
             </nav>
-            {/* Footer — desktop only. Mobile drops it to save vertical space. */}
+            {/* Footer — desktop only. */}
             <div className="hidden lg:flex px-3 py-1.5 border-t items-center justify-between"
               style={{ borderColor: `${teamColor}22` }}>
               <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">live</span>
