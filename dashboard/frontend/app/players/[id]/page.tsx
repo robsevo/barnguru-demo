@@ -5791,12 +5791,19 @@ export default function PlayerProfilePage() {
           below gets the FULL viewport width. */}
       <div className="mt-3 flex flex-col lg:grid lg:gap-4 lg:grid-cols-[210px_minmax(0,1fr)]">
 
-        {/* Rail — sticky horizontal strip on <lg, sticky vertical
-            sidebar on lg+. Mobile: top offset sits BELOW the 44px global
-            header bar so it doesn't overlap the search/team controls;
-            z-20 keeps it under the header (z-30) but above page content. */}
-        <aside className="sticky top-11 lg:top-3 self-start z-20 mb-2 lg:mb-0 lg:max-h-[calc(100vh-1rem)] lg:overflow-y-auto">
-          <div className="hud-panel hud-panel--all-corners jarvis-boot jarvis-shimmer relative overflow-hidden"
+        {/* Rail — non-sticky horizontal strip on <lg (sticky + overflow-x
+            is broken on iOS Safari, the scroll stops registering), sticky
+            vertical sidebar on lg+. Mobile: scroll-anchored to its
+            container so the horizontal scrolling actually works. */}
+        {/* Rail order: on mobile the rail is order-2 — sits BETWEEN the
+            hero (order-1, inside right pane) and the tab-content
+            (order-3, also right pane). To make this work the right pane
+            is split below; rail row uses col-span to span both grid
+            columns on mobile, and on lg+ collapses to column 1. */}
+        <aside className="order-2 lg:order-none lg:col-start-1 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-3 self-start z-20 mb-2 lg:mb-0 lg:max-h-[calc(100vh-1rem)] lg:overflow-y-auto">
+          {/* overflow-hidden on lg+ only — on mobile we need the inner
+              nav's horizontal scroll to actually scroll. */}
+          <div className="hud-panel hud-panel--all-corners jarvis-boot jarvis-shimmer relative lg:overflow-hidden"
             style={{
               ["--hud-corner" as string]: teamColor,
               background: "linear-gradient(180deg, rgba(0,0,0,0.62), rgba(0,0,0,0.40))",
@@ -5850,7 +5857,12 @@ export default function PlayerProfilePage() {
                 ▸
               </span>
               <nav className="flex lg:flex-col p-1 lg:p-1.5 gap-1 overflow-x-auto lg:overflow-visible"
-                style={{ scrollbarWidth: "none" }}>
+                style={{
+                  scrollbarWidth: "none",
+                  WebkitOverflowScrolling: "touch",
+                  touchAction: "pan-x",
+                  msOverflowStyle: "none",
+                }}>
               {(() => {
                 const glyph: Record<string, string> = {
                   overview: "◈", neural: "◆", "shot-map": "⌖",
@@ -5952,8 +5964,11 @@ export default function PlayerProfilePage() {
           </div>
         </aside>
 
-        {/* Right content pane — wraps overview block + tab content grid */}
-        <div className="min-w-0">
+        {/* Hero pane — on mobile sits at order-1 (above the rail). On
+            lg+ it lives in column 2 of the grid AND we use `lg:contents`
+            to flatten this wrapper + the sibling tab-content wrapper so
+            they share the same grid column instead of doubling up. */}
+        <div className="min-w-0 order-1 lg:order-none lg:col-start-2 lg:row-start-1">
 
       {/* ── Hero section — ALWAYS VISIBLE so the player you're looking
           at never leaves the screen when you switch tabs. Only RATINGS +
@@ -6392,6 +6407,14 @@ export default function PlayerProfilePage() {
           </div>
         )}
       </div>
+      {/* /Hero pane (order-1) — close right-pane wrapper here so the
+          mobile rail (order-2) can slot between hero and tab content. */}
+      </div>
+
+      {/* Tab-content pane — mobile order-3 (below the rail), lg+ stacks
+          right under the hero in column 2. Holds the overview-only
+          ratings/deck block AND the swap-on-tab content grid. */}
+      <div className="min-w-0 order-3 lg:order-none lg:col-start-2 lg:row-start-2">
 
       {/* ── OVERVIEW SECTION — RATINGS + HUD Command Deck. Hidden when
           another tab is active so each tab fills the viewport. The hero
