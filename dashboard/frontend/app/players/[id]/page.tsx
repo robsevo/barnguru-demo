@@ -5642,6 +5642,61 @@ export default function PlayerProfilePage() {
         )}
       </div>
 
+      {/* ─────────── RATINGS STRIP ─────────── */}
+      {/* Engine-output summary — sits between the player hero (TARGET
+          PROFILE) and the 3-col Vitals · Hologram · Neural Cortex deck so
+          the analytical anchors are visible before the deck opens. Six
+          tier-coloured odometers across one HudPanel. */}
+      <div className="mt-4">
+        <HudPanel title="Ratings" subtitle="aggregate engine inputs" themeColor={teamColor} scanline allCorners>
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 text-center">
+            {[
+              { label: "xGF/60",     val: data.xgf_per60,            dec: 2, suffix: "", tier: data.xgf_per60     != null ? xgf60Tier(data.xgf_per60)         : null },
+              { label: "xGA/60",     val: data.rapm_xga_60,          dec: 2, suffix: "", tier: data.rapm_xga_60   != null ? xgaAllowedTier(data.rapm_xga_60)  : null },
+              { label: "CDR",        val: data.cdr,                  dec: 2, suffix: "", tier: data.cdr           != null ? defTier(data.cdr)                : null },
+              { label: "Finishing",  val: data.finishing,            dec: 1, suffix: "", tier: data.finishing     != null ? finishingTier(data.finishing)    : null },
+              { label: "PP xGF/60",  val: data.special_teams_pp,     dec: 2, suffix: "", tier: data.special_teams_pp != null ? stTier(data.special_teams_pp): null },
+              { label: "Bayes",      val: data.bayesian_rating,      dec: 3, suffix: "", tier: data.bayesian_rating != null ? bayesianTier(data.bayesian_rating) : null },
+            ].map((m, i) => {
+              const tierColor = m.tier ? TIER_COLOR[m.tier] : null;
+              return m.val != null ? (
+                <div key={i} className="flex flex-col items-center gap-0.5">
+                  <span className="hud-mono text-[9px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+                    {m.label}
+                  </span>
+                  <OdometerNumber
+                    value={m.val}
+                    decimals={m.dec}
+                    suffix={m.suffix}
+                    className="text-base"
+                  />
+                  {m.tier && tierColor && (
+                    <span
+                      className="hud-mono text-[8px] uppercase tracking-[0.18em] rounded border px-1.5 py-0.5 mt-0.5"
+                      style={{
+                        color: tierColor,
+                        borderColor: `${tierColor}55`,
+                        backgroundColor: `${tierColor}14`,
+                        textShadow: `0 0 6px ${tierColor}55`,
+                      }}
+                    >
+                      {TIER_ABBREV[m.tier]}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div key={i} className="flex flex-col items-center gap-0.5 opacity-40">
+                  <span className="hud-mono text-[9px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                    {m.label}
+                  </span>
+                  <span className="hud-mono text-base text-[var(--text-muted)]">—</span>
+                </div>
+              );
+            })}
+          </div>
+        </HudPanel>
+      </div>
+
       {/* ─────────── HUD COMMAND DECK ─────────── */}
       {/* 3-zone monitoring console: Vitals · Hologram · Neural Cortex.
          Folds the most-glanced metrics into a single surface so the rest of
@@ -6405,60 +6460,13 @@ export default function PlayerProfilePage() {
             (GP/G/A/P/+/-/FI for skaters, GP/W/L/SV%/GAA/SO for goalies)
             — removed. The headline totals live in the top hero. */}
 
-        {/* EDGE / SAVE Telemetry band was moved INSIDE the Behavior tab,
-            right under Performance Snapshot. Keeping a top-level band
-            duplicated the same data twice on screen. */}
-
-        {/* RATING STRIP — full width, 6 mini odometers, tier-coloured */}
-        <div className="lg:col-span-12">
-          <HudPanel title="Ratings" subtitle="aggregate engine inputs" themeColor={teamColor}>
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 text-center">
-              {[
-                { label: "xGF/60",     val: data.xgf_per60,            dec: 2, suffix: "", tier: data.xgf_per60     != null ? xgf60Tier(data.xgf_per60)         : null },
-                { label: "xGA/60",     val: data.rapm_xga_60,          dec: 2, suffix: "", tier: data.rapm_xga_60   != null ? xgaAllowedTier(data.rapm_xga_60)  : null },
-                { label: "CDR",        val: data.cdr,                  dec: 2, suffix: "", tier: data.cdr           != null ? defTier(data.cdr)                : null },
-                { label: "Finishing",  val: data.finishing,            dec: 1, suffix: "", tier: data.finishing     != null ? finishingTier(data.finishing)    : null },
-                { label: "PP xGF/60",  val: data.special_teams_pp,     dec: 2, suffix: "", tier: data.special_teams_pp != null ? stTier(data.special_teams_pp): null },
-                { label: "Bayes",      val: data.bayesian_rating,      dec: 3, suffix: "", tier: data.bayesian_rating != null ? bayesianTier(data.bayesian_rating) : null },
-              ].map((m, i) => {
-                const tierColor = m.tier ? TIER_COLOR[m.tier] : null;
-                return m.val != null ? (
-                  <div key={i} className="flex flex-col items-center gap-0.5">
-                    <span className="hud-mono text-[9px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
-                      {m.label}
-                    </span>
-                    <OdometerNumber
-                      value={m.val}
-                      decimals={m.dec}
-                      suffix={m.suffix}
-                      className="text-base"
-                    />
-                    {m.tier && tierColor && (
-                      <span
-                        className="hud-mono text-[8px] uppercase tracking-[0.18em] rounded border px-1.5 py-0.5 mt-0.5"
-                        style={{
-                          color: tierColor,
-                          borderColor: `${tierColor}55`,
-                          backgroundColor: `${tierColor}14`,
-                          textShadow: `0 0 6px ${tierColor}55`,
-                        }}
-                      >
-                        {TIER_ABBREV[m.tier]}
-                      </span>
-                    )}
-                  </div>
-                ) : (
-                  <div key={i} className="flex flex-col items-center gap-0.5 opacity-40">
-                    <span className="hud-mono text-[9px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                      {m.label}
-                    </span>
-                    <span className="hud-mono text-base text-[var(--text-muted)]">—</span>
-                  </div>
-                );
-              })}
-            </div>
-          </HudPanel>
-        </div>
+        {/* Ratings strip + EDGE/Save Telemetry both relocated:
+              · Ratings moved UP between TARGET PROFILE and the 3-col
+                command deck (renders before the grid opens).
+              · EDGE / SAVE Telemetry moved INTO the Behavior tab, right
+                under Performance Snapshot.
+            Both are gone from this position to keep the dashboard from
+            duplicating data across scroll positions. */}
 
       </div>
 
