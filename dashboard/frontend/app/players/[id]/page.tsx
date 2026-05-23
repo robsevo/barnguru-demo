@@ -6706,6 +6706,121 @@ export default function PlayerProfilePage() {
               );
             })()}
 
+            {/* ── PROFILE STRIP ───────────────────────────────────────
+                Compact dense block filling the rest of the Vitals
+                panel so it doesn't waste vertical space when Neural
+                Cortex on the right is tall. Surfaces context that
+                ISN'T in the hero stats strip or rings: player type +
+                top role-defining stat, best linemate, top NN action,
+                career totals, contract. Each row reads in one glance. */}
+            {(() => {
+              const rows: { label: string; value: string; tone?: "good" | "warn" | "bad"; tip?: string }[] = [];
+
+              // Player type — derived label ("Sniper", "Two-Way D", etc.)
+              if (playerType) {
+                rows.push({ label: "Type", value: playerType, tone: "good", tip: "Derived role from finishing + RAPM + box-score mix" });
+              }
+
+              // Top behavior NN action — what they MOST do on the ice.
+              const nnMap: { id: string; label: string; pct?: number | null }[] = [
+                { id: "carry",  label: "Carry-in",      pct: data.nn_carry_in_pct },
+                { id: "dump",   label: "Dump-in",       pct: data.nn_dump_pct },
+                { id: "slot",   label: "Slot Shot",     pct: data.nn_shoot_slot_pct },
+                { id: "perim",  label: "Perimeter",     pct: data.nn_shoot_perimeter_pct },
+                { id: "drive",  label: "Drive Net",     pct: data.nn_drive_net_pct },
+                { id: "battle", label: "Battle Corner", pct: data.nn_battle_corner_pct },
+                { id: "hold",   label: "Hold Corner",   pct: data.nn_hold_corner_pct },
+              ].filter(n => n.pct != null && n.pct > 0).sort((a, b) => (b.pct ?? 0) - (a.pct ?? 0));
+              if (nnMap.length > 0 && nnMap[0].pct != null) {
+                rows.push({
+                  label: "Top Action",
+                  value: `${nnMap[0].label} ${nnMap[0].pct.toFixed(0)}%`,
+                  tip: "Most likely behavior NN action — what the player does most often",
+                });
+              }
+
+              // Best linemate (from line_pairs partner with highest chemistry_delta)
+              if (data.line_pairs && data.line_pairs.length > 0) {
+                const top = [...data.line_pairs].sort((a, b) => (b.chemistry_delta ?? 0) - (a.chemistry_delta ?? 0))[0];
+                if (top && top.partner_name) {
+                  const cd = top.chemistry_delta;
+                  const chip = cd != null ? ` · ${cd > 0 ? "+" : ""}${(cd * 100).toFixed(1)}%` : "";
+                  rows.push({
+                    label: "Best Line",
+                    value: `${top.partner_name}${chip}`,
+                    tone: cd != null && cd > 0.02 ? "good" : undefined,
+                    tip: "Linemate with highest co-xGF% — your strongest pair",
+                  });
+                }
+              }
+
+              // EV TOI per game — coach-trust signal
+              if (data.toi_ev != null && data.game_log?.summary.n_games) {
+                const toiPerGame = data.toi_ev / data.game_log.summary.n_games;
+                rows.push({
+                  label: "EV TOI",
+                  value: `${toiPerGame.toFixed(1)} min/g`,
+                  tone: toiPerGame >= 16 ? "good" : toiPerGame <= 12 ? "warn" : undefined,
+                  tip: "5v5 even-strength minutes per game — higher = more coach trust",
+                });
+              }
+
+              // Career totals — short
+              if (data.nhl_games_played != null && data.nhl_career_points != null) {
+                rows.push({
+                  label: "Career",
+                  value: `${data.nhl_career_points} P · ${data.nhl_games_played} GP`,
+                  tip: "Career NHL totals",
+                });
+              }
+
+              // Contract / cap — when surfaced
+              if (contract?.cap_hit) {
+                const cap = contract.cap_hit;
+                const fmt = cap >= 1_000_000 ? `$${(cap / 1_000_000).toFixed(2)}M`
+                  : cap >= 1_000 ? `$${(cap / 1_000).toFixed(0)}K` : `$${cap}`;
+                const tag = [contract.contract_type, contract.expiry_year ? `'${String(contract.expiry_year).slice(-2)}` : null]
+                  .filter(Boolean).join(" · ");
+                rows.push({
+                  label: "Cap",
+                  value: `${fmt}${tag ? ` · ${tag}` : ""}`,
+                  tip: "Current cap hit + contract context",
+                });
+              }
+
+              if (rows.length === 0) return null;
+              return (
+                <div className="mt-3 pt-2.5 border-t border-white/[0.06] space-y-1.5">
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span className="hud-mono text-[8px] uppercase tracking-[0.22em] text-[var(--text-secondary)]">
+                      ▸ PROFILE
+                    </span>
+                    <span className="hud-mono text-[7px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                      derived signals
+                    </span>
+                  </div>
+                  {rows.map((r, i) => {
+                    const c =
+                      r.tone === "good" ? "#5ee08a" :
+                      r.tone === "warn" ? "#fbbf24" :
+                      r.tone === "bad"  ? "#f87171" :
+                      teamColor;
+                    return (
+                      <div key={i} className="flex items-baseline gap-2" title={r.tip ?? ""}>
+                        <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)] w-16 shrink-0">
+                          {r.label}
+                        </span>
+                        <span className="hud-mono text-[10px] tabular-nums truncate"
+                          style={{ color: c, textShadow: `0 0 4px ${c}33` }}>
+                          {r.value}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
             {/* Status flags — pushed to bottom so the panel evenly fills */}
             {statusFlags.length > 0 && (
               <div className="mt-auto pt-3 flex flex-wrap gap-1.5">
