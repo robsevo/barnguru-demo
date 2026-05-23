@@ -5296,9 +5296,30 @@ export default function PlayerProfilePage() {
   // landing view on every player.
   type TelemetryTab = "overview" | "shot-map" | "zones" | "fatigue" | "advanced" | "neural";
   const [telemetryTab, setTelemetryTab] = useState<TelemetryTab>("overview");
-  // Ref for the mobile telemetry rail — used by the left/right scroll
-  // buttons below the rail to programmatically scroll the nav.
-  const railRef = useRef<HTMLElement | null>(null);
+  // Ref + visibility state for the mobile telemetry rail. Matches the
+  // pattern used by ScoreboardBar (which works) — arrows are flex
+  // siblings, not absolute-positioned overlays.
+  const railRef = useRef<HTMLDivElement | null>(null);
+  const [railCanLeft,  setRailCanLeft]  = useState(false);
+  const [railCanRight, setRailCanRight] = useState(false);
+  const updateRailArrows = () => {
+    const el = railRef.current;
+    if (!el) return;
+    setRailCanLeft(el.scrollLeft > 0);
+    setRailCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+  };
+  const scrollRail = (dir: "left" | "right") => {
+    railRef.current?.scrollBy({ left: dir === "left" ? -160 : 160, behavior: "smooth" });
+  };
+  useEffect(() => {
+    const el = railRef.current;
+    if (!el) return;
+    updateRailArrows();
+    el.addEventListener("scroll", updateRailArrows, { passive: true });
+    const ro = new ResizeObserver(updateRailArrows);
+    ro.observe(el);
+    return () => { el.removeEventListener("scroll", updateRailArrows); ro.disconnect(); };
+  }, []);
   // Cached season-derived player archetype + the effect that maintains
   // it BOTH live ABOVE the loading/!data early returns so the hook
   // order stays stable across renders. The effect callback no-ops when
@@ -5868,54 +5889,26 @@ export default function PlayerProfilePage() {
                 ▌ TELEMETRY
               </span>
             </div>
-            {/* Scroll-rail wrapper — relative so chevron buttons can
-                absolute-position over the nav. w-full + overflow-hidden
-                constrain this wrapper to the parent panel's width so
-                right-0 actually anchors to the viewport edge, not the
-                nav's natural scrollWidth (which is way wider). */}
-            <div className="relative w-full overflow-hidden">
-              {/* Mobile-only left/right scroll buttons. JS-driven so they
-                  actually scroll the nav by 140px per tap. Hidden on lg+. */}
+            {/* Rail layout — mirrors ScoreboardBar exactly: arrows are
+                FLEX SIBLINGS of the scroller, not absolute overlays. This
+                is the only horizontal-menu pattern that's been verified
+                to work on the site for both mobile + desktop. */}
+            <div className="flex items-stretch lg:block">
+              {/* Left arrow — visible only on mobile, only when scrollable */}
               <button
                 type="button"
+                onClick={() => scrollRail("left")}
                 aria-label="Scroll left"
-                onClick={() => railRef.current?.scrollBy({ left: -140, behavior: "smooth" })}
-                className="lg:hidden absolute left-0 top-0 bottom-0 z-[6] flex items-center justify-center w-8 active:scale-95 transition-transform"
-                style={{
-                  background: "linear-gradient(90deg, rgba(0,0,0,0.92) 30%, rgba(0,0,0,0) 100%)",
-                  color: teamColor,
-                  textShadow: `0 0 5px ${teamColor}`,
-                }}>
-                <span className="hud-mono text-[14px] font-bold"
-                  style={{ animation: "railChevPulse 1.6s ease-in-out infinite" }}>
-                  ◂
-                </span>
+                className={`lg:hidden flex shrink-0 w-8 items-center justify-center transition-opacity ${railCanLeft ? "opacity-100" : "opacity-25 pointer-events-none"}`}
+                style={{ color: teamColor, textShadow: `0 0 4px ${teamColor}` }}>
+                <span className="hud-mono text-[14px] font-bold">❮</span>
               </button>
-              <button
-                type="button"
-                aria-label="Scroll right"
-                onClick={() => railRef.current?.scrollBy({ left: 140, behavior: "smooth" })}
-                className="lg:hidden absolute right-0 top-0 bottom-0 z-[6] flex items-center justify-center w-8 active:scale-95 transition-transform"
-                style={{
-                  background: "linear-gradient(270deg, rgba(0,0,0,0.92) 30%, rgba(0,0,0,0) 100%)",
-                  color: teamColor,
-                  textShadow: `0 0 5px ${teamColor}`,
-                }}>
-                {/* Glyph animates inside the button — animating the button
-                    itself fights its absolute right-0 / inset positioning
-                    and pushes the whole arrow off-screen. */}
-                <span className="hud-mono text-[14px] font-bold"
-                  style={{ animation: "railChevPulse 1.6s ease-in-out infinite" }}>
-                  ▸
-                </span>
-              </button>
-              <nav
+              <div
                 ref={railRef}
-                className="flex lg:flex-col p-1 lg:p-1.5 gap-1 overflow-x-auto lg:overflow-visible px-9 lg:px-1.5"
+                className="flex-1 min-w-0 flex lg:flex-col p-1 lg:p-1.5 gap-1 overflow-x-auto lg:overflow-visible"
                 style={{
                   scrollbarWidth: "none",
                   WebkitOverflowScrolling: "touch",
-                  touchAction: "pan-x",
                   msOverflowStyle: "none",
                 }}>
               {(() => {
@@ -5991,7 +5984,17 @@ export default function PlayerProfilePage() {
                   );
                 });
               })()}
-              </nav>
+              </div>
+              {/* Right arrow — sibling of the scroller so it doesn't get
+                  dragged off-screen by the nav's scrollWidth. */}
+              <button
+                type="button"
+                onClick={() => scrollRail("right")}
+                aria-label="Scroll right"
+                className={`lg:hidden flex shrink-0 w-8 items-center justify-center transition-opacity ${railCanRight ? "opacity-100" : "opacity-25 pointer-events-none"}`}
+                style={{ color: teamColor, textShadow: `0 0 4px ${teamColor}` }}>
+                <span className="hud-mono text-[14px] font-bold">❯</span>
+              </button>
             </div>
             {/* Footer — desktop only. */}
             <div className="hidden lg:flex px-3 py-1.5 border-t items-center justify-between"
