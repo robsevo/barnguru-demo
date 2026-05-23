@@ -6515,27 +6515,24 @@ export default function PlayerProfilePage() {
                   tip: "EDGE skating-load degradation vs the player's own baseline. Negative = moving slower/shorter distance than their norm — fatigue showing in the legs." },
               ].filter(c => c.val !== null)}
               tickerLine={isGoalie ? [
-                data.sv_pct != null ? `SV ${(data.sv_pct * 100).toFixed(1)}%` : (nhlStats?.sv_pct != null ? `SV ${(nhlStats.sv_pct * 100).toFixed(1)}%` : null),
-                data.hdsv_pct != null ? `HD ${(data.hdsv_pct * 100).toFixed(1)}%` : null,
-                data.mdsv_pct != null ? `MD ${(data.mdsv_pct * 100).toFixed(1)}%` : null,
-                data.ldsv_pct != null ? `LD ${(data.ldsv_pct * 100).toFixed(1)}%` : null,
-                data.gsax != null ? `GSAx ${data.gsax > 0 ? "+" : ""}${data.gsax.toFixed(1)}` : null,
-                nhlStats?.gaa != null ? `GAA ${nhlStats.gaa.toFixed(2)}` : null,
-                data.shots_against != null ? `SA ${data.shots_against}` : null,
-                data.games_played != null ? `GP ${data.games_played}` : null,
-                nhlStats?.shutouts != null ? `SO ${nhlStats.shutouts}` : null,
-                fi != null ? `FI ${fi.toFixed(2)}` : null,
-                ci != null ? `CI ${ci >= 0 ? "+" : ""}${ci.toFixed(2)}` : null,
-              ].filter((s): s is string => Boolean(s)) : [
-                fi != null ? `FI ${fi.toFixed(2)}` : null,
-                ci != null ? `CI ${ci >= 0 ? "+" : ""}${ci.toFixed(2)}` : null,
+                // Goalie ticker — only stats NOT already in the TARGET
+                // PROFILE strip (GP, W-L, SV%, GSAx, GAA, SO are there)
+                // or hologram callouts (HD/MD/LD SV%, GSAx, xGA, SA).
+                // Roll value-added context only.
                 hhs != null ? `HHS ${hhs >= 0 ? "+" : ""}${hhs.toFixed(2)}` : null,
-                warVal != null ? `WAR ${warVal >= 0 ? "+" : ""}${warVal.toFixed(2)}` : null,
-                data.xgf_per60 != null ? `xGF/60 ${data.xgf_per60.toFixed(2)}` : null,
-                data.cdr != null ? `CDR ${data.cdr >= 0 ? "+" : ""}${data.cdr.toFixed(2)}` : null,
-                data.finishing != null ? `FIN ${data.finishing >= 0 ? "+" : ""}${data.finishing.toFixed(1)}` : null,
                 data.bayesian_rating != null ? `BAYES ${data.bayesian_rating.toFixed(3)}` : null,
                 phase3?.fi_multiplier != null ? `MULT ${phase3.fi_multiplier.toFixed(3)}` : null,
+                data.toi_ev != null ? `TOI ${data.toi_ev.toFixed(0)}m` : null,
+              ].filter((s): s is string => Boolean(s)) : [
+                // Skater ticker — drop xGF/60, CDR, FIN, BAYES, PP
+                // (all in RATINGS strip) + FI, CI (in Vitals rings).
+                // Roll only the things that have no other home on the
+                // dashboard so the ticker carries unique value.
+                hhs != null ? `HHS ${hhs >= 0 ? "+" : ""}${hhs.toFixed(2)}` : null,
+                warVal != null ? `WAR ${warVal >= 0 ? "+" : ""}${warVal.toFixed(2)}` : null,
+                phase3?.fi_multiplier != null ? `MULT ${phase3.fi_multiplier.toFixed(3)}` : null,
+                data.toi_ev != null ? `TOI ${data.toi_ev.toFixed(0)}m` : null,
+                data.ewma_xgf60 != null ? `EWMA ${data.ewma_xgf60.toFixed(2)}` : null,
               ].filter((s): s is string => Boolean(s))}
               dnaRungs={(() => {
                 // Neural DNA strip — one rung per behavior NN dimension for
@@ -7158,6 +7155,11 @@ export default function PlayerProfilePage() {
           </div>
         )}
 
+        {/* Section header — Behavior tab "Profile" group */}
+        {!isGoalie && telemetryTab === "neural" && (
+          <SectionHeader title="Profile" subtitle="performance · EDGE telemetry" teamColor={teamColor} />
+        )}
+
         {/* ── Performance Snapshot charts ── */}
         {!isGoalie && telemetryTab === "neural" && (
           <div className="sm:col-span-2">
@@ -7309,6 +7311,11 @@ export default function PlayerProfilePage() {
           </div>
         )}
 
+        {/* Section header — Recent Activity group */}
+        {telemetryTab === "advanced" && (
+          <SectionHeader title="Recent Activity" subtitle="game log · linemates" teamColor={teamColor} />
+        )}
+
         {/* Recent Games */}
         {telemetryTab === "advanced" && (
           <div className="sm:col-span-2">
@@ -7435,6 +7442,11 @@ export default function PlayerProfilePage() {
           </Card>
         )}
 
+        {/* Section header — Special Teams group */}
+        {!isGoalie && telemetryTab === "advanced" && (data.special_teams_pp != null || data.special_teams_pk != null) && (
+          <SectionHeader title="Special Teams" subtitle="PP + PK impact" teamColor={teamColor} />
+        )}
+
         {/* Special Teams */}
         {!isGoalie && telemetryTab === "advanced" && (data.special_teams_pp != null || data.special_teams_pk != null) && (
           <Card title="Special Teams" style={cardStyle}>
@@ -7459,6 +7471,11 @@ export default function PlayerProfilePage() {
               )}
             </div>
           </Card>
+        )}
+
+        {/* Section header — Behavior tab "Form & Identity" group */}
+        {!isGoalie && telemetryTab === "neural" && (data.ewma_xgf60 != null || data.hot_hand_score != null || data.clutch_index != null) && (
+          <SectionHeader title="Form & Identity" subtitle="momentum · play style" teamColor={teamColor} />
         )}
 
         {/* Current Form */}
@@ -7987,6 +8004,11 @@ export default function PlayerProfilePage() {
           )
         )}
 
+        {/* Section header — goalie Behavior tab "Profile" group */}
+        {isGoalie && telemetryTab === "neural" && (
+          <SectionHeader title="Profile" subtitle="goalie radar · save telemetry" teamColor={teamColor} />
+        )}
+
         {/* Goalie Performance Snapshot — radar with save% / GSAx axes. */}
         {isGoalie && telemetryTab === "neural" && (
           <div className="sm:col-span-2">
@@ -7999,6 +8021,11 @@ export default function PlayerProfilePage() {
               </div>
             </Card>
           </div>
+        )}
+
+        {/* Section header — goalie Behavior tab "Breakdown" group */}
+        {isGoalie && telemetryTab === "neural" && (
+          <SectionHeader title="Breakdown" subtitle="full save% + workload table" teamColor={teamColor} />
         )}
 
         {isGoalie && telemetryTab === "neural" && (
