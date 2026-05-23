@@ -5831,8 +5831,14 @@ export default function PlayerProfilePage() {
     return out;
   })();
 
+  // overflow-x-clip (not -hidden) — Chrome/Safari treat overflow-x: hidden
+  // as overflow:auto/hidden which silently creates a NEW scroll context on
+  // this main element. That scroll context broke the lg:sticky position on
+  // the telemetry rail: sticky was anchoring to main instead of the
+  // viewport, so the rail would drift away as the user scrolled.
+  // overflow-clip clips overflow without creating a new formatting context.
   return (
-    <main className="relative min-h-screen p-4 sm:p-6 max-w-3xl lg:max-w-[1400px] mx-auto w-full overflow-x-hidden">
+    <main className="relative min-h-screen p-4 sm:p-6 max-w-3xl lg:max-w-[1400px] mx-auto w-full overflow-x-clip">
       <HudGrid />
 
       {/* ── Search bar — team-colored ── */}
@@ -5916,7 +5922,7 @@ export default function PlayerProfilePage() {
             (order-3, also right pane). To make this work the right pane
             is split below; rail row uses col-span to span both grid
             columns on mobile, and on lg+ collapses to column 1. */}
-        <aside className="order-2 lg:order-none lg:col-start-1 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-3 z-20 mb-2 lg:mb-0 w-full lg:w-auto max-w-full lg:max-w-none min-w-0 lg:self-start lg:max-h-[calc(100vh-1rem)] lg:overflow-y-auto">
+        <aside className="order-2 lg:order-none lg:col-start-1 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-4 z-30 mb-2 lg:mb-0 w-full lg:w-auto max-w-full lg:max-w-none min-w-0 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
           {/* Outer wrapper — PLAIN div, NO .hud-panel class. The .hud-panel
               class has `overflow: hidden` baked in (globals.css line 347)
               which kills the inner nav's overflow-x-auto. Style the chrome
