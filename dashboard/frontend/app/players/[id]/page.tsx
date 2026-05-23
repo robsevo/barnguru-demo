@@ -902,15 +902,15 @@ function clamp01(v: number | null | undefined): number {
 interface RadarEntry { subject: string; A: number; raw: string; tip: string; }
 
 
-function PlayerRadarChart({ data, teamColor }: { data: ProfileData; teamColor: string }) {
+function PlayerRadarChart({ data, teamColor, maxSize = 300 }: { data: ProfileData; teamColor: string; maxSize?: number }) {
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
-  const [chartSize, setChartSize] = useState(300);
+  const [chartSize, setChartSize] = useState(maxSize);
   useEffect(() => {
-    const update = () => setChartSize(Math.min(300, window.innerWidth - 56));
+    const update = () => setChartSize(Math.min(maxSize, window.innerWidth - 56));
     update();
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
-  }, []);
+  }, [maxSize]);
 
   // Derive per-60 from raw season counts when model fields are null
   const derivedG60   = (data.goals_per60  != null) ? data.goals_per60
@@ -5295,38 +5295,10 @@ export default function PlayerProfilePage() {
           </div>
           </div>
 
-          {/* RIGHT — Attribute Radar in a target-lock frame. Hidden on
-              narrow screens (where it would push identity stack to wrap);
-              renders inline at md+ so the radar sits beside the player. */}
-          <div className="hidden md:flex flex-col items-center justify-center shrink-0 relative rounded border px-2 pt-1 pb-2 overflow-hidden"
-            style={{
-              width: 240,
-              borderColor: `${teamColor}33`,
-              background: "linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0.32))",
-              boxShadow: `0 0 12px ${teamColor}14, inset 0 0 16px rgba(0,0,0,0.4)`,
-            }}>
-            <div className="absolute top-1 left-1 w-2.5 h-2.5 pointer-events-none" style={{ borderLeft: `1px solid ${teamColor}aa`, borderTop: `1px solid ${teamColor}aa` }} />
-            <div className="absolute top-1 right-1 w-2.5 h-2.5 pointer-events-none" style={{ borderRight: `1px solid ${teamColor}aa`, borderTop: `1px solid ${teamColor}aa` }} />
-            <div className="absolute bottom-1 left-1 w-2.5 h-2.5 pointer-events-none" style={{ borderLeft: `1px solid ${teamColor}aa`, borderBottom: `1px solid ${teamColor}aa` }} />
-            <div className="absolute bottom-1 right-1 w-2.5 h-2.5 pointer-events-none" style={{ borderRight: `1px solid ${teamColor}aa`, borderBottom: `1px solid ${teamColor}aa` }} />
-            <div className="flex items-center justify-between w-full px-1 mb-0.5">
-              <span className="hud-mono text-[8px] uppercase tracking-[0.22em] flex items-center gap-1"
-                style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}55` }}>
-                <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 4px ${teamColor}` }} />
-                ⌖ {isGoalie ? "GOALIE" : "BIOMETRIC"}
-              </span>
-              <span className="hud-mono text-[7px] uppercase tracking-[0.18em]" style={{ color: `${teamColor}99` }}>
-                locked
-              </span>
-            </div>
-            <div className="w-full flex items-center justify-center [&>div]:!w-full">
-              {isGoalie ? (
-                <GoalieRadarChart data={data} teamColor={teamColor} nhlSvPct={nhlStats?.sv_pct} nhlGaa={nhlStats?.gaa} />
-              ) : (
-                <PlayerRadarChart data={data} teamColor={teamColor} />
-              )}
-            </div>
-          </div>
+          {/* Biometric radar moved back into the Behavior tab — it kept
+              clipping / floating awkwardly inline with the identity stack
+              and there's no compact size that reads cleanly. The tab has
+              the room it needs. */}
         </div>
 
         {/* ── Season / Playoffs context pill ── */}
@@ -6479,9 +6451,13 @@ export default function PlayerProfilePage() {
             <Card title="Performance Snapshot" style={cardStyle}>
               <div className="flex flex-wrap justify-center gap-6">
 
-                {/* Radar promoted to TARGET PROFILE band — kept in place was
-                    duplicate and pushed the more interesting game-log chart
-                    down. The radar now lives directly under the KPI band. */}
+                {/* Radar */}
+                {(data.xgf_per60 != null || data.cdr != null || data.battle_percentile != null) && (
+                  <div className="flex flex-col items-center w-full sm:w-auto overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/30 mb-2 text-center">Attribute Radar</p>
+                    <PlayerRadarChart data={data} teamColor={teamColor} />
+                  </div>
+                )}
 
                 {/* Game log bar chart */}
                 {gl && gl.games.length >= 3 && (
@@ -6554,18 +6530,14 @@ export default function PlayerProfilePage() {
           <div className="sm:col-span-2">
             <Card title="Zone Tendencies" style={cardStyle}>
               <div className="grid gap-3 lg:grid-cols-[1.35fr_1fr] items-start">
-                {/* LEFT — 3D rink with 2D fallback. Fills the column. */}
+                {/* LEFT — 3D rink with 2D fallback. Fills the column.
+                    No external header strip — Zone3D ships its own 2D
+                    toggle in the top-left corner and any label here would
+                    collide with it. The Card title "Zone Tendencies"
+                    already names the section. */}
                 <div className="min-w-0">
                   {data.nn_shoot_slot_pct != null ? (
                     <>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="hud-mono text-[9px] uppercase tracking-[0.22em]" style={{ color: teamColor }}>
-                          ◢ OFFENSIVE ZONE · 3D
-                        </span>
-                        <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                          drag · scroll
-                        </span>
-                      </div>
                       <Zone3D
                         activations={{
                           slot:    data.nn_shoot_slot_pct ?? 0,
@@ -7279,9 +7251,19 @@ export default function PlayerProfilePage() {
           )
         )}
 
-        {/* Goalie Performance Snapshot retired — Goalie Radar lives in the
-            TARGET PROFILE band at the top of the page, paired with the net
-            save% heatmap. No need to duplicate it on the Neural tab. */}
+        {/* Goalie Performance Snapshot — radar with save% / GSAx axes. */}
+        {isGoalie && telemetryTab === "neural" && (
+          <div className="sm:col-span-2">
+            <Card title="Performance Snapshot" style={cardStyle}>
+              <div className="flex flex-wrap justify-center gap-6">
+                <div className="flex flex-col items-center w-full sm:w-auto overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/30 mb-2 text-center">Goalie Radar</p>
+                  <GoalieRadarChart data={data} teamColor={teamColor} nhlSvPct={nhlStats?.sv_pct} nhlGaa={nhlStats?.gaa} />
+                </div>
+              </div>
+            </Card>
+          </div>
+        )}
 
         {isGoalie && telemetryTab === "neural" && (
           <div className="sm:col-span-2">
