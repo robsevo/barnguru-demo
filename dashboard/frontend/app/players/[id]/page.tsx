@@ -4045,6 +4045,158 @@ function PredictedPlay({
 }
 
 // ---------------------------------------------------------------------------
+// KpiBand — the headline tile strip directly under the hero console.
+// Skater variant surfaces box-score (GP · G · A · P · TOI · +/-) plus the
+// analytical anchor (WAR · FI · CI). Goalie variant flips to GP · W-L ·
+// SV% · GSAx · GAA · SO. Each tile is its own HUD pip — compact, glowing
+// in team colour, with a tier chip when the value clears a known band.
+//
+// Sits BETWEEN the hero console and the Ratings panel so the dashboard
+// reads top-to-bottom: who the player is → what they did → engine context
+// → drill-down telemetry tabs. Without this band the page jumps straight
+// from hologram to engine outputs and box-score totals are buried in the
+// game log tab.
+// ---------------------------------------------------------------------------
+
+interface KpiTile {
+  label: string;
+  value: string;
+  sub?: string;
+  tier?: Tier | null;
+  tone?: "good" | "warn" | "bad" | "neutral";
+  tip?: string;
+}
+
+function KpiBand({
+  tiles, teamColor,
+}: { tiles: KpiTile[]; teamColor: string }) {
+  if (tiles.length === 0) return null;
+  return (
+    <div className="lg:col-span-12 mt-3">
+      <div className="hud-panel hud-panel--all-corners jarvis-boot jarvis-shimmer relative overflow-hidden"
+        style={{
+          ["--hud-corner" as string]: teamColor,
+          background: "linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0.32))",
+          boxShadow: `0 0 18px ${teamColor}14, inset 0 0 24px rgba(0,0,0,0.4)`,
+        }}>
+        <span className="hud-panel__corner-tr" />
+        <span className="hud-panel__corner-bl" />
+        <div className="hud-scan" aria-hidden />
+        {/* Header strip — pulse-dot + label, mirrors the Ratings panel
+            chrome so the two bands feel like one console layer. */}
+        <div className="flex items-center justify-between px-3 py-1.5 border-b" style={{ borderColor: `${teamColor}22` }}>
+          <div className="flex items-center gap-2">
+            <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 6px ${teamColor}` }} />
+            <span className="hud-mono text-[10px] uppercase tracking-[0.24em] font-semibold"
+              style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}55` }}>
+              ◢ KEY METRICS
+            </span>
+            <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+              · season totals
+            </span>
+          </div>
+          <span className="hud-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: `${teamColor}99` }}>
+            live · 60Hz
+          </span>
+        </div>
+        {/* Tile row — grid auto-fits 6 across desktop, 3 across tablet,
+            2 across phone. Each tile lives in its own column with a
+            vertical divider hairline so it reads as instrument cluster. */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 divide-x"
+          style={{ borderColor: `${teamColor}14` }}>
+          {tiles.map((t, i) => {
+            const tierColor = t.tier ? TIER_COLOR[t.tier] : null;
+            const toneColor =
+              t.tone === "good" ? "#5ee08a" :
+              t.tone === "warn" ? "#fbbf24" :
+              t.tone === "bad"  ? "#f87171" :
+              tierColor ?? teamColor;
+            return (
+              <div key={i} className="px-3 py-2.5 relative flex flex-col items-center justify-center text-center gap-1"
+                title={t.tip ?? ""}
+                style={{ borderColor: `${teamColor}14` }}>
+                {/* Top mini-tick — matches the Ratings cluster pip */}
+                <span aria-hidden className="absolute top-1 left-1/2 -translate-x-1/2 w-6 h-px"
+                  style={{ background: `${toneColor}55`, boxShadow: `0 0 4px ${toneColor}77` }} />
+                <span className="hud-mono text-[9px] uppercase tracking-[0.22em] text-[var(--text-secondary)]">
+                  {t.label}
+                </span>
+                <span className="hud-mono text-[18px] sm:text-[20px] font-semibold tabular-nums leading-none"
+                  style={{
+                    color: toneColor,
+                    textShadow: `0 0 8px ${toneColor}55, 0 0 2px ${toneColor}33`,
+                    animation: `kpiBoot 600ms cubic-bezier(0.22,1,0.36,1) ${i * 70}ms both`,
+                  }}>
+                  {t.value}
+                </span>
+                {t.sub && (
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.16em] text-[var(--text-muted)] tabular-nums">
+                    {t.sub}
+                  </span>
+                )}
+                {t.tier && tierColor && (
+                  <span className="hud-mono text-[8px] uppercase tracking-[0.18em] rounded border px-1.5 py-0.5"
+                    style={{
+                      color: tierColor,
+                      borderColor: `${tierColor}55`,
+                      backgroundColor: `${tierColor}14`,
+                      textShadow: `0 0 4px ${tierColor}55`,
+                    }}>
+                    {TIER_ABBREV[t.tier]}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <style jsx>{`
+          @keyframes kpiBoot {
+            from { transform: translateY(4px); opacity: 0; }
+            to   { transform: translateY(0);   opacity: 1; }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            span { animation: none !important; }
+          }
+        `}</style>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SectionHeader — the "◆ OFFENSE", "◆ DEFENSE" reticle bars that group
+// related cards inside a telemetry tab. Same idiom HudPanel uses for its
+// title strip, but free-standing so it sits between cards in a flat grid.
+// ---------------------------------------------------------------------------
+
+function SectionHeader({
+  title, subtitle, teamColor, glyph = "◆",
+}: { title: string; subtitle?: string; teamColor: string; glyph?: string }) {
+  return (
+    <div className="sm:col-span-2 mt-2 px-1">
+      <div className="flex items-center gap-2.5 pb-1.5 border-b"
+        style={{ borderColor: `${teamColor}26` }}>
+        <span className="hud-mono text-[11px]" style={{ color: teamColor, textShadow: `0 0 6px ${teamColor}77` }}>
+          {glyph}
+        </span>
+        <span className="hud-mono text-[10px] uppercase tracking-[0.24em] font-semibold"
+          style={{ color: teamColor, textShadow: `0 0 5px ${teamColor}44` }}>
+          {title}
+        </span>
+        {subtitle && (
+          <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+            · {subtitle}
+          </span>
+        )}
+        {/* Right-side stretch hairline so the header reads as a section
+            divider, not just a label. */}
+        <span className="flex-1 h-px ml-1" style={{ background: `linear-gradient(90deg, ${teamColor}55 0%, transparent 100%)` }} />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Profile Page
 // ---------------------------------------------------------------------------
 
@@ -5794,6 +5946,51 @@ export default function PlayerProfilePage() {
           </HudPanel>
         </div>
 
+        {/* KPI BAND — box-score / goalie headline totals. Sits between hero
+            and Ratings so the dashboard reads: who → what → engine outputs
+            → drill-down tabs. Tiles flip skater↔goalie. */}
+        {(() => {
+          const fmtNum = (v: number | null | undefined, dec = 0) => v == null ? "—" : (dec > 0 ? v.toFixed(dec) : Math.round(v).toString());
+          const tiles: KpiTile[] = isGoalie ? (() => {
+            const gp = nhlStats?.gp ?? data.games_played ?? null;
+            const w  = nhlStats?.wins ?? null;
+            const l  = nhlStats?.losses ?? null;
+            const ot = nhlStats?.ot_losses ?? null;
+            const svp = data.sv_pct ?? nhlStats?.sv_pct ?? null;
+            const gsax = data.gsax ?? null;
+            const gaa = nhlStats?.gaa ?? null;
+            const so = nhlStats?.shutouts ?? null;
+            const svTone = svp == null ? "neutral" : svp >= 0.920 ? "good" : svp >= 0.905 ? "neutral" : "bad";
+            const gsxTone = gsax == null ? "neutral" : gsax >= 5 ? "good" : gsax >= -2 ? "neutral" : "bad";
+            const gaaTone = gaa == null ? "neutral" : gaa <= 2.50 ? "good" : gaa <= 2.90 ? "neutral" : "bad";
+            return [
+              { label: "GP",     value: fmtNum(gp), tip: "Games played this season." },
+              { label: "Record", value: (w != null && l != null) ? `${w}-${l}${ot != null ? `-${ot}` : ""}` : "—", sub: "W-L-OT", tip: "Win-Loss-OT record. Team-dependent, useful for context only." },
+              { label: "SV%",    value: svp != null ? `${(svp * 100).toFixed(1)}%` : "—", tone: svTone as KpiTile["tone"], tip: "Overall save percentage. .920+ is starter-quality." },
+              { label: "GSAx",   value: gsax != null ? `${gsax > 0 ? "+" : ""}${gsax.toFixed(1)}` : "—", tone: gsxTone as KpiTile["tone"], tip: "Goals saved above expected. +10 over a season is elite." },
+              { label: "GAA",    value: gaa != null ? gaa.toFixed(2) : "—", tone: gaaTone as KpiTile["tone"], tip: "Goals against per 60 mins. Pair with GSAx for an honest read." },
+              { label: "SO",     value: fmtNum(so), tip: "Shutouts this season." },
+            ];
+          })() : (() => {
+            const gp = nhlStats?.gp ?? data.game_log?.summary.n_games ?? null;
+            const g  = nhlStats?.goals  ?? data.game_log?.summary.goals  ?? null;
+            const a  = nhlStats?.assists ?? data.game_log?.summary.assists ?? null;
+            const p  = nhlStats?.points  ?? data.game_log?.summary.points  ?? null;
+            const pm = nhlStats?.plus_minus ?? null;
+            const fiTone = fi == null ? "neutral" : fi < 0.40 ? "good" : fi > 0.65 ? "bad" : "neutral";
+            const ciTone = ci == null ? "neutral" : ci >= 0.20 ? "good" : ci <= -0.20 ? "bad" : "neutral";
+            return [
+              { label: "GP",      value: fmtNum(gp), tip: "Games played this season." },
+              { label: "G",       value: fmtNum(g),  tip: "Goals this season." },
+              { label: "A",       value: fmtNum(a),  tip: "Assists this season." },
+              { label: "P",       value: fmtNum(p),  sub: gp ? `${(((p ?? 0) / Math.max(gp, 1))).toFixed(2)} P/G` : undefined, tip: "Points (goals + assists)." },
+              { label: "+/-",     value: pm == null ? "—" : `${pm > 0 ? "+" : ""}${pm}`, tone: pm == null ? "neutral" : pm > 5 ? "good" : pm < -5 ? "bad" : "neutral", tip: "Plus-minus this season. Heavily team-dependent." },
+              { label: "WAR",     value: warVal != null ? `${warVal > 0 ? "+" : ""}${warVal.toFixed(2)}` : "—", tier: warVal != null ? warTier(warVal) : null, tip: "Wins Above Replacement. Single-number player value, blends offense + defense + special teams." },
+            ];
+          })();
+          return <KpiBand tiles={tiles} teamColor={teamColor} />;
+        })()}
+
         {/* RATING STRIP — full width, 6 mini odometers, tier-coloured */}
         <div className="lg:col-span-12">
           <HudPanel title="Ratings" subtitle="aggregate engine inputs" themeColor={teamColor}>
@@ -5847,11 +6044,20 @@ export default function PlayerProfilePage() {
 
       </div>
 
-      {/* ── Telemetry tab bar — switches the cards below ── */}
-      <div className="mt-5 mb-2 px-1 flex items-center gap-2"
-        style={{ borderBottom: `1px solid ${teamColor}22` }}>
-        <span className="hud-mono text-[9px] uppercase tracking-[0.2em] text-[var(--text-secondary)] shrink-0 pr-2">
-          ▌ TELEMETRY
+      {/* ── Telemetry tab bar — sticky so the section nav stays accessible
+          as cards scroll. Backdrop blur + team-tinted background so it
+          reads as a HUD layer, not a floating bar. */}
+      <div className="sticky top-0 z-30 mt-5 mb-3 px-1 -mx-1 py-1.5 flex items-center gap-2"
+        style={{
+          borderBottom: `1px solid ${teamColor}33`,
+          background: `linear-gradient(180deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.72) 100%)`,
+          backdropFilter: "blur(8px)",
+          WebkitBackdropFilter: "blur(8px)",
+          boxShadow: `0 4px 14px rgba(0,0,0,0.45), 0 0 8px ${teamColor}1c`,
+        }}>
+        <span className="hud-mono text-[9px] uppercase tracking-[0.2em] text-[var(--text-secondary)] shrink-0 pr-2 flex items-center gap-1.5">
+          <span className="hud-pulse-dot" style={{ background: teamColor, boxShadow: `0 0 4px ${teamColor}` }} />
+          <span>▌ TELEMETRY</span>
         </span>
         <HudTabBar
           tabs={telemetryTabs}
@@ -5891,7 +6097,7 @@ export default function PlayerProfilePage() {
         {/* ── Performance Snapshot charts ── */}
         {!isGoalie && telemetryTab === "neural" && (
           <div className="sm:col-span-2">
-            <Card title="Performance Snapshot" icon="📊" style={cardStyle}>
+            <Card title="Performance Snapshot" style={cardStyle}>
               <div className="flex flex-wrap justify-center gap-6">
 
                 {/* Radar */}
@@ -5941,7 +6147,7 @@ export default function PlayerProfilePage() {
         {/* ── Shot Map card — 3D + 2D toggle ── */}
         {!isGoalie && telemetryTab === "shot-map" && (
           <div className="sm:col-span-2">
-            <Card title="Shot Map" icon="🎯" style={cardStyle}>
+            <Card title="Shot Map" style={cardStyle}>
               {shots.length > 0 ? (
                 <>
                   <p className="text-[9px] uppercase tracking-wider text-center mb-3" style={{ color: "rgba(255,255,255,0.35)" }}>
@@ -6019,7 +6225,7 @@ export default function PlayerProfilePage() {
         {/* Recent Games */}
         {telemetryTab === "games" && (
           <div className="sm:col-span-2">
-            <Card title="Recent Games" icon="📅" style={cardStyle}>
+            <Card title="Recent Games" style={cardStyle}>
               {gl && gl.games.length > 0 ? (
                 <GameLogTable allGames={gl.games} />
               ) : (
@@ -6031,9 +6237,14 @@ export default function PlayerProfilePage() {
           </div>
         )}
 
+        {/* Section header — advanced two-up (Offense + Defense) */}
+        {!isGoalie && telemetryTab === "advanced" && (
+          <SectionHeader title="Advanced Metrics" subtitle="offense + defense" teamColor={teamColor} />
+        )}
+
         {/* Offensive Profile */}
         {!isGoalie && telemetryTab === "advanced" && (data.finishing != null || data.war != null || data.rapm_ev_off != null) && (
-          <Card title="Offensive Profile" icon="⚡" style={cardStyle}>
+          <Card title="Offensive Profile" style={cardStyle}>
             <div className="space-y-0">
               {data.finishing != null && (
                 <StatRow
@@ -6091,7 +6302,7 @@ export default function PlayerProfilePage() {
 
         {/* Defensive Profile */}
         {!isGoalie && telemetryTab === "advanced" && (data.cdr != null || data.rapm_ev_def != null || data.battle_score != null) && (
-          <Card title="Defensive Profile" icon="🛡️" style={cardStyle}>
+          <Card title="Defensive Profile" style={cardStyle}>
             <div className="space-y-0">
               {(data.cdr != null || data.rapm_ev_def != null) && (
                 <StatRow
@@ -6139,7 +6350,7 @@ export default function PlayerProfilePage() {
 
         {/* Special Teams */}
         {!isGoalie && telemetryTab === "special-teams" && (data.special_teams_pp != null || data.special_teams_pk != null) && (
-          <Card title="Special Teams" icon="⭐" style={cardStyle}>
+          <Card title="Special Teams" style={cardStyle}>
             <div className="space-y-0">
               {data.special_teams_pp != null && (
                 <StatRow
@@ -6165,7 +6376,7 @@ export default function PlayerProfilePage() {
 
         {/* Current Form */}
         {!isGoalie && telemetryTab === "neural" && (data.ewma_xgf60 != null || data.hot_hand_score != null || data.clutch_index != null) && (
-          <Card title="Current Form" icon="📈" style={cardStyle}>
+          <Card title="Current Form" style={cardStyle}>
             <div className="space-y-0">
               {data.ewma_xgf60 != null && (
                 <StatRow
@@ -6215,9 +6426,14 @@ export default function PlayerProfilePage() {
           </Card>
         )}
 
+        {/* Section header — context block */}
+        {!isGoalie && telemetryTab === "advanced" && (data.playoff_delta != null || data.former_team_boost != null || data.bayesian_rating != null) && (
+          <SectionHeader title="Context" subtitle="playoffs · transitions · priors" teamColor={teamColor} />
+        )}
+
         {/* Playoff & Context */}
         {!isGoalie && telemetryTab === "advanced" && (data.playoff_delta != null || data.former_team_boost != null || data.bayesian_rating != null) && (
-          <Card title="Advanced Context" icon="🔬" style={cardStyle}>
+          <Card title="Advanced Context" style={cardStyle}>
             <div className="space-y-0">
               {data.bayesian_rating != null && (
                 <StatRow
@@ -6269,6 +6485,14 @@ export default function PlayerProfilePage() {
           </Card>
         )}
 
+        {/* Section header — readiness block (fatigue + confidence) */}
+        {!isGoalie && telemetryTab === "fatigue" && (phase3?.fatigue_index != null || phase3?.confidence_index != null) && (
+          <SectionHeader title="Readiness" subtitle="fatigue · confidence · momentum" teamColor={teamColor} />
+        )}
+        {isGoalie && telemetryTab === "fatigue" && phase3?.goalie_fi != null && (
+          <SectionHeader title="Readiness" subtitle="goalie fatigue · workload" teamColor={teamColor} />
+        )}
+
         {/* Phase 3 — Fatigue & Schedule */}
         {!isGoalie && telemetryTab === "fatigue" && phase3 && phase3.fatigue_index != null && (() => {
           const fi    = phase3.fatigue_index ?? 0;
@@ -6280,7 +6504,7 @@ export default function PlayerProfilePage() {
           const monthAbbr: Record<number,string> = { 1:"Jan",2:"Feb",3:"Mar",4:"Apr",5:"May",6:"Jun",
                                                      7:"Jul",8:"Aug",9:"Sep",10:"Oct",11:"Nov",12:"Dec" };
           return (
-            <Card title="Fatigue & Schedule" icon="😮‍💨" style={cardStyle}>
+            <Card title="Fatigue & Schedule" style={cardStyle}>
               <div className="space-y-0">
                 <StatRow
                   label="Fatigue Index"
@@ -6428,7 +6652,7 @@ export default function PlayerProfilePage() {
                 .slice(0, 12)
             : [];
           return (
-            <Card title="Confidence (Phase 17)" icon="📈" style={cardStyle}>
+            <Card title="Confidence (Phase 17)" style={cardStyle}>
               <div className="space-y-0">
                 <StatRow
                   label="Confidence Index"
@@ -6560,7 +6784,7 @@ export default function PlayerProfilePage() {
                               : "Low";
           const svPct    = (svDelta * 100).toFixed(2);
           return (
-            <Card title="Fatigue & Schedule" icon="🥅" style={cardStyle}>
+            <Card title="Fatigue & Schedule" style={cardStyle}>
               <div className="space-y-0">
                 <StatRow
                   label="Goalie Fatigue Index"
@@ -6619,7 +6843,7 @@ export default function PlayerProfilePage() {
         {/* Behavioral NN + Skating */}
         {!isGoalie && telemetryTab === "neural" && (
           (data.nn_carry_in_pct != null || data.skating_avg_speed_kmh != null) && (
-          <Card title="Play Style (Neural Network)" icon="🧠" style={cardStyle}>
+          <Card title="Play Style (Neural Network)" style={cardStyle}>
             {playStyle && (
               <p className="text-[11px] text-white/50 mb-4 italic">{playStyle}</p>
             )}
@@ -6680,7 +6904,7 @@ export default function PlayerProfilePage() {
         {/* Goalie Performance Snapshot — above Goalie Profile */}
         {isGoalie && telemetryTab === "neural" && (
           <div className="sm:col-span-2">
-            <Card title="Performance Snapshot" icon="📊" style={cardStyle}>
+            <Card title="Performance Snapshot" style={cardStyle}>
               <div className="flex flex-wrap justify-center gap-6">
                 <div className="flex flex-col items-center w-full overflow-x-auto" style={{ scrollbarWidth: "none" }}>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/30 mb-2 text-center">Goalie Radar</p>
@@ -6693,7 +6917,7 @@ export default function PlayerProfilePage() {
 
         {isGoalie && telemetryTab === "neural" && (
           <div className="sm:col-span-2">
-            <Card title="Goalie Profile" icon="🥅" style={cardStyle}>
+            <Card title="Goalie Profile" style={cardStyle}>
               <div className="space-y-0">
                 {data.gsax != null && (
                   <StatRow
@@ -6810,7 +7034,7 @@ export default function PlayerProfilePage() {
         {/* Line Pairs (chemistry) */}
         {!isGoalie && telemetryTab === "games" && data.line_pairs && data.line_pairs.length > 0 && (
           <div className="sm:col-span-2">
-            <Card title="Best Linemates" icon="🤝" style={cardStyle}>
+            <Card title="Best Linemates" style={cardStyle}>
               <p className="text-[10px] text-white/30 mb-3">
                 Partners this player generates above-average scoring chances with — based on shared ice time and xGF%.
               </p>
