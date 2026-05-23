@@ -3884,6 +3884,201 @@ function PredictedPlay({
   // but each row carries its own delta-vs-avg chip.
   const top3 = inZoneActions.slice(0, 3);
 
+  // ── PATTERN LIBRARY ────────────────────────────────────────────────
+  // The single-action model output ("80% slot shot") is granular but
+  // doesn't tell you the *play*. A real scout names patterns: "off-wing
+  // one-timer," "crash-and-tip," "D-to-D one-timer setup." Each pattern
+  // here is a composite play built from existing data (action probs +
+  // box-score + handedness + position) — no new model, no hallucination.
+  //
+  // Scoring: each pattern declares 3-5 weighted requirements over the
+  // input vector. Pattern score = sum of weighted, clamped requirements.
+  // The AI picks the top-scoring pattern that clears the 0.55 threshold,
+  // and (optionally) a secondary at 0.50. Position filter ensures D
+  // patterns can't fire on forwards and vice versa.
+  //
+  // When a pattern fires, the rink renders the pattern's segments
+  // (multi-leg composite) instead of the single-action arrow; AI READ
+  // leads with the pattern name; SEQ chip carries the pattern label.
+  // When nothing clears threshold the existing single-action UX is the
+  // fallback (so we never overstate confidence on a flat probability mix).
+  type PatternCtx = {
+    isD: boolean;
+    dSide: "L" | "R";
+    shoots: "L" | "R" | null;
+    carry: number; dump: number;
+    slot: number; perim: number; drive: number;
+    battle: number; hold: number;
+    pass: number;       // 0-1 synthesised passTendency
+    deltaSlot: number | null;
+    deltaPerim: number | null;
+    deltaDrive: number | null;
+    deltaBattle: number | null;
+    deltaHold: number | null;
+    finishing: number;  // -10..10
+    hits60: number | null;
+    netFront: number | null; // 0-100
+  };
+  type Pattern = {
+    id: string;
+    label: string;       // human name
+    blurb: string;       // 1-line description for AI READ
+    posFilter: "F" | "D" | "ANY";
+    score: (c: PatternCtx) => number;
+  };
+  // Helper — clamp + scale a single input to a 0..1 contribution
+  const norm = (v: number, lo: number, hi: number) =>
+    Math.max(0, Math.min(1, (v - lo) / (hi - lo)));
+  // Off-wing test: the shooting hand is OPPOSITE the wing (R-shot on LW =
+  // off-wing). Lets us spot one-timer threats vs. cross-grain entries.
+  const offWingForward = (c: PatternCtx) => {
+    if (c.isD) return false;
+    if (!c.shoots) return false;
+    if (pos === "L" || pos === "LW") return c.shoots === "R";
+    if (pos === "R" || pos === "RW") return c.shoots === "L";
+    return false;  // C — no off-wing concept
+  };
+  const PATTERNS: Pattern[] = [
+    // ── FORWARD PATTERNS ─────────────────────────────────────────────
+    {
+      id: "controlled-slot-feed",
+      label: "Controlled Slot Feed",
+      blurb: "carries the puck in, then slides a seam pass through the slot for a one-touch finish",
+      posFilter: "F",
+      score: (c) => 0.55 * norm(c.carry, 30, 70) + 0.35 * c.pass + 0.10 * norm(c.slot, 8, 22),
+    },
+    {
+      id: "off-wing-one-timer",
+      label: "Off-Wing One-Timer",
+      blurb: "swings to the off-wing dot for a cross-grain one-timer from the half-wall",
+      posFilter: "F",
+      score: (c) => (offWingForward(c) ? 0.45 : 0) + 0.40 * norm(c.perim, 18, 32)
+                  + 0.15 * norm((c.deltaPerim ?? 0), 0, 8),
+    },
+    {
+      id: "crash-and-tip",
+      label: "Crash-and-Tip",
+      blurb: "drives the lane and crashes the crease for a deflection or rebound",
+      posFilter: "F",
+      score: (c) => 0.50 * norm(c.drive, 6, 20) + 0.30 * norm(c.netFront ?? 0, 25, 60)
+                  + 0.20 * norm((c.deltaDrive ?? 0), 0, 6),
+    },
+    {
+      id: "cycle-power",
+      label: "Cycle Power Move",
+      blurb: "wins the wall battle then powers off the half-board for a quick shot",
+      posFilter: "F",
+      score: (c) => 0.50 * norm(c.battle, 12, 24) + 0.30 * norm(c.hits60 ?? 0, 1.5, 5)
+                  + 0.20 * norm((c.deltaBattle ?? 0), 0, 6),
+    },
+    {
+      id: "stretch-entry",
+      label: "Stretch Carry Entry",
+      blurb: "skates the puck through the neutral zone with speed and beats the gap one-on-one",
+      posFilter: "F",
+      score: (c) => 0.65 * norm(c.carry, 35, 75) + 0.20 * (1 - norm(c.battle, 12, 22))
+                  + 0.15 * (1 - norm(c.dump, 25, 55)),
+    },
+    {
+      id: "trailing-backside",
+      label: "Trailing Backside Setup",
+      blurb: "trails the play as F3 and slides a pass to the backside for a one-time chance",
+      posFilter: "F",
+      score: (c) => 0.55 * c.pass + 0.25 * norm(c.hold, 6, 14)
+                  + 0.20 * (1 - norm(c.slot + c.drive, 12, 30)),
+    },
+    {
+      id: "dump-and-hunt",
+      label: "Dump-and-Hunt",
+      blurb: "chips it in and forechecks the corner to retrieve possession",
+      posFilter: "F",
+      score: (c) => 0.55 * norm(c.dump, 30, 65) + 0.30 * norm(c.battle, 14, 24)
+                  + 0.15 * norm(c.hits60 ?? 0, 2, 6),
+    },
+    {
+      id: "drop-pass-trail",
+      label: "Drop-Pass Drag",
+      blurb: "carries to the blue line then drops it back for a trailing teammate with a clear lane",
+      posFilter: "F",
+      score: (c) => 0.45 * norm(c.carry, 30, 60) + 0.40 * c.pass + 0.15 * norm(c.hold, 6, 14),
+    },
+    // ── DEFENSE PATTERNS ─────────────────────────────────────────────
+    {
+      id: "point-snap-tip",
+      label: "Point Snap + Tip",
+      blurb: "snaps a low-angle wrister from the point looking for a deflection at the net-front",
+      posFilter: "D",
+      score: (c) => 0.45 * norm(c.perim, 22, 36) + 0.30 * norm((c.deltaPerim ?? 0), 0, 8)
+                  + 0.25 * norm(c.drive, 4, 10),
+    },
+    {
+      id: "d-to-d-one-timer",
+      label: "D-to-D One-Timer Setup",
+      blurb: "walks the line and feeds the off-side D for a one-time blast from the opposite point",
+      posFilter: "D",
+      score: (c) => 0.50 * norm(c.hold, 8, 16) + 0.35 * c.pass + 0.15 * norm(c.perim, 20, 30),
+    },
+    {
+      id: "activate-to-slot",
+      label: "Activate to Slot",
+      blurb: "leaks down from the point into the high slot for a walk-in wrist shot",
+      posFilter: "D",
+      score: (c) => 0.55 * norm(c.slot, 4, 12) + 0.30 * norm((c.deltaSlot ?? 0), 0, 5)
+                  + 0.15 * norm(c.drive, 4, 10),
+    },
+    {
+      id: "quick-up-stretch",
+      label: "Quick-Up Stretch Pass",
+      blurb: "first-pass D — rims the puck up to a streaking forward instead of carrying it himself",
+      posFilter: "D",
+      score: (c) => 0.55 * c.pass + 0.25 * (1 - norm(c.drive, 4, 10))
+                  + 0.20 * (1 - norm(c.battle, 12, 22)),
+    },
+    {
+      id: "walk-down-boards",
+      label: "Walk-Down Boards",
+      blurb: "activates down the strong-side wall, looking for a low-to-high shot or seam pass",
+      posFilter: "D",
+      score: (c) => 0.45 * norm(c.battle, 14, 24) + 0.35 * norm((c.deltaBattle ?? 0), 0, 5)
+                  + 0.20 * norm(c.hold, 6, 14),
+    },
+  ];
+
+  // Build the pattern context once. Action % fields are already 0-100;
+  // pass is 0-1. Deltas come from leagueAvg lookups computed above.
+  const patternCtx: PatternCtx = {
+    isD,
+    dSide,
+    shoots: ((shoots ?? "").toUpperCase() === "L" ? "L" : (shoots ?? "").toUpperCase() === "R" ? "R" : null),
+    carry:  carry   ?? 0,
+    dump:   dump    ?? 0,
+    slot:   slot    ?? 0,
+    perim:  perim   ?? 0,
+    drive:  drive   ?? 0,
+    battle: battleC ?? 0,
+    hold:   holdC   ?? 0,
+    pass:   passTendency,
+    deltaSlot:   avgFor("slot")   != null && slot   != null ? slot   - (avgFor("slot")   ?? 0) : null,
+    deltaPerim:  avgFor("perim")  != null && perim  != null ? perim  - (avgFor("perim")  ?? 0) : null,
+    deltaDrive:  avgFor("drive")  != null && drive  != null ? drive  - (avgFor("drive")  ?? 0) : null,
+    deltaBattle: avgFor("battle") != null && battleC!= null ? battleC- (avgFor("battle") ?? 0) : null,
+    deltaHold:   avgFor("hold")   != null && holdC  != null ? holdC  - (avgFor("hold")   ?? 0) : null,
+    finishing: finishing ?? 0,
+    hits60: null,       // not threaded through here (yet)
+    netFront: null,     // not threaded through here (yet)
+  };
+  // Score every position-eligible pattern → pick the top two clearing
+  // the threshold. The 0.55 floor keeps us from forcing a pattern on a
+  // flat probability vector.
+  const scoredPatterns = PATTERNS
+    .filter(p => p.posFilter === "ANY"
+              || (p.posFilter === "D" && isD)
+              || (p.posFilter === "F" && !isD))
+    .map(p => ({ ...p, s: p.score(patternCtx) }))
+    .sort((a, b) => b.s - a.s);
+  const primaryPattern   = scoredPatterns[0] && scoredPatterns[0].s >= 0.55 ? scoredPatterns[0] : null;
+  const secondaryPattern = scoredPatterns[1] && scoredPatterns[1].s >= 0.50 ? scoredPatterns[1] : null;
+
   // ── AI READ — synthesises the model outputs + context into a 2-line
   // scouting forecast. This is rule-based "AI" by design: per Principle 2
   // we want interpretable, auditable text (every clause maps to one of the
@@ -3933,7 +4128,9 @@ function PredictedPlay({
       return { verb: "go", noun: "to the net" };
     };
 
-    // ── Open sentence — position-aware preamble + primary action
+    // ── Open sentence — when the pattern engine recognised a play, lead
+    // with the pattern name (more specific than "fires from the perim").
+    // Otherwise fall back to the position+verb generic phrasing.
     const role = playerType
       ? playerType
       : isD ? "Defenseman"
@@ -3941,21 +4138,30 @@ function PredictedPlay({
       : pos === "L" || pos === "LW" ? "Left winger"
       : pos === "R" || pos === "RW" ? "Right winger"
       : "Skater";
-    const v1 = verbFor(top.id);
-    const deltaPhrase = topDelta != null && Math.abs(topDelta) >= 2
-      ? ` (${topDelta > 0 ? "+" : ""}${topDelta.toFixed(1)}pp ${topDelta > 0 ? "above" : "below"} ${isD ? "D" : "F"} avg)`
-      : "";
-    let sentence1 = `${role} most likely to ${v1.verb} ${v1.noun}${deltaPhrase}.`;
-
-    // Entry phrase for forwards
-    if (!isD && topEntry && entryActions.length > 0) {
-      const entryVerb = topEntry.id === "carry" ? "Prefers controlled carry-ins" : "Tends to dump-and-chase";
-      sentence1 = `${entryVerb}. ` + sentence1;
+    let sentence1: string;
+    if (primaryPattern) {
+      const matchPhrase = primaryPattern.s >= 0.75 ? "runs the" : "leans into the";
+      sentence1 = `${role} ${matchPhrase} ${primaryPattern.label} — ${primaryPattern.blurb}.`;
+    } else {
+      const v1 = verbFor(top.id);
+      const deltaPhrase = topDelta != null && Math.abs(topDelta) >= 2
+        ? ` (${topDelta > 0 ? "+" : ""}${topDelta.toFixed(1)}pp ${topDelta > 0 ? "above" : "below"} ${isD ? "D" : "F"} avg)`
+        : "";
+      sentence1 = `${role} most likely to ${v1.verb} ${v1.noun}${deltaPhrase}.`;
+      // Entry phrase for forwards — only when no pattern, otherwise the
+      // pattern blurb covers entry style implicitly.
+      if (!isD && topEntry && entryActions.length > 0) {
+        const entryVerb = topEntry.id === "carry" ? "Prefers controlled carry-ins" : "Tends to dump-and-chase";
+        sentence1 = `${entryVerb}. ` + sentence1;
+      }
     }
 
-    // ── Modifier sentence — context (form, fatigue, passing, secondary action)
+    // ── Modifier sentence — context (form, fatigue, passing, secondary
+    // pattern OR secondary action when no secondary pattern fired)
     const mods: string[] = [];
-    if (second != null && secondDelta != null && secondDelta > 2.5) {
+    if (secondaryPattern) {
+      mods.push(`also flashes ${secondaryPattern.label.toLowerCase()}`);
+    } else if (second != null && secondDelta != null && secondDelta > 2.5) {
       const v2 = verbFor(second.id);
       mods.push(`secondary read is to ${v2.verb} ${v2.noun}`);
     } else if (second != null) {
@@ -3975,7 +4181,13 @@ function PredictedPlay({
       ? mods.slice(0, 3).join(" · ").replace(/^\w/, (c) => c.toUpperCase()) + "."
       : null;
 
-    return { sentence1, sentence2, confidence, topDelta };
+    // Pattern match boosts confidence — when a pattern clears the
+    // threshold the AI isn't guessing from raw probs anymore.
+    if (primaryPattern) {
+      confidence = Math.max(confidence, primaryPattern.s);
+      if (secondaryPattern) confidence = Math.min(0.97, confidence + 0.05);
+    }
+    return { sentence1, sentence2, confidence, topDelta, patternLabel: primaryPattern?.label ?? null };
   })();
 
   // ── SVG geometry ──────────────────────────────────────────────────────
@@ -4233,8 +4445,161 @@ function PredictedPlay({
           );
         })()}
 
-        {/* Primary entry path — action-coloured, kind-styled */}
-        {topEntry && (() => {
+        {/* ── PATTERN OVERLAY ──────────────────────────────────────────
+            When the pattern engine recognised a play, render its composite
+            segments as the primary visual: multi-leg path with distinct
+            colours per leg (skate, pass, shot) + waypoint markers. Each
+            leg uses the same arrowhead vocabulary as the single-action
+            paths so the eye reads them as the same instrument. Mounts
+            with a draw-on animation. */}
+        {primaryPattern && (() => {
+          // Build segments per pattern id. Each segment is
+          // { d, stroke, dash, marker, kind } in viewBox coords.
+          type Seg = { d: string; color: string; dash?: string; markerId: string; w?: number; dashAnim?: number };
+          const SKATE  = ACTION_THEME["carry"].color;
+          const SHOT_R = ACTION_THEME["slot"].color;
+          const SHOT_Y = ACTION_THEME["perim"].color;
+          const PASS_C = ACTION_THEME["pass"].color;
+          const DRIVE  = ACTION_THEME["drive"].color;
+          const HOLD_C = ACTION_THEME["hold"].color;
+          const BATTLE = ACTION_THEME["battle"].color;
+          // Side helpers — primary attack side for forwards. Off-wing
+          // shooters cut the opposite way.
+          const offW   = !isD && shoots && ((pos === "L" || pos === "LW") ? shoots.toUpperCase() === "R" :
+                                            (pos === "R" || pos === "RW") ? shoots.toUpperCase() === "L" : false);
+          const segs: Seg[] = (() => {
+            switch (primaryPattern.id) {
+              case "controlled-slot-feed":
+                return [
+                  { d: `M 140 -5 Q 110 30 130 60 T 140 90`, color: SKATE, markerId: "ppArrow-carry", w: 2.4 },
+                  { d: `M 140 90 Q 110 110 ${SLOT.cx - 14} ${SLOT.cy + 4}`, color: PASS_C, dash: "2 2.5", markerId: "ppArrow-pass", w: 2.0 },
+                  { d: `M ${SLOT.cx - 14} ${SLOT.cy + 4} L ${NET.cx + 2} ${NET.y - 4}`, color: SHOT_R, markerId: "ppArrow-slot", w: 2.4 },
+                ];
+              case "off-wing-one-timer": {
+                const side = (pos === "L" || pos === "LW") ? "R" : "L";
+                const dot  = side === "L" ? PERIM_L : PERIM_R;
+                return [
+                  { d: `M 140 -5 Q ${dot.cx} 30 ${dot.cx} ${dot.cy - 8}`, color: SKATE, markerId: "ppArrow-carry", w: 2.4 },
+                  { d: `M ${dot.cx} ${dot.cy - 8} L ${NET.cx} ${NET.y - 4}`, color: SHOT_Y, markerId: "ppArrow-perim", w: 2.4 },
+                ];
+              }
+              case "crash-and-tip":
+                return [
+                  { d: `M 140 -5 Q 160 40 160 80`, color: SKATE, markerId: "ppArrow-carry", w: 2.0 },
+                  { d: `M 160 80 Q 150 110 ${NET.cx + 2} ${NET.y - 6}`, color: DRIVE, markerId: "ppArrow-drive", w: 2.6 },
+                  { d: `M 60 30 Q 100 100 ${NET.cx - 4} ${NET.y - 8}`, color: SHOT_Y, dash: "1 3", markerId: "ppArrow-perim", w: 1.6 },
+                ];
+              case "cycle-power": {
+                const corn = CORNER_R;
+                return [
+                  { d: `M 140 -5 L 200 40 Q 240 110 ${corn.cx} ${corn.cy - 6}`, color: BATTLE, dash: "4 3", markerId: "ppArrow-battle", w: 2.2 },
+                  { d: `M ${corn.cx} ${corn.cy - 6} Q 200 130 ${SLOT.cx + 8} ${SLOT.cy}`, color: SKATE, markerId: "ppArrow-carry", w: 2.0 },
+                  { d: `M ${SLOT.cx + 8} ${SLOT.cy} L ${NET.cx} ${NET.y - 4}`, color: SHOT_R, markerId: "ppArrow-slot", w: 2.4 },
+                ];
+              }
+              case "stretch-entry":
+                return [
+                  { d: `M 140 -8 Q 120 25 140 55 Q 160 85 140 95`, color: SKATE, markerId: "ppArrow-carry", w: 2.8 },
+                  { d: `M 140 95 L ${NET.cx} ${NET.y - 4}`, color: SHOT_R, dash: "1 4", markerId: "ppArrow-slot", w: 1.6 },
+                ];
+              case "trailing-backside": {
+                const dot  = PERIM_L;
+                return [
+                  { d: `M 140 -5 Q 180 40 ${PERIM_R.cx} ${PERIM_R.cy}`, color: SKATE, dash: "1 3", markerId: "ppArrow-carry", w: 1.4 },
+                  { d: `M ${PERIM_R.cx} ${PERIM_R.cy} Q 160 80 ${dot.cx + 6} ${dot.cy + 6}`, color: PASS_C, dash: "2 2.5", markerId: "ppArrow-pass", w: 2.4 },
+                  { d: `M ${dot.cx + 6} ${dot.cy + 6} L ${NET.cx - 4} ${NET.y - 4}`, color: SHOT_Y, markerId: "ppArrow-perim", w: 2.0 },
+                ];
+              }
+              case "dump-and-hunt": {
+                const corn = CORNER_R;
+                return [
+                  { d: `M 140 -5 L 145 40 L ${corn.cx} ${corn.cy - 6}`, color: ACTION_THEME["dump"].color, dash: "5 4", markerId: "ppArrow-dump", w: 2.4 },
+                  { d: `M 140 -5 Q 200 80 ${corn.cx + 2} ${corn.cy - 8}`, color: BATTLE, dash: "4 3", markerId: "ppArrow-battle", w: 2.2 },
+                ];
+              }
+              case "drop-pass-trail":
+                return [
+                  { d: `M 140 -5 Q 110 25 140 55`, color: SKATE, markerId: "ppArrow-carry", w: 2.4 },
+                  { d: `M 140 55 L 120 30`, color: PASS_C, dash: "2 2.5", markerId: "ppArrow-pass", w: 2.2 },
+                  { d: `M 120 30 Q 90 70 ${PERIM_L.cx} ${PERIM_L.cy}`, color: SKATE, dash: "1 3", markerId: "ppArrow-carry", w: 1.6 },
+                  { d: `M ${PERIM_L.cx} ${PERIM_L.cy} L ${NET.cx - 4} ${NET.y - 4}`, color: SHOT_Y, markerId: "ppArrow-perim", w: 2.0 },
+                ];
+
+              // ── D PATTERNS ────────────────────────────────────────
+              case "point-snap-tip":
+                return [
+                  { d: `M ${D_POINT.cx} ${D_POINT.cy + 4} L ${D_POINT.cx} ${NET.y - 6}`, color: SHOT_Y, markerId: "ppArrow-perim", w: 2.6 },
+                  { d: `M ${NET.cx} ${NET.y - 18} Q ${NET.cx - 6} ${NET.y - 10} ${NET.cx + 2} ${NET.y - 4}`, color: DRIVE, dash: "1 3", markerId: "ppArrow-drive", w: 1.8 },
+                ];
+              case "d-to-d-one-timer":
+                return [
+                  { d: `M ${D_POINT.cx} ${D_POINT.cy} Q ${(D_POINT.cx + D_OPP.cx) / 2} ${D_POINT.cy - 14} ${D_OPP.cx} ${D_OPP.cy}`, color: PASS_C, dash: "2 2.5", markerId: "ppArrow-pass", w: 2.4 },
+                  { d: `M ${D_OPP.cx} ${D_OPP.cy + 4} L ${NET.cx} ${NET.y - 6}`, color: SHOT_Y, markerId: "ppArrow-perim", w: 2.4 },
+                ];
+              case "activate-to-slot":
+                return [
+                  { d: `M ${D_POINT.cx} ${D_POINT.cy + 4} Q ${(D_POINT.cx + SLOT.cx) / 2} ${(D_POINT.cy + SLOT.cy) / 2 - 4} ${SLOT.cx} ${SLOT.cy}`, color: SKATE, markerId: "ppArrow-carry", w: 2.4 },
+                  { d: `M ${SLOT.cx} ${SLOT.cy} L ${NET.cx} ${NET.y - 4}`, color: SHOT_R, markerId: "ppArrow-slot", w: 2.4 },
+                ];
+              case "quick-up-stretch":
+                return [
+                  { d: `M ${D_POINT.cx} ${D_POINT.cy + 4} L ${D_POINT.cx} 60`, color: SKATE, dash: "1 3", markerId: "ppArrow-carry", w: 1.4 },
+                  { d: `M ${D_POINT.cx} ${D_POINT.cy + 4} Q ${(D_POINT.cx + SLOT.cx) / 2} ${(D_POINT.cy + SLOT.cy) / 2 + 6} ${SLOT.cx + (dSide === "L" ? 18 : -18)} ${SLOT.cy}`, color: PASS_C, dash: "2 2.5", markerId: "ppArrow-pass", w: 2.6 },
+                ];
+              case "walk-down-boards": {
+                const corn = dSide === "L" ? CORNER_L : CORNER_R;
+                return [
+                  { d: `M ${D_POINT.cx} ${D_POINT.cy + 4} Q ${(D_POINT.cx + corn.cx) / 2} ${(D_POINT.cy + corn.cy) / 2} ${corn.cx + (dSide === "L" ? 6 : -6)} ${corn.cy - 6}`, color: BATTLE, dash: "4 3", markerId: "ppArrow-battle", w: 2.2 },
+                  { d: `M ${corn.cx + (dSide === "L" ? 6 : -6)} ${corn.cy - 6} L ${NET.cx} ${NET.y - 4}`, color: SHOT_Y, markerId: "ppArrow-perim", w: 2.0 },
+                ];
+              }
+              default: return [];
+            }
+          })();
+          if (segs.length === 0) return null;
+          return (
+            <g>
+              {segs.map((s, i) => (
+                <path key={`pat-${i}`}
+                  d={s.d}
+                  fill="none"
+                  stroke={s.color}
+                  strokeOpacity={0.95}
+                  strokeWidth={s.w ?? 2.2}
+                  strokeLinecap="round"
+                  strokeDasharray={s.dash}
+                  markerEnd={`url(#${s.markerId})`}
+                  style={{
+                    filter: `drop-shadow(0 0 6px ${s.color}aa)`,
+                    strokeDasharray: s.dash ?? "260",
+                    strokeDashoffset: s.dash ? 0 : 260,
+                    animation: s.dash ? undefined : `ppDraw 950ms ease-out ${200 + i * 250}ms forwards`,
+                  }} />
+              ))}
+              {/* Pattern callout — top-right inside the rink so the eye
+                  binds the name to the lines drawn here. */}
+              <foreignObject x={VB.w - 110} y="2" width="106" height="22">
+                {/* @ts-expect-error xmlns required on foreignObject root */}
+                <div xmlns="http://www.w3.org/1999/xhtml" className="hud-mono text-[8px] uppercase tracking-[0.16em] px-1.5 py-0.5 rounded border text-right"
+                  style={{
+                    color: themeColor,
+                    borderColor: `${themeColor}88`,
+                    background: "rgba(0,0,0,0.78)",
+                    boxShadow: `0 0 6px ${themeColor}55`,
+                    backdropFilter: "blur(2px)",
+                    fontFamily: "var(--font-mono)",
+                  }}>
+                  ▸ {primaryPattern.label}
+                </div>
+              </foreignObject>
+            </g>
+          );
+        })()}
+
+        {/* Primary entry path — action-coloured, kind-styled. When a
+            pattern fired we suppress this since the pattern overlay
+            already carries the entry leg. */}
+        {!primaryPattern && topEntry && (() => {
           const t = ACTION_THEME[topEntry.id];
           if (!t) return null;
           return (
@@ -4255,8 +4620,9 @@ function PredictedPlay({
               }} />
           );
         })()}
-        {/* Primary in-zone path — same treatment */}
-        {topInZone && (() => {
+        {/* Primary in-zone path — same treatment. Suppressed when a
+            pattern fired (the pattern overlay already drew the play). */}
+        {!primaryPattern && topInZone && (() => {
           const t = ACTION_THEME[topInZone.id];
           if (!t) return null;
           return (
