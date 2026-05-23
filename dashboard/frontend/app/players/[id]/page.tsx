@@ -5868,9 +5868,12 @@ export default function PlayerProfilePage() {
                 ▌ TELEMETRY
               </span>
             </div>
-            {/* Scroll-rail wrapper — relative so chevron buttons + edge
-                fades can absolute-position over the nav. */}
-            <div className="relative">
+            {/* Scroll-rail wrapper — relative so chevron buttons can
+                absolute-position over the nav. w-full + overflow-hidden
+                constrain this wrapper to the parent panel's width so
+                right-0 actually anchors to the viewport edge, not the
+                nav's natural scrollWidth (which is way wider). */}
+            <div className="relative w-full overflow-hidden">
               {/* Mobile-only left/right scroll buttons. JS-driven so they
                   actually scroll the nav by 140px per tap. Hidden on lg+. */}
               <button
