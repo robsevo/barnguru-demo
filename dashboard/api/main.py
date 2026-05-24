@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import sys
 from datetime import date as _date, datetime, timedelta, timezone
@@ -4703,6 +4704,902 @@ async def phase3_player(
 
 
 # ---------------------------------------------------------------------------
+# Phase 4 — Coaching Tendency Models
+# ---------------------------------------------------------------------------
+
+_PHASE4_FEATURES: list[dict] = [
+    {"id": "line_deployment",  "ref": "4.1", "subdir": "line_deployment", "glob": "line_deployment_*.parquet",
+     "name": "Line Deployment Forecaster",   "desc": "Predicted F lines + D pairs + minutes allocation per coach", "feeds": "Lineup Forecaster (6.1) · Rust line-change (5.10)"},
+    {"id": "line_matching",    "ref": "4.2", "subdir": "line_matching",   "glob": "line_matching_*.parquet",
+     "name": "Line-Matching Model",          "desc": "Defensive counter-deployment vs. opponent top lines; last-change Δ", "feeds": "Rust line-change (5.10)"},
+    {"id": "st_deployment",    "ref": "4.3", "subdir": "st_deployment",   "glob": "st_deployment_*.parquet",
+     "name": "Special Teams Deployment",     "desc": "PP1/PP2 + PK1/PK2 personnel choices and first-unit share", "feeds": "Rust PP/PK sim (5.8, 5.9)"},
+    {"id": "timeout_usage",    "ref": "4.4", "subdir": "timeout_usage",   "glob": "timeout_usage_*.parquet",
+     "name": "Timeout Usage Model",          "desc": "P(timeout) by period × score state × time remaining per coach", "feeds": "Coach decision net (4.17)"},
+    {"id": "goalie_pull",      "ref": "4.5", "subdir": "goalie_pull",     "glob": "goalie_pull_*.parquet",
+     "name": "Goalie Pull Timing",           "desc": "P(pull goalie) at each (score deficit, time remaining) per coach", "feeds": "Coach decision net (4.17) · Rust pull sim (5.12)"},
+    {"id": "penalty_tendency", "ref": "4.6", "subdir": "penalty_tendency","glob": "penalty_tendency_*.parquet",
+     "name": "Penalty Tendency",             "desc": "Per-referee-crew foul call rate + PP opps/game baseline", "feeds": "Rust penalty model (5.7)"},
+    {"id": "coach_profiles",   "ref": "4.7", "subdir": "coach_profiles",  "glob": "coach_profiles_*.parquet",
+     "name": "Coach Profile Database",       "desc": "Career-with-current-team tendencies for every NHL head coach", "feeds": "Coach decision net (4.17) · /coaches/{name}"},
+    {"id": "goalie_coach_curve","ref": "4.8","subdir": "goalie_coach_curve","glob": "goalie_coach_curve_*.parquet",
+     "name": "Goalie Coach Model",           "desc": "Team save% trajectory + mid-season change-point detection", "feeds": "Goalie Bayesian update (2.10) · regime detector (2.14)"},
+    {"id": "pp_coordinator",   "ref": "4.9", "subdir": "pp_coordinator",  "glob": "pp_coordinator_*.parquet",
+     "name": "PP Coordinator Signature",     "desc": "PP system: xG/60, shot quality, carry%, PP1 QB usage", "feeds": "Rust PP simulator (5.8) · /coaches/{name}"},
+    {"id": "pk_coordinator",   "ref": "4.10","subdir": "pk_coordinator",  "glob": "pk_coordinator_*.parquet",
+     "name": "PK Coordinator Signature",     "desc": "PK system: SV%, xGA/60, SH forecheck pressure", "feeds": "Rust PK simulator (5.9) · /coaches/{name}"},
+    {"id": "coaching_style",   "ref": "4.11","subdir": "coaching_style",  "glob": "coaching_style_*.parquet",
+     "name": "Coaching Style Vector",        "desc": "8-dim system vector per team (forecheck, DZ, pace, …)", "feeds": "Roster fit (4.12) · Coach decision net (4.17)"},
+    {"id": "roster_fit",       "ref": "4.12","subdir": "roster_fit",      "glob": "roster_fit_*.parquet",
+     "name": "Roster Fit Score",             "desc": "Coach style × roster archetype composition (Roy / Dobson mismatch)", "feeds": "Team efficiency modifier in game setup (7.1)"},
+    {"id": "staff_changes",    "ref": "4.13","subdir": "staff_changes",   "glob": "staff_changes_*.parquet",
+     "name": "Staff Change Detector",        "desc": "Mid-season HC/coordinator/goalie-coach changes → regime pipeline", "feeds": "Regime change (2.14) · Bayesian update acceleration"},
+    {"id": "fo_regime_changes","ref": "4.14","subdir": "fo_regime_changes","glob": "fo_regime_changes_*.parquet",
+     "name": "FO Regime Change Detector",    "desc": "GM/AGM/Pres Hockey Ops changes → slow-decay regime pipeline", "feeds": "Regime change (2.14, 15.4) · team efficiency"},
+    {"id": "buyer_seller",     "ref": "4.15","subdir": "buyer_seller",    "glob": "buyer_seller_*.parquet",
+     "name": "Buyer/Seller Classifier",      "desc": "Per-team buyer|seller|neutral from standings + season progress", "feeds": "Lineup projector (6.1) · seller motivation (4.16) · roster disruption (2.19)"},
+    {"id": "seller_motivation","ref": "4.16","subdir": "seller_motivation","glob": "seller_motivation_*.parquet",
+     "name": "Seller Motivation State",      "desc": "Post-deadline efficiency drag for confirmed sellers", "feeds": "Game setup builder (7.1)"},
+    {"id": "coach_decision_net","ref": "4.17","subdir": "coach_decision_net","glob": "coach_decision_net_*.parquet",
+     "name": "Coach Decision Network",       "desc": "Unified per-coach decision profile from Phase 4 aggregates", "feeds": "Rust sim coach decisions (5.10, 5.12)"},
+    {"id": "gm_fingerprint",   "ref": "4.18","subdir": "gm_fingerprint",  "glob": "gm_fingerprint_*.parquet",
+     "name": "GM Behavioral Fingerprint",    "desc": "Per-GM action archetype + deadline aggression", "feeds": "Buyer/seller (4.15) · roster disruption (2.19)"},
+    {"id": "venue_atmosphere", "ref": "4.19","subdir": "venue_atmosphere", "glob": "venue_atmosphere_*.parquet",
+     "name": "Venue Atmosphere / Scare",     "desc": "Per-arena scare factor: visiting SV%/FOW%/PP/xGF deltas", "feeds": "Game setup builder (7.1)"},
+    {"id": "playoff_elimination","ref":"4.20","subdir":"playoff_elimination","glob":"playoff_elimination_*.parquet",
+     "name": "Playoff Elimination Fatigue",  "desc": "Team motivational regression when playoff_prob < 25%", "feeds": "Game setup builder (7.1) · stacks with FI + seller (4.16)"},
+    {"id": "dow_signature",    "ref": "4.21","subdir": "dow_signature",    "glob": "dow_signature_*.parquet",
+     "name": "DOW Signature + Broadcast",    "desc": "Per-player day-of-week z-score + rivalry/broadcast context", "feeds": "Rust engine shooting modifier · game setup (7.1)"},
+]
+
+
+def _phase4_latest(subdir: str, glob: str) -> tuple[Path | None, datetime | None]:
+    """Return (path, mtime) of the most-recently modified Phase 4 parquet."""
+    d = _GRETZKY_DATA_DIR / subdir
+    if not d.exists():
+        return None, None
+    paths = sorted(d.glob(glob))
+    if not paths:
+        return None, None
+    latest = max(paths, key=lambda p: p.stat().st_mtime)
+    return latest, datetime.fromtimestamp(latest.stat().st_mtime, tz=timezone.utc)
+
+
+@app.get("/phase4/modules")
+async def phase4_modules() -> dict:
+    """Per-feature build + data status for the Phase 4 coaching models."""
+    import polars as pl
+
+    out: list[dict] = []
+    for f in _PHASE4_FEATURES:
+        path, mtime = _phase4_latest(f["subdir"], f["glob"])
+        if path is None:
+            out.append({
+                "id":            f["id"],
+                "ref":           f["ref"],
+                "name":          f["name"],
+                "desc":          f["desc"],
+                "feeds":         f["feeds"],
+                "status":        "not_run",
+                "record_count":  0,
+                "last_computed": None,
+                "parquet":       None,
+            })
+            continue
+        try:
+            rc = pl.scan_parquet(path).select(pl.len()).collect().item()
+        except Exception:
+            rc = 0
+        out.append({
+            "id":            f["id"],
+            "ref":           f["ref"],
+            "name":          f["name"],
+            "desc":          f["desc"],
+            "feeds":         f["feeds"],
+            "status":        "ok",
+            "record_count":  int(rc),
+            "last_computed": mtime.date().isoformat() if mtime else None,
+            "parquet":       path.name,
+        })
+
+    built = sum(1 for m in out if m["status"] == "ok")
+    return {"modules": out, "built": built, "total": len(out)}
+
+
+@app.get("/phase4/teams")
+async def phase4_teams() -> dict:
+    """Return the list of teams with line-deployment data, sorted alphabetically."""
+    import polars as pl
+
+    path, mtime = _phase4_latest("line_deployment", "line_deployment_*.parquet")
+    if path is None:
+        return {"status": "not_run", "teams": [], "as_of": None}
+    df = pl.read_parquet(path)
+    if df.is_empty():
+        return {"status": "empty", "teams": [], "as_of": mtime.date().isoformat() if mtime else None}
+    teams = sorted(df["team"].unique().drop_nulls().to_list())
+    return {
+        "status":  "ok",
+        "teams":   teams,
+        "as_of":   mtime.date().isoformat() if mtime else None,
+        "parquet": path.name,
+    }
+
+
+@app.get("/phase4/deployment/{team}")
+async def phase4_deployment(team: str) -> dict:
+    """Return F lines + D pairs + projected minutes for a team."""
+    import polars as pl
+
+    path, mtime = _phase4_latest("line_deployment", "line_deployment_*.parquet")
+    if path is None:
+        return {"status": "not_run", "team": team, "lines": [], "as_of": None}
+
+    df = pl.read_parquet(path).filter(pl.col("team") == team.upper())
+    if df.is_empty():
+        return {"status": "empty", "team": team, "lines": [], "as_of": mtime.date().isoformat() if mtime else None}
+
+    names = _build_name_lookup()
+    rows: list[dict] = []
+    for r in df.to_dicts():
+        pids: list[int] = []
+        for k in ("player_1", "player_2", "player_3"):
+            v = r.get(k)
+            if v is not None:
+                pids.append(int(v))
+        rows.append({
+            "line_type":              r.get("line_type"),
+            "line_rank":              int(r.get("line_rank") or 0),
+            "player_ids":             pids,
+            "player_names":           [names.get(p, f"player_{p}") for p in pids],
+            "chemistry_toi_secs":     r.get("chemistry_toi_secs"),
+            "trio_toi_per_game":      r.get("trio_toi_per_game"),
+            "line_toi_per_game":      r.get("line_toi_per_game"),
+            "cohesion_pct":           r.get("cohesion_pct"),
+            "share_of_team_toi":      r.get("share_of_team_toi"),
+            "team_gp":                int(r.get("team_gp") or 0),
+        })
+    rows.sort(key=lambda r: (r["line_type"], r["line_rank"]))
+    return {
+        "status":  "ok",
+        "team":    team.upper(),
+        "lines":   rows,
+        "as_of":   mtime.date().isoformat() if mtime else None,
+        "parquet": path.name,
+    }
+
+
+@app.get("/phase4/matching/{team}")
+async def phase4_matching(team: str, line_type: str = "F", venue: str = "all") -> dict:
+    """Return matchup profile for a team — for each (own_line, opp_line, venue)
+    the weighted share averaged across opponents.
+
+    Args:
+        team:      focal team abbrev (e.g. "MTL").
+        line_type: "F" or "D".
+        venue:     "home", "away", or "all" (combines).
+    """
+    import polars as pl
+
+    path, mtime = _phase4_latest("line_matching", "line_matching_*.parquet")
+    if path is None:
+        return {"status": "not_run", "team": team, "rows": [], "as_of": None}
+
+    df = pl.read_parquet(path).filter(
+        (pl.col("team") == team.upper())
+        & (pl.col("line_type") == line_type.upper())
+    )
+    if venue in ("home", "away"):
+        df = df.filter(pl.col("venue") == venue)
+    if df.is_empty():
+        return {
+            "status": "empty", "team": team, "rows": [],
+            "as_of": mtime.date().isoformat() if mtime else None,
+        }
+
+    # Weighted-share aggregation across opponents.  Numerator = cell TOI,
+    # denominator = total TOI when opp_rank was on the ice (any own_rank).
+    # This guarantees that the four-row column at any (opp_rank, venue)
+    # sums to 1.0.
+    num = (
+        df.group_by(["own_line_rank", "opp_line_rank", "venue"])
+        .agg(pl.col("matchup_toi_secs").sum().alias("cell_toi"))
+    )
+    den = (
+        df.group_by(["opp_line_rank", "venue"])
+        .agg(pl.col("matchup_toi_secs").sum().alias("opp_rank_toi"))
+    )
+    grouped = (
+        num.join(den, on=["opp_line_rank", "venue"], how="left")
+        .with_columns(
+            (pl.col("cell_toi") / pl.col("opp_rank_toi").clip(lower_bound=1e-9))
+              .alias("weighted_share")
+        )
+        .rename({"cell_toi": "total_toi_secs"})
+        .drop("opp_rank_toi")
+        .sort(["venue", "opp_line_rank", "own_line_rank"])
+    )
+    rows = [
+        {
+            "own_line_rank":   int(r["own_line_rank"]),
+            "opp_line_rank":   int(r["opp_line_rank"]),
+            "venue":           r["venue"],
+            "weighted_share":  float(r["weighted_share"]) if r["weighted_share"] is not None else 0.0,
+            "total_toi_secs":  float(r["total_toi_secs"]) if r["total_toi_secs"] is not None else 0.0,
+        }
+        for r in grouped.to_dicts()
+    ]
+    return {
+        "status":    "ok",
+        "team":      team.upper(),
+        "line_type": line_type.upper(),
+        "venue":     venue,
+        "rows":      rows,
+        "as_of":     mtime.date().isoformat() if mtime else None,
+        "parquet":   path.name,
+    }
+
+
+@app.get("/phase4/st-deployment/{team}")
+async def phase4_st_deployment(team: str) -> dict:
+    """Return PP1/PP2/PK1/PK2 units + first-unit share for a team."""
+    import polars as pl
+
+    path, mtime = _phase4_latest("st_deployment", "st_deployment_*.parquet")
+    if path is None:
+        return {"status": "not_run", "team": team, "units": [], "as_of": None}
+
+    df = pl.read_parquet(path).filter(pl.col("team") == team.upper())
+    if df.is_empty():
+        return {
+            "status": "empty", "team": team, "units": [],
+            "as_of": mtime.date().isoformat() if mtime else None,
+        }
+
+    names = _build_name_lookup()
+    units: list[dict] = []
+    for r in df.to_dicts():
+        pids = [int(p) for p in (r.get("personnel") or [])]
+        units.append({
+            "unit_type":        r.get("unit_type"),
+            "player_ids":       pids,
+            "player_names":     [names.get(p, f"player_{p}") for p in pids],
+            "unit_toi_secs":    r.get("unit_toi_secs"),
+            "share_of_st_toi":  r.get("share_of_st_toi"),
+            "team_st_toi":      r.get("team_st_toi"),
+            "team_st_gp":       int(r.get("team_st_gp") or 0),
+        })
+
+    # Canonical PP1, PP2, PK1, PK2 order
+    order = {"PP1": 0, "PP2": 1, "PK1": 2, "PK2": 3}
+    units.sort(key=lambda u: order.get(u["unit_type"] or "", 9))
+    return {
+        "status":  "ok",
+        "team":    team.upper(),
+        "units":   units,
+        "as_of":   mtime.date().isoformat() if mtime else None,
+        "parquet": path.name,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Coach profiles — joins Phase 4 outputs per team
+# ---------------------------------------------------------------------------
+
+_COACHES_PATH = Path(__file__).resolve().parents[2] / "data" / "coaches.json"
+
+
+def _load_coaches() -> list[dict]:
+    """Load the static head-coach roster.  Returns a list of dicts with
+    at minimum keys ``team``, ``name``.  Returns ``[]`` if the file is
+    missing or malformed (with stderr warning)."""
+    if not _COACHES_PATH.exists():
+        return []
+    try:
+        with open(_COACHES_PATH, "r", encoding="utf-8") as f:
+            blob = json.load(f)
+        coaches = blob.get("coaches", [])
+        if isinstance(coaches, list):
+            return coaches
+    except Exception as e:
+        print(f"[coaches] failed to load {_COACHES_PATH}: {e}", file=sys.stderr)
+    return []
+
+
+def _coach_slug(name: str) -> str:
+    """URL-safe slug for a coach name.  Preserves apostrophes/accents in
+    the slug because the frontend uses encodeURIComponent + this lookup
+    is exact-match (case-insensitive).
+    """
+    return (name or "").strip()
+
+
+@app.get("/coaches")
+async def list_coaches() -> dict:
+    """Return all known head coaches.  Powers Cortex search + the team
+    page coach tile."""
+    coaches = _load_coaches()
+    out = [
+        {
+            "name":                   c.get("name") or "",
+            "team":                   c.get("team") or "",
+            "kind":                   "coach",
+            "position":               "HC",  # head coach
+            "first_named_head_coach": c.get("first_named_head_coach"),
+            "notes":                  c.get("notes") or "",
+        }
+        for c in coaches
+        if c.get("name") and c.get("team")
+    ]
+    return {"coaches": out, "count": len(out)}
+
+
+@app.get("/coaches/{name}")
+async def coach_profile(name: str) -> dict:
+    """Return a unified coach profile combining every Phase 4 signal we
+    have for the coach's team.
+
+    Output schema:
+        - meta: {name, team, first_named_head_coach, notes}
+        - line_deployment:  same shape as /phase4/deployment/{team}
+        - line_matching_F:  team_matchup_profile rows (F)
+        - line_matching_D:  team_matchup_profile rows (D)
+        - st_deployment:    PP/PK units
+        - goalie_pull:      per-deficit summary rows
+        - penalty_tendency: per-team baseline row
+        - timeout_usage:    aggregated per-team timeout buckets (often empty
+                            until the ingester captures team timeouts)
+    """
+    import polars as pl
+
+    coaches = _load_coaches()
+    target = (name or "").strip().lower()
+    match = next(
+        (c for c in coaches if (c.get("name") or "").lower() == target),
+        None,
+    )
+    if match is None:
+        return {"status": "not_found", "name": name}
+
+    team = (match.get("team") or "").upper()
+
+    out: dict = {
+        "status": "ok",
+        "meta": {
+            "name":                       match.get("name"),
+            "team":                       team,
+            "first_named_head_coach":     match.get("first_named_head_coach"),
+            "notes":                      match.get("notes") or "",
+        },
+    }
+
+    names_lut = _build_name_lookup()
+
+    # Line deployment (4.1) — flatten same shape as /phase4/deployment/{team}
+    ld_path, ld_mtime = _phase4_latest("line_deployment", "line_deployment_*.parquet")
+    ld_rows: list[dict] = []
+    if ld_path is not None:
+        df = pl.read_parquet(ld_path).filter(pl.col("team") == team)
+        for r in df.to_dicts():
+            pids: list[int] = []
+            for k in ("player_1", "player_2", "player_3"):
+                v = r.get(k)
+                if v is not None:
+                    pids.append(int(v))
+            ld_rows.append({
+                "line_type":              r.get("line_type"),
+                "line_rank":              int(r.get("line_rank") or 0),
+                "player_ids":             pids,
+                "player_names":           [names_lut.get(p, f"player_{p}") for p in pids],
+                "chemistry_toi_secs":     r.get("chemistry_toi_secs"),
+                "trio_toi_per_game":      r.get("trio_toi_per_game"),
+                "line_toi_per_game":      r.get("line_toi_per_game"),
+                "cohesion_pct":           r.get("cohesion_pct"),
+                "share_of_team_toi":      r.get("share_of_team_toi"),
+                "team_gp":                int(r.get("team_gp") or 0),
+            })
+        ld_rows.sort(key=lambda r: (r["line_type"], r["line_rank"]))
+    out["line_deployment"] = {
+        "rows":  ld_rows,
+        "as_of": ld_mtime.date().isoformat() if ld_mtime else None,
+    }
+
+    # Line matching (4.2) — team profile across opponents
+    lm_path, lm_mtime = _phase4_latest("line_matching", "line_matching_*.parquet")
+    matching_F: list[dict] = []
+    matching_D: list[dict] = []
+    if lm_path is not None:
+        from models.line_matching import team_matchup_profile
+        lm_df = pl.read_parquet(lm_path)
+        for line_type, bucket in (("F", matching_F), ("D", matching_D)):
+            prof = team_matchup_profile(lm_df, team, line_type=line_type)
+            for r in prof.to_dicts():
+                bucket.append({
+                    "own_line_rank":  int(r["own_line_rank"]),
+                    "opp_line_rank":  int(r["opp_line_rank"]),
+                    "venue":          r["venue"],
+                    "weighted_share": float(r["weighted_share"] or 0.0),
+                    "total_toi_secs": float(r["total_toi_secs"] or 0.0),
+                })
+    out["line_matching"] = {
+        "F":     matching_F,
+        "D":     matching_D,
+        "as_of": lm_mtime.date().isoformat() if lm_mtime else None,
+    }
+
+    # Special teams (4.3)
+    st_path, st_mtime = _phase4_latest("st_deployment", "st_deployment_*.parquet")
+    st_units: list[dict] = []
+    if st_path is not None:
+        df = pl.read_parquet(st_path).filter(pl.col("team") == team)
+        for r in df.to_dicts():
+            pids = [int(p) for p in (r.get("personnel") or [])]
+            st_units.append({
+                "unit_type":        r.get("unit_type"),
+                "player_ids":       pids,
+                "player_names":     [names_lut.get(p, f"player_{p}") for p in pids],
+                "unit_toi_secs":    r.get("unit_toi_secs"),
+                "share_of_st_toi":  r.get("share_of_st_toi"),
+                "team_st_toi":      r.get("team_st_toi"),
+                "team_st_gp":       int(r.get("team_st_gp") or 0),
+            })
+        order = {"PP1": 0, "PP2": 1, "PK1": 2, "PK2": 3}
+        st_units.sort(key=lambda u: order.get(u["unit_type"] or "", 9))
+    out["st_deployment"] = {
+        "units": st_units,
+        "as_of": st_mtime.date().isoformat() if st_mtime else None,
+    }
+
+    # Goalie pull (4.5)
+    gp_path, gp_mtime = _phase4_latest("goalie_pull", "goalie_pull_[0-9]*.parquet")
+    pulls: list[dict] = []
+    if gp_path is not None:
+        df = pl.read_parquet(gp_path).filter(pl.col("team") == team)
+        for r in df.to_dicts():
+            pulls.append({
+                "deficit":               int(r.get("deficit") or 0),
+                "n_pulls":               int(r.get("n_pulls") or 0),
+                "n_team_games":          int(r.get("n_team_games") or 0),
+                "mean_pull_time_secs":   r.get("mean_pull_time_secs"),
+                "median_pull_time_secs": r.get("median_pull_time_secs"),
+                "earliest_pull_secs":    r.get("earliest_pull_secs"),
+            })
+        pulls.sort(key=lambda r: r["deficit"])
+    out["goalie_pull"] = {
+        "rows":  pulls,
+        "as_of": gp_mtime.date().isoformat() if gp_mtime else None,
+    }
+
+    # Penalty tendency (4.6)
+    pt_path, pt_mtime = _phase4_latest("penalty_tendency", "penalty_tendency_*.parquet")
+    pt_row: dict | None = None
+    league_avg: dict[str, float] = {}
+    if pt_path is not None:
+        df = pl.read_parquet(pt_path)
+        if not df.is_empty():
+            league_avg = {
+                "penalties_taken_per_game": float(df["penalties_taken_per_game"].mean() or 0.0),
+                "pp_opps_per_game":         float(df["pp_opps_per_game"].mean() or 0.0),
+                "pim_per_game":             float(df["pim_per_game"].mean() or 0.0),
+            }
+        team_df = df.filter(pl.col("team") == team)
+        if not team_df.is_empty():
+            r = team_df.row(0, named=True)
+            pt_row = {
+                "n_games":                  int(r.get("n_games") or 0),
+                "n_penalties_taken":        int(r.get("n_penalties_taken") or 0),
+                "n_pp_opportunities":       int(r.get("n_pp_opportunities") or 0),
+                "pim_total":                int(r.get("pim_total") or 0),
+                "penalties_taken_per_game": float(r.get("penalties_taken_per_game") or 0.0),
+                "pp_opps_per_game":         float(r.get("pp_opps_per_game") or 0.0),
+                "pim_per_game":             float(r.get("pim_per_game") or 0.0),
+                "ref_dim":                  r.get("ref_dim"),
+            }
+    out["penalty_tendency"] = {
+        "row":        pt_row,
+        "league_avg": league_avg,
+        "as_of":      pt_mtime.date().isoformat() if pt_mtime else None,
+    }
+
+    # Timeout usage (4.4) — may be empty until ingester captures timeouts
+    to_path, to_mtime = _phase4_latest("timeout_usage", "timeout_usage_*.parquet")
+    timeouts: list[dict] = []
+    if to_path is not None:
+        df = pl.read_parquet(to_path).filter(pl.col("team") == team)
+        for r in df.to_dicts():
+            timeouts.append({
+                "period_bucket": r.get("period_bucket"),
+                "score_state":   r.get("score_state"),
+                "time_bucket":   r.get("time_bucket"),
+                "n_timeouts":    int(r.get("n_timeouts") or 0),
+                "n_games":       int(r.get("n_games") or 0),
+                "rate_per_game": float(r.get("rate_per_game") or 0.0),
+            })
+    out["timeout_usage"] = {
+        "rows":  timeouts,
+        "as_of": to_mtime.date().isoformat() if to_mtime else None,
+    }
+
+    # Coach profile (4.7) — match by coach_name
+    cp_path, cp_mtime = _phase4_latest("coach_profiles", "coach_profiles_*.parquet")
+    coach_profile_row: dict | None = None
+    if cp_path is not None:
+        df = pl.read_parquet(cp_path).filter(
+            pl.col("coach_name").str.to_lowercase() == target
+        )
+        if not df.is_empty():
+            r = df.row(0, named=True)
+            coach_profile_row = {
+                "coach_name":             r.get("coach_name"),
+                "team":                   r.get("team"),
+                "first_named_head_coach": r.get("first_named_head_coach"),
+                "season":                 int(r.get("season") or 0),
+                "seasons_covered":        [int(s) for s in (r.get("seasons_covered") or [])],
+                "gp_under_coach":         int(r.get("gp_under_coach") or 0),
+                "wins":                   int(r.get("wins") or 0),
+                "ot_wins":                int(r.get("ot_wins") or 0),
+                "losses":                 int(r.get("losses") or 0),
+                "ot_losses":              int(r.get("ot_losses") or 0),
+                "points":                 int(r.get("points") or 0),
+                "points_pct":             float(r.get("points_pct") or 0.0),
+                "gf_per_game":            float(r.get("gf_per_game") or 0.0),
+                "ga_per_game":            float(r.get("ga_per_game") or 0.0),
+                "pp_pct":                 float(r.get("pp_pct") or 0.0),
+                "pk_pct":                 float(r.get("pk_pct") or 0.0),
+                "sf_per_game":            float(r.get("sf_per_game") or 0.0),
+                "sa_per_game":            float(r.get("sa_per_game") or 0.0),
+            }
+    out["coach_profile"] = {
+        "row":   coach_profile_row,
+        "as_of": cp_mtime.date().isoformat() if cp_mtime else None,
+    }
+
+    # Goalie coach curve (4.8) — match by team
+    gc_path, gc_mtime = _phase4_latest("goalie_coach_curve", "goalie_coach_curve_*.parquet")
+    goalie_coach_row: dict | None = None
+    if gc_path is not None:
+        df = pl.read_parquet(gc_path).filter(pl.col("team") == team)
+        if not df.is_empty():
+            r = df.row(0, named=True)
+            def _nz(v):
+                try:
+                    f = float(v)
+                    return f if f == f else None   # NaN → None
+                except (TypeError, ValueError):
+                    return None
+            goalie_coach_row = {
+                "team":                  r.get("team"),
+                "season":                int(r.get("season") or 0),
+                "gp":                    int(r.get("gp") or 0),
+                "shots_against":         int(r.get("shots_against") or 0),
+                "goals_against":         int(r.get("goals_against") or 0),
+                "season_save_pct":       _nz(r.get("season_save_pct")),
+                "prior_save_pct":        _nz(r.get("prior_save_pct")),
+                "save_pct_delta":        _nz(r.get("save_pct_delta")),
+                "early_split_save_pct":  _nz(r.get("early_split_save_pct")),
+                "late_split_save_pct":   _nz(r.get("late_split_save_pct")),
+                "split_delta":           _nz(r.get("split_delta")),
+                "change_point_detected": bool(r.get("change_point_detected") or False),
+                "rolling_save_pct":      [float(v) for v in (r.get("rolling_save_pct") or [])],
+                "goalie_coach":          r.get("goalie_coach") or "",
+            }
+    out["goalie_coach"] = {
+        "row":   goalie_coach_row,
+        "as_of": gc_mtime.date().isoformat() if gc_mtime else None,
+    }
+
+    # PP Coordinator (4.9) — match by team
+    pc_path, pc_mtime = _phase4_latest("pp_coordinator", "pp_coordinator_*.parquet")
+    pp_coord_row: dict | None = None
+    if pc_path is not None:
+        df = pl.read_parquet(pc_path).filter(pl.col("team") == team)
+        if not df.is_empty():
+            r = df.row(0, named=True)
+            def _nz(v):
+                try:
+                    f = float(v)
+                    return f if f == f else None
+                except (TypeError, ValueError):
+                    return None
+            qb_id = int(r.get("pp1_qb_id") or -1)
+            pp_coord_row = {
+                "team":                 r.get("team"),
+                "season":               int(r.get("season") or 0),
+                "pp_toi_secs":          float(r.get("pp_toi_secs") or 0.0),
+                "pp_team_gp":           int(r.get("pp_team_gp") or 0),
+                "pp_shots":             int(r.get("pp_shots") or 0),
+                "pp_goals":             int(r.get("pp_goals") or 0),
+                "pp_xg_total":          float(r.get("pp_xg_total") or 0.0),
+                "pp_shots_per_60":      float(r.get("pp_shots_per_60") or 0.0),
+                "pp_xg_per_60":         float(r.get("pp_xg_per_60") or 0.0),
+                "pp_goals_per_60":      float(r.get("pp_goals_per_60") or 0.0),
+                "pp_xg_per_shot":       float(r.get("pp_xg_per_shot") or 0.0),
+                "pp_shot_distance_avg": float(r.get("pp_shot_distance_avg") or 0.0),
+                "pp_carry_pct":         _nz(r.get("pp_carry_pct")),
+                "pp1_qb_id":            qb_id if qb_id > 0 else None,
+                "pp1_qb_name":          r.get("pp1_qb_name") or "",
+                "pp1_qb_share":         float(r.get("pp1_qb_share") or 0.0),
+                "pp_coordinator":       r.get("pp_coordinator") or "",
+            }
+    out["pp_coordinator"] = {
+        "row":   pp_coord_row,
+        "as_of": pc_mtime.date().isoformat() if pc_mtime else None,
+    }
+
+    # PK Coordinator (4.10) — match by team
+    kc_path, kc_mtime = _phase4_latest("pk_coordinator", "pk_coordinator_*.parquet")
+    pk_coord_row: dict | None = None
+    if kc_path is not None:
+        df = pl.read_parquet(kc_path).filter(pl.col("team") == team)
+        if not df.is_empty():
+            r = df.row(0, named=True)
+            pk_coord_row = {
+                "team":                  r.get("team"),
+                "season":                int(r.get("season") or 0),
+                "pk_toi_secs":           float(r.get("pk_toi_secs") or 0.0),
+                "pk_team_gp":            int(r.get("pk_team_gp") or 0),
+                "pk_sa":                 int(r.get("pk_sa") or 0),
+                "pk_ga":                 int(r.get("pk_ga") or 0),
+                "pk_xga_total":          float(r.get("pk_xga_total") or 0.0),
+                "pk_sa_per_60":          float(r.get("pk_sa_per_60") or 0.0),
+                "pk_xga_per_60":         float(r.get("pk_xga_per_60") or 0.0),
+                "pk_ga_per_60":          float(r.get("pk_ga_per_60") or 0.0),
+                "pk_save_pct":           float(r.get("pk_save_pct") or 0.0),
+                "pk_xga_per_shot":       float(r.get("pk_xga_per_shot") or 0.0),
+                "pk_shot_distance_avg":  float(r.get("pk_shot_distance_avg") or 0.0),
+                "sh_shots_for":          int(r.get("sh_shots_for") or 0),
+                "sh_goals_for":          int(r.get("sh_goals_for") or 0),
+                "sh_shots_per_60":       float(r.get("sh_shots_per_60") or 0.0),
+                "pk1_share":             float(r.get("pk1_share") or 0.0),
+                "pk_coordinator":        r.get("pk_coordinator") or "",
+            }
+    out["pk_coordinator"] = {
+        "row":   pk_coord_row,
+        "as_of": kc_mtime.date().isoformat() if kc_mtime else None,
+    }
+
+    # Coaching Style Vector (4.11) — match by team
+    cs_path, cs_mtime = _phase4_latest("coaching_style", "coaching_style_*.parquet")
+    coaching_style_row: dict | None = None
+    league_avg_style: dict | None = None
+    if cs_path is not None:
+        df_all = pl.read_parquet(cs_path)
+        if not df_all.is_empty():
+            # League average raw values for context (NaN → None so JSON stays valid).
+            league_avg_style = {}
+            for col in df_all.columns:
+                if col.endswith("_raw") and df_all[col].dtype.is_float():
+                    m = df_all[col].mean()
+                    league_avg_style[col] = (
+                        float(m) if m is not None and m == m else None
+                    )
+            df = df_all.filter(pl.col("team") == team)
+            if not df.is_empty():
+                r = df.row(0, named=True)
+                def _nz(v):
+                    try:
+                        f = float(v)
+                        return f if f == f else None
+                    except (TypeError, ValueError):
+                        return None
+                dims = ["forecheck_aggression", "dz_structure", "pace", "physicality",
+                        "oz_structure", "nz_tendency", "line_match", "st_aggression"]
+                coaching_style_row = {
+                    "team": r.get("team"),
+                    "season": int(r.get("season") or 0),
+                    "dimensions": {
+                        d: {
+                            "raw":  _nz(r.get(f"{d}_raw")),
+                            "rank": _nz(r.get(f"{d}_rank")),
+                        }
+                        for d in dims
+                    },
+                }
+    out["coaching_style"] = {
+        "row":        coaching_style_row,
+        "league_avg": league_avg_style,
+        "as_of":      cs_mtime.date().isoformat() if cs_mtime else None,
+    }
+
+    # Roster Fit (4.12) — match by team
+    rf_path, rf_mtime = _phase4_latest("roster_fit", "roster_fit_*.parquet")
+    roster_fit_row: dict | None = None
+    if rf_path is not None:
+        df = pl.read_parquet(rf_path).filter(pl.col("team") == team)
+        if not df.is_empty():
+            r = df.row(0, named=True)
+            archs   = list(r.get("archetypes") or [])
+            shares  = [float(s) for s in (r.get("archetype_shares") or [])]
+            roster_fit_row = {
+                "team":              r.get("team"),
+                "season":            int(r.get("season") or 0),
+                "n_skaters":         int(r.get("n_skaters") or 0),
+                "archetype_top":     r.get("archetype_top") or "",
+                "archetypes":        archs,
+                "archetype_shares":  shares,
+                "fit_score":         float(r.get("fit_score") or 0.0),
+                "mismatch_dim":      r.get("mismatch_dim") or "",
+                "mismatch_support":  float(r.get("mismatch_support") or 0.0),
+            }
+    out["roster_fit"] = {
+        "row":   roster_fit_row,
+        "as_of": rf_mtime.date().isoformat() if rf_mtime else None,
+    }
+
+    # Staff changes (4.13) — all events for this team
+    sc_path, sc_mtime = _phase4_latest("staff_changes", "staff_changes_*.parquet")
+    staff_rows: list[dict] = []
+    if sc_path is not None:
+        df = pl.read_parquet(sc_path).filter(pl.col("team") == team)
+        for r in df.to_dicts():
+            staff_rows.append({
+                "date":          r.get("date") or "",
+                "change_type":   r.get("change_type") or "",
+                "person_out":    r.get("person_out") or "",
+                "person_in":     r.get("person_in") or "",
+                "description":   r.get("description") or "",
+                "decay_games":   int(r.get("decay_games") or 15),
+            })
+    out["staff_changes"] = {
+        "rows":  staff_rows,
+        "as_of": sc_mtime.date().isoformat() if sc_mtime else None,
+    }
+
+    # FO regime changes (4.14) — all events for this team
+    fo_path, fo_mtime = _phase4_latest("fo_regime_changes", "fo_regime_changes_*.parquet")
+    fo_rows: list[dict] = []
+    if fo_path is not None:
+        df = pl.read_parquet(fo_path).filter(pl.col("team") == team)
+        for r in df.to_dicts():
+            fo_rows.append({
+                "date":          r.get("date") or "",
+                "fo_role":       r.get("fo_role") or "",
+                "person_out":    r.get("person_out") or "",
+                "person_in":     r.get("person_in") or "",
+                "description":   r.get("description") or "",
+                "decay_games":   int(r.get("decay_games") or 50),
+            })
+    out["fo_regime_changes"] = {
+        "rows":  fo_rows,
+        "as_of": fo_mtime.date().isoformat() if fo_mtime else None,
+    }
+
+    # Buyer/seller (4.15) — this team's row
+    bs_path, bs_mtime = _phase4_latest("buyer_seller", "buyer_seller_*.parquet")
+    bs_row: dict | None = None
+    if bs_path is not None:
+        df = pl.read_parquet(bs_path).filter(pl.col("team") == team)
+        if not df.is_empty():
+            r = df.row(0, named=True)
+            bs_row = {
+                "team":            r.get("team"),
+                "season":          int(r.get("season") or 0),
+                "gp":              int(r.get("gp") or 0),
+                "points_pct":      float(r.get("points_pct") or 0.0),
+                "classification":  r.get("classification") or "neutral",
+                "confidence":      float(r.get("confidence") or 0.0),
+                "gap":             float(r.get("gap") or 0.0),
+                "threshold":       float(r.get("threshold") or 0.0),
+            }
+    out["buyer_seller"] = {
+        "row":   bs_row,
+        "as_of": bs_mtime.date().isoformat() if bs_mtime else None,
+    }
+
+    # Seller motivation (4.16) — match by team
+    sm_path, sm_mtime = _phase4_latest("seller_motivation", "seller_motivation_*.parquet")
+    sm_row: dict | None = None
+    if sm_path is not None:
+        df = pl.read_parquet(sm_path).filter(pl.col("team") == team)
+        if not df.is_empty():
+            r = df.row(0, named=True)
+            sm_row = {
+                "team":                  r.get("team"),
+                "seller_drag":           float(r.get("seller_drag") or 0.0),
+                "efficiency_multiplier": float(r.get("efficiency_multiplier") or 1.0),
+                "games_since_deadline":  int(r.get("games_since_deadline") or 0),
+                "contextual_flag":       r.get("contextual_flag") or "",
+            }
+    out["seller_motivation"] = {
+        "row":   sm_row,
+        "as_of": sm_mtime.date().isoformat() if sm_mtime else None,
+    }
+
+    # Coach decision net (4.17) — match by coach name
+    dn_path, dn_mtime = _phase4_latest("coach_decision_net", "coach_decision_net_*.parquet")
+    dn_row: dict | None = None
+    if dn_path is not None:
+        df = pl.read_parquet(dn_path).filter(
+            pl.col("coach_name").str.to_lowercase() == target
+        )
+        if not df.is_empty():
+            r = df.row(0, named=True)
+            dn_row = {
+                "coach_name":          r.get("coach_name"),
+                "team":                r.get("team"),
+                "timeout_aggression":  float(r.get("timeout_aggression") or 0.5),
+                "pull_aggression":     float(r.get("pull_aggression") or 0.5),
+                "line_shelter_score":  float(r.get("line_shelter_score") or 0.5),
+                "st_first_unit_lean":  float(r.get("st_first_unit_lean") or 0.5),
+                "penalty_discipline":  float(r.get("penalty_discipline") or 0.5),
+                "matching_intensity":  float(r.get("matching_intensity") or 0.5),
+                "overall_aggression":  float(r.get("overall_aggression") or 0.5),
+            }
+    out["coach_decision_net"] = {
+        "row":   dn_row,
+        "as_of": dn_mtime.date().isoformat() if dn_mtime else None,
+    }
+
+    # GM fingerprint (4.18) — match by team
+    gm_path, gm_mtime = _phase4_latest("gm_fingerprint", "gm_fingerprint_*.parquet")
+    gm_row: dict | None = None
+    if gm_path is not None:
+        df = pl.read_parquet(gm_path).filter(pl.col("team") == team)
+        if not df.is_empty():
+            r = df.row(0, named=True)
+            gm_row = {
+                "team":                 r.get("team"),
+                "gm_name":              r.get("gm_name") or "",
+                "action_archetype":     r.get("action_archetype") or "",
+                "prob_stand_pat":       float(r.get("prob_stand_pat") or 0.0),
+                "prob_add_rental":      float(r.get("prob_add_rental") or 0.0),
+                "prob_sell_veteran":    float(r.get("prob_sell_veteran") or 0.0),
+                "prob_rebuild":         float(r.get("prob_rebuild") or 0.0),
+                "prob_package_deal":    float(r.get("prob_package_deal") or 0.0),
+                "deadline_aggression":  float(r.get("deadline_aggression") or 0.0),
+                "recent_tx_count":      int(r.get("recent_tx_count") or 0),
+            }
+    out["gm_fingerprint"] = {
+        "row":   gm_row,
+        "as_of": gm_mtime.date().isoformat() if gm_mtime else None,
+    }
+
+    # Venue atmosphere (4.19) — match by team
+    va_path, va_mtime = _phase4_latest("venue_atmosphere", "venue_atmosphere_*.parquet")
+    va_row: dict | None = None
+    if va_path is not None:
+        df = pl.read_parquet(va_path).filter(pl.col("team") == team)
+        if not df.is_empty():
+            r = df.row(0, named=True)
+            va_row = {
+                "team":               r.get("team"),
+                "home_gp":            int(r.get("home_gp") or 0),
+                "visiting_sv_delta":  float(r.get("visiting_sv_delta") or 0.0),
+                "visiting_fow_delta": float(r.get("visiting_fow_delta") or 0.0),
+                "ref_pp_delta":       float(r.get("ref_pp_delta") or 0.0),
+                "visiting_xgf_delta": float(r.get("visiting_xgf_delta") or 0.0),
+                "scare_factor":       float(r.get("scare_factor") or 0.0),
+                "scare_rank":         float(r.get("scare_rank") or 0.0),
+            }
+    out["venue_atmosphere"] = {
+        "row":   va_row,
+        "as_of": va_mtime.date().isoformat() if va_mtime else None,
+    }
+
+    # Playoff elimination (4.20) — match by team
+    pe_path, pe_mtime = _phase4_latest("playoff_elimination", "playoff_elimination_*.parquet")
+    pe_row: dict | None = None
+    if pe_path is not None:
+        df = pl.read_parquet(pe_path).filter(pl.col("team") == team)
+        if not df.is_empty():
+            r = df.row(0, named=True)
+            pe_row = {
+                "team":                  r.get("team"),
+                "playoff_prob":          float(r.get("playoff_prob") or 0.0),
+                "elimination_drag":      float(r.get("elimination_drag") or 0.0),
+                "efficiency_multiplier": float(r.get("efficiency_multiplier") or 1.0),
+                "games_remaining":       int(r.get("games_remaining") or 0),
+                "points_pct":            float(r.get("points_pct") or 0.0),
+            }
+    out["playoff_elimination"] = {
+        "row":   pe_row,
+        "as_of": pe_mtime.date().isoformat() if pe_mtime else None,
+    }
+
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Chart endpoints — feed the Phase 1/2/3 dashboard visualizations
 # ---------------------------------------------------------------------------
 
@@ -5560,6 +6457,28 @@ async def phase2_players() -> dict:
                 to_remove.add(short)
     for k in to_remove:
         players.pop(k, None)
+
+    # Tag everything we already have as "skater" or "goalie".  We mix
+    # coaches into the same search list so Cortex autocomplete surfaces
+    # all three kinds in one dropdown.
+    for entry in players.values():
+        entry.setdefault("kind", "goalie" if entry.get("position") == "G" else "skater")
+
+    # Layer in head coaches (sourced from data/coaches.json).
+    for coach in _load_coaches():
+        cname = (coach.get("name") or "").strip()
+        if not cname:
+            continue
+        # Don't overwrite a player who happens to share a name; coach
+        # nodes are otherwise unique.
+        if cname not in players:
+            players[cname] = {
+                "name":      cname,
+                "team":      (coach.get("team") or "").upper(),
+                "position":  "HC",       # head coach
+                "player_id": None,
+                "kind":      "coach",
+            }
 
     return {"players": sorted(players.values(), key=lambda p: p["name"])}
 

@@ -82,7 +82,7 @@ const PHASES: { num: number; name: string; status: PhaseStatus }[] = [
   { num: 1,  name: "Data Pipeline",             status: "complete"    },
   { num: 2,  name: "Player Rating Models",       status: "complete"    },
   { num: 3,  name: "Fatigue Engine",             status: "complete"    },
-  { num: 4,  name: "Coaching Tendency Models",   status: "not_started" },
+  { num: 4,  name: "Coaching Tendency Models",   status: "in_progress" },
   { num: 5,  name: "Rust Simulation Engine",     status: "not_started" },
   { num: 6,  name: "Lineup / Roster Forecaster", status: "not_started" },
   { num: 7,  name: "Single-Game Simulation",     status: "not_started" },
@@ -211,6 +211,9 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
   const isCortexMode = !theme && (isCortexPage || cortexPinned);
   const brandHex = theme?.primaryColor ?? (isCortexMode ? "#a78bfa" : "#C9A84C");
   const brandHex2 = theme ? lightenHex(theme.primaryColor) : (isCortexMode ? "#c4b5fd" : "#E8D090");
+  const brandHex3 = theme ? darkenHex(theme.primaryColor, 0.55) : "#6a5728"; // dark midstop
+  const brandRgb  = hexToRgb(brandHex);
+  const brandShadow = `rgba(${brandRgb.r},${brandRgb.g},${brandRgb.b},0.30)`;
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -603,13 +606,13 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                         #ffffff 0%,
                         ${brandHex2} 18%,
                         ${brandHex} 38%,
-                        #6a5728 58%,
+                        ${brandHex3} 58%,
                         ${brandHex} 78%,
                         ${brandHex2} 100%)`,
                   // Subtle outer + inner glow via text-shadow on the bg-clipped text
                   filter: isCortexMode
                     ? `drop-shadow(0 1px 0 rgba(0,0,0,0.85)) drop-shadow(0 0 6px rgba(167,139,250,0.30))`
-                    : `drop-shadow(0 1px 0 rgba(0,0,0,0.85)) drop-shadow(0 0 6px rgba(201,168,76,0.30))`,
+                    : `drop-shadow(0 1px 0 rgba(0,0,0,0.85)) drop-shadow(0 0 6px ${brandShadow})`,
                 }}
               >
                 {theme ? theme.abbrev : isCortexMode ? "CORTEX" : "GRTZKY"}
@@ -887,6 +890,26 @@ function lightenHex(hex: string): string {
   const lg = Math.round(g + (255 - g) * 0.45);
   const lb = Math.round(b + (255 - b) * 0.45);
   return `#${lr.toString(16).padStart(2, "0")}${lg.toString(16).padStart(2, "0")}${lb.toString(16).padStart(2, "0")}`;
+}
+
+function darkenHex(hex: string, factor: number = 0.45): string {
+  const clean = hex.replace("#", "");
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  const dr = Math.round(r * (1 - factor));
+  const dg = Math.round(g * (1 - factor));
+  const db = Math.round(b * (1 - factor));
+  return `#${dr.toString(16).padStart(2, "0")}${dg.toString(16).padStart(2, "0")}${db.toString(16).padStart(2, "0")}`;
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const clean = hex.replace("#", "");
+  return {
+    r: parseInt(clean.slice(0, 2), 16),
+    g: parseInt(clean.slice(2, 4), 16),
+    b: parseInt(clean.slice(4, 6), 16),
+  };
 }
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {

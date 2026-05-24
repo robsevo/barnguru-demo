@@ -988,7 +988,7 @@ export default function PlayersPage() {
 
   // Search state
   const [query, setQuery]         = useState("");
-  const [allPlayers, setAllPlayers] = useState<{ name: string; team: string; position: string; player_id?: number }[]>([]);
+  const [allPlayers, setAllPlayers] = useState<{ name: string; team: string; position: string; player_id?: number; kind?: string }[]>([]);
   const [showSugg, setShowSugg]   = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -1227,11 +1227,17 @@ export default function PlayersPage() {
     ? allPlayers.filter(p => p.name.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 8)
     : [];
 
-  // Navigate to full profile page by player name
+  // Navigate to the appropriate profile by name.  Coaches (kind === "coach")
+  // route to /coaches/{name}; everyone else goes to the player profile.
   const loadPlayer = useCallback((name: string) => {
     setShowSugg(false);
+    const match = allPlayers.find(p => p.name === name);
+    if (match?.kind === "coach") {
+      router.push(`/coaches/${encodeURIComponent(name)}`);
+      return;
+    }
     router.push(`/players/${encodeURIComponent(normalizePlayerName(name))}`);
-  }, [router]);
+  }, [router, allPlayers]);
 
   const handleRowClick = useCallback((name: string) => {
     router.push(`/players/${encodeURIComponent(normalizePlayerName(name))}`);
@@ -1396,21 +1402,30 @@ export default function PlayersPage() {
               border: `1px solid rgba(var(--brand-r), var(--brand-g), var(--brand-b), 0.18)`,
             }}
           >
-            {suggestions.map(p => (
-              <button
-                key={p.name}
-                className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-white/[0.06] transition-colors"
-                onMouseDown={() => {
-                  setQuery(p.name);
-                  loadPlayer(p.name);
-                }}
-              >
-                {p.team && <TeamLogo team={p.team} size={24} />}
-                <span className="text-sm font-medium text-white/80 flex-1">{p.name}</span>
-                <span className="text-[10px] font-mono text-white/30">{p.team}</span>
-                <span className="text-[10px] text-white/20">{fmtPos(p.position)}</span>
-              </button>
-            ))}
+            {suggestions.map(p => {
+              const isCoach = p.kind === "coach";
+              return (
+                <button
+                  key={p.name}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-white/[0.06] transition-colors"
+                  onMouseDown={() => {
+                    setQuery(p.name);
+                    loadPlayer(p.name);
+                  }}
+                >
+                  {p.team && <TeamLogo team={p.team} size={24} />}
+                  <span className="text-sm font-medium text-white/80 flex-1">{p.name}</span>
+                  <span className="text-[10px] font-mono text-white/30">{p.team}</span>
+                  {isCoach ? (
+                    <span className="text-[9px] font-semibold tracking-wider px-1.5 py-0.5 rounded border border-[#fb923c]/40 bg-[#fb923c]/[0.10] text-[#fb923c]">
+                      HC
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-white/20">{fmtPos(p.position)}</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>

@@ -345,6 +345,26 @@ export default function TeamPage() {
     mean_fi: number; max_fi: number; last_game: string | null; rows: number;
     window_start: string; window_end: string;
   } | null>(null);
+
+  // Head coach for the team — drives the hero section + tab link to /coaches/{name}.
+  const [headCoach, setHeadCoach] = useState<{ name: string; first_named_head_coach: string | null } | null>(null);
+  const [coachProfile, setCoachProfile] = useState<Record<string, any> | null>(null);
+  useEffect(() => {
+    setCoachProfile(null);
+    fetch("/api/coaches")
+      .then((r) => r.json())
+      .then((d) => {
+        const row = (d.coaches ?? []).find((c: { team: string }) => c.team === team);
+        if (row) {
+          setHeadCoach({ name: row.name, first_named_head_coach: row.first_named_head_coach ?? null });
+          fetch(`/api/coaches/${encodeURIComponent(row.name)}`)
+            .then(r2 => r2.json())
+            .then(setCoachProfile)
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
+  }, [team]);
   useEffect(() => {
     fetch("/api/phase3/team-fatigue?window_days=21")
       .then((r) => r.json())
@@ -529,7 +549,7 @@ export default function TeamPage() {
             }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={logoUrl(team)} alt={team} width={24} height={24} className="object-contain" />
+            <img src={logoUrl(team)} alt={team} width={40} height={40} className="object-contain" />
             Set as Theme
           </button>
         )}
@@ -663,6 +683,67 @@ export default function TeamPage() {
               <div className="h-3.5 w-40 rounded bg-white/[0.06] animate-pulse mt-1.5" />
             )}
           </div>
+
+          {/* Head coach panel — inline, right side of the hero */}
+          {headCoach && (
+            <a
+              href={`/coaches/${encodeURIComponent(headCoach.name)}`}
+              className="hidden md:flex shrink-0 items-center gap-3 rounded-xl border bg-white/[0.02] px-3 py-2.5 hover:bg-white/[0.05] transition-all group"
+              style={{
+                borderColor: `${teamColor}30`,
+              }}
+              title={`Head Coach · since ${headCoach.first_named_head_coach ?? "unknown"}`}
+            >
+              <div
+                className="w-10 h-10 rounded-full border flex items-center justify-center shrink-0"
+                style={{
+                  borderColor: `${teamColor}66`,
+                  background: `${teamColor}10`,
+                }}
+              >
+                <span className="text-[10px] font-bold tracking-wider" style={{ color: teamColor }}>HC</span>
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[12px] font-semibold text-white/85 group-hover:text-white transition-colors leading-tight">
+                  {headCoach.name}
+                </span>
+                {(() => {
+                  const cp = coachProfile?.coach_profile?.row;
+                  const bs = coachProfile?.buyer_seller?.row;
+                  return (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[8px] uppercase tracking-[0.18em]" style={{ color: teamColor }}>
+                        Head Coach
+                      </span>
+                      {cp && (
+                        <>
+                          <span className="text-white/20">·</span>
+                          <span className={`text-[9px] font-mono font-semibold ${
+                            cp.points_pct >= 0.55 ? "text-[#4ade80]" : cp.points_pct >= 0.45 ? "text-white/65" : "text-[#f87171]"
+                          }`}>
+                            {(cp.points_pct * 100).toFixed(1)}%
+                          </span>
+                        </>
+                      )}
+                      {bs && (
+                        <span className={`ml-0.5 px-1 py-0 rounded text-[7px] font-mono font-semibold uppercase border ${
+                          bs.classification === "buyer" ? "border-[#4ade80]/30 text-[#4ade80]"
+                          : bs.classification === "seller" ? "border-[#f87171]/30 text-[#f87171]"
+                          : "border-[#fbbf24]/30 text-[#fbbf24]"
+                        }`}>
+                          {bs.classification}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
+                <span className="text-[8px] font-mono text-white/25">
+                  since {headCoach.first_named_head_coach ?? "—"}
+                </span>
+              </div>
+              <span className="text-white/20 group-hover:text-white/50 text-[14px] ml-1">&rarr;</span>
+            </a>
+          )}
         </div>
 
         {/* HUD Tab bar */}
@@ -704,6 +785,94 @@ export default function TeamPage() {
           <p className="sm:hidden text-[11px] text-white/60 text-center flex items-center justify-center gap-1.5">
             <span>↻</span> Rotate for more stats
           </p>
+
+          {/* Head coach — top of the roster, before the players */}
+          {headCoach && (
+            <div>
+              <p className="text-[11px] font-semibold text-white/35 uppercase tracking-widest mb-3 px-1">
+                Head Coach
+              </p>
+              <a
+                href={`/coaches/${encodeURIComponent(headCoach.name)}`}
+                className="block rounded-2xl border bg-white/[0.02] hover:bg-white/[0.04] transition-all group"
+                style={{ borderColor: `${teamColor}30` }}
+              >
+                <div className="flex items-center gap-4 px-4 py-3.5">
+                  <div
+                    className="w-14 h-14 rounded-full border-2 flex items-center justify-center shrink-0"
+                    style={{ borderColor: `${teamColor}80`, background: `${teamColor}12` }}
+                  >
+                    <span className="text-[15px] font-bold tracking-wider" style={{ color: teamColor }}>HC</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[15px] font-semibold text-white group-hover:text-white transition-colors">
+                        {headCoach.name}
+                      </span>
+                      {(() => {
+                        const bs = coachProfile?.buyer_seller?.row;
+                        return bs ? (
+                          <span className={`px-1.5 py-0.5 rounded text-[8px] font-mono font-semibold uppercase border ${
+                            bs.classification === "buyer" ? "border-[#4ade80]/30 text-[#4ade80]"
+                            : bs.classification === "seller" ? "border-[#f87171]/30 text-[#f87171]"
+                            : "border-[#fbbf24]/30 text-[#fbbf24]"
+                          }`}>
+                            {bs.classification}
+                          </span>
+                        ) : null;
+                      })()}
+                    </div>
+                    <div className="text-[10px] font-mono text-white/40 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                      <span className="uppercase tracking-[0.18em]" style={{ color: teamColor }}>Head Coach</span>
+                      <span className="text-white/20">·</span>
+                      <span>{TEAM_FULL_NAMES[team] ?? team}</span>
+                      {headCoach.first_named_head_coach && (
+                        <>
+                          <span className="text-white/20">·</span>
+                          <span>since {headCoach.first_named_head_coach}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {(() => {
+                    const cp = coachProfile?.coach_profile?.row;
+                    const dn = coachProfile?.coach_decision_net?.row;
+                    return (
+                      <div className="hidden sm:flex items-center gap-4 shrink-0">
+                        {cp && (
+                          <div className="flex flex-col items-end">
+                            <span className="text-[8px] uppercase tracking-wider text-white/30">Points %</span>
+                            <span className={`text-[15px] font-mono font-semibold leading-tight ${
+                              cp.points_pct >= 0.55 ? "text-[#4ade80]" : cp.points_pct >= 0.45 ? "text-white" : "text-[#f87171]"
+                            }`}>
+                              {(cp.points_pct * 100).toFixed(1)}%
+                            </span>
+                          </div>
+                        )}
+                        {cp && (
+                          <div className="flex flex-col items-end">
+                            <span className="text-[8px] uppercase tracking-wider text-white/30">Record</span>
+                            <span className="text-[13px] font-mono text-white/75 leading-tight">
+                              {cp.wins}-{cp.losses}-{cp.ot_losses}
+                            </span>
+                          </div>
+                        )}
+                        {dn && (
+                          <div className="flex flex-col items-end">
+                            <span className="text-[8px] uppercase tracking-wider text-white/30">Aggression</span>
+                            <span className="text-[13px] font-mono font-semibold leading-tight" style={{ color: teamColor }}>
+                              {dn.overall_aggression.toFixed(2)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                  <span className="text-white/25 group-hover:text-white/55 text-[18px] ml-1 transition-colors">&rarr;</span>
+                </div>
+              </a>
+            </div>
+          )}
 
           {/* Skaters table */}
           <div>
