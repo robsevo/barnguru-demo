@@ -683,67 +683,6 @@ export default function TeamPage() {
               <div className="h-3.5 w-40 rounded bg-white/[0.06] animate-pulse mt-1.5" />
             )}
           </div>
-
-          {/* Head coach panel — inline, right side of the hero */}
-          {headCoach && (
-            <a
-              href={`/coaches/${encodeURIComponent(headCoach.name)}`}
-              className="hidden md:flex shrink-0 items-center gap-3 rounded-xl border bg-white/[0.02] px-3 py-2.5 hover:bg-white/[0.05] transition-all group"
-              style={{
-                borderColor: `${teamColor}30`,
-              }}
-              title={`Head Coach · since ${headCoach.first_named_head_coach ?? "unknown"}`}
-            >
-              <div
-                className="w-10 h-10 rounded-full border flex items-center justify-center shrink-0"
-                style={{
-                  borderColor: `${teamColor}66`,
-                  background: `${teamColor}10`,
-                }}
-              >
-                <span className="text-[10px] font-bold tracking-wider" style={{ color: teamColor }}>HC</span>
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[12px] font-semibold text-white/85 group-hover:text-white transition-colors leading-tight">
-                  {headCoach.name}
-                </span>
-                {(() => {
-                  const cp = coachProfile?.coach_profile?.row;
-                  const bs = coachProfile?.buyer_seller?.row;
-                  return (
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[8px] uppercase tracking-[0.18em]" style={{ color: teamColor }}>
-                        Head Coach
-                      </span>
-                      {cp && (
-                        <>
-                          <span className="text-white/20">·</span>
-                          <span className={`text-[9px] font-mono font-semibold ${
-                            cp.points_pct >= 0.55 ? "text-[#4ade80]" : cp.points_pct >= 0.45 ? "text-white/65" : "text-[#f87171]"
-                          }`}>
-                            {(cp.points_pct * 100).toFixed(1)}%
-                          </span>
-                        </>
-                      )}
-                      {bs && (
-                        <span className={`ml-0.5 px-1 py-0 rounded text-[7px] font-mono font-semibold uppercase border ${
-                          bs.classification === "buyer" ? "border-[#4ade80]/30 text-[#4ade80]"
-                          : bs.classification === "seller" ? "border-[#f87171]/30 text-[#f87171]"
-                          : "border-[#fbbf24]/30 text-[#fbbf24]"
-                        }`}>
-                          {bs.classification}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })()}
-                <span className="text-[8px] font-mono text-white/25">
-                  since {headCoach.first_named_head_coach ?? "—"}
-                </span>
-              </div>
-              <span className="text-white/20 group-hover:text-white/50 text-[14px] ml-1">&rarr;</span>
-            </a>
-          )}
         </div>
 
         {/* HUD Tab bar */}

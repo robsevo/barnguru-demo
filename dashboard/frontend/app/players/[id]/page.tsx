@@ -6006,7 +6006,7 @@ export default function PlayerProfilePage() {
                       onClick={() => setTelemetryTab(tab.id as TelemetryTab)}
                       title={`${tab.label} — ${subtitle[tab.id] ?? ""}`}
                       aria-label={tab.label}
-                      className="relative group flex items-center gap-1.5 lg:gap-3 px-2 lg:px-2.5 py-1.5 lg:py-2.5 rounded-sm transition-all shrink-0 lg:shrink"
+                      className="relative group flex items-center gap-2 lg:gap-3 px-3 lg:px-2.5 py-2.5 lg:py-2.5 rounded-sm transition-all shrink-0 lg:shrink"
                       style={{
                         background: isActive
                           ? `linear-gradient(90deg, ${teamColor}28 0%, ${teamColor}08 100%)`
@@ -6022,7 +6022,7 @@ export default function PlayerProfilePage() {
                             mixBlendMode: "screen",
                           }} />
                       )}
-                      <span className="hud-mono text-[13px] lg:text-[16px] leading-none shrink-0"
+                      <span className="hud-mono text-[18px] lg:text-[16px] leading-none shrink-0"
                         style={{
                           color: isActive ? teamColor : "rgba(255,255,255,0.55)",
                           textShadow: isActive ? `0 0 8px ${teamColor}` : "none",
@@ -6031,7 +6031,7 @@ export default function PlayerProfilePage() {
                         {glyph[tab.id] ?? "▸"}
                       </span>
                       {/* Mobile shows compact label; desktop shows label+subtitle stack. */}
-                      <span className="flex lg:hidden hud-mono text-[9px] uppercase tracking-[0.16em] font-semibold whitespace-nowrap"
+                      <span className="flex lg:hidden hud-mono text-[12px] uppercase tracking-[0.14em] font-bold whitespace-nowrap"
                         style={{
                           color: isActive ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.65)",
                         }}>
@@ -6637,8 +6637,11 @@ export default function PlayerProfilePage() {
       <div className="mt-4 grid gap-3 lg:grid-cols-12">
 
         {/* VITALS column — bumped to 4/12 (was 3) since Decision Matrix
-            moved here from Neural Cortex. Hologram drops to 4 to match. */}
-        <div className="lg:col-span-4 flex">
+            moved here from Neural Cortex. Hologram drops to 4 to match.
+            Mobile order-2: sits BELOW Neural Cortex (order-1) per Bob's
+            request — Cortex carries the engine read so it leads on
+            mobile, Vitals/Hologram fall in behind. */}
+        <div className="order-2 lg:order-none lg:col-span-4 flex">
           <HudPanel title="Vitals" themeColor={teamColor} scanline allCorners className="w-full flex flex-col">
             <div className="grid grid-cols-2 gap-3 place-items-center">
               {/* FI + CI rings moved to the Hologram panel topGauges slot
@@ -7104,8 +7107,9 @@ export default function PlayerProfilePage() {
 
         {/* HOLOGRAM column — stretches with Vitals/Cortex so the row
             reads as one console. Internal flex layout pushes silhouette
-            to fill + ticker stays bottom-anchored. */}
-        <div className="lg:col-span-4 flex">
+            to fill + ticker stays bottom-anchored. Mobile order-3:
+            tail of the deck. */}
+        <div className="order-3 lg:order-none lg:col-span-4 flex">
           <HudPanel title="Hologram" subtitle={isGoalie ? "goalie scan" : "skater scan"} themeColor={teamColor} scanline allCorners className="w-full flex flex-col">
             <HologramScanner
               isGoalie={!!isGoalie}
@@ -7497,8 +7501,10 @@ export default function PlayerProfilePage() {
 
         {/* NEURAL CORTEX column — stretches with Vitals/Hologram. The
             ENGINE CONTEXT strip at the bottom has mt-auto so it pushes
-            to fill any extra height when the row matches Vitals. */}
-        <div className="lg:col-span-4 flex">
+            to fill any extra height when the row matches Vitals. Mobile
+            order-1: leads the deck (sits directly under Ratings) per
+            Bob's request — engine read first, body/vitals after. */}
+        <div className="order-1 lg:order-none lg:col-span-4 flex">
           <HudPanel title="Neural Cortex" subtitle="BNN v2.22" themeColor={teamColor} scanline allCorners className="w-full flex flex-col">
             {/* INFER status strip + Archetype banner BOTH removed:
                   - "INFER · BNN v2.22 · N CH" inline status duplicated the
