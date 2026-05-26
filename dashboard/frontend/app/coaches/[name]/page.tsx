@@ -3,7 +3,8 @@
 import { Fragment, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { logoUrl, TEAM_FULL_NAMES, TEAM_COLORS, TEAM_SECONDARY } from "@/utils/nhl";
-import { HudGrid } from "@/components/hud";
+import { useTheme } from "@/utils/themeContext";
+import { HudGrid, HudPanel, HudBadge } from "@/components/hud";
 
 // ---------------------------------------------------------------------------
 // Types — mirror /coaches/{name} payload from dashboard/api/main.py
@@ -129,7 +130,7 @@ interface PlayoffEliminationRow {
 interface CoachProfile {
   status: "ok" | "not_found";
   name?: string;
-  meta?: { name: string; team: string; first_named_head_coach: string | null; notes: string };
+  meta?: { name: string; team: string; first_named_head_coach: string | null; notes: string; image_url?: string | null };
   line_deployment?:  { rows: LineRow[]; as_of: string | null };
   line_matching?:    { F: MatchingRow[]; D: MatchingRow[]; as_of: string | null };
   st_deployment?:    { units: StUnit[]; as_of: string | null };
@@ -183,41 +184,8 @@ function fmtNum(v: number | null | undefined, dec = 2): string {
 }
 
 // ---------------------------------------------------------------------------
-// HUD primitives
+// HUD primitives (HudPanel + HudTitle imported from @/components/hud)
 // ---------------------------------------------------------------------------
-
-function HudTitle({ title, subtitle, accent }: { title: string; subtitle?: string; accent: string }) {
-  return (
-    <div className="flex items-baseline gap-2 min-w-0">
-      <span className="hud-mono opacity-80" style={{ color: accent }} aria-hidden>◢</span>
-      <span className="hud-mono text-[10px] uppercase tracking-[0.18em] text-white/85">{title}</span>
-      {subtitle && <span className="hud-mono text-[9px] uppercase tracking-[0.15em] text-white/40">· {subtitle}</span>}
-      <span className="hud-mono opacity-80 ml-auto" style={{ color: accent }} aria-hidden>◣</span>
-    </div>
-  );
-}
-
-function HudCard({
-  title, subtitle, right, accent, children, padding = "p-3"
-}: {
-  title?: string; subtitle?: string; right?: React.ReactNode; accent: string;
-  children: React.ReactNode; padding?: string;
-}) {
-  return (
-    <div className="hud-panel hud-panel--all-corners jarvis-boot jarvis-shimmer"
-      style={{ ["--hud-corner" as string]: `${accent}aa` }}>
-      <span className="hud-panel__corner-tr" />
-      <span className="hud-panel__corner-bl" />
-      {title && (
-        <div className="px-3 pt-2 pb-1.5 flex items-center justify-between gap-2 border-b border-white/[0.06]">
-          <HudTitle title={title} subtitle={subtitle} accent={accent} />
-          {right}
-        </div>
-      )}
-      <div className={padding}>{children}</div>
-    </div>
-  );
-}
 
 function StatPill({ label, value, color = "text-white" }: {
   label: string; value: React.ReactNode; color?: string;
@@ -230,12 +198,22 @@ function StatPill({ label, value, color = "text-white" }: {
   );
 }
 
-function SkeletonBadge() {
+function CoachAvatar({ imageUrl, team }: { imageUrl: string | null; team: string }) {
+  const [errored, setErrored] = useState(false);
+  if (!imageUrl || errored) {
+    // Fallback: team logo centered
+    /* eslint-disable-next-line @next/next/no-img-element */
+    return <img src={logoUrl(team)} alt={team} className="w-[68px] h-[68px] object-contain" />;
+  }
+  /* eslint-disable-next-line @next/next/no-img-element */
   return (
-    <span className="text-[8px] font-mono px-1.5 py-0.5 rounded border border-[#a78bfa]/30 bg-[#a78bfa]/[0.08] text-[#a78bfa]/80 uppercase tracking-wider">
-      NOT TRAINED
-    </span>
+    <img src={imageUrl} alt="" onError={() => setErrored(true)}
+      className="w-full h-full object-cover object-top scale-110 origin-top" />
   );
+}
+
+function SkeletonBadge() {
+  return <HudBadge tone="accent">NOT TRAINED</HudBadge>;
 }
 
 // ---------------------------------------------------------------------------
@@ -443,8 +421,8 @@ function Hero({ meta, profile, teamColor, teamSecondary }: {
 
       {/* Content */}
       <div className="relative z-10 flex items-center gap-5 px-5 py-5">
-        {/* Team logo as avatar with glow */}
-        <a href={`/teams/${meta.team}`} className="shrink-0 relative">
+        {/* Coach headshot (or team logo fallback) with team-color halo */}
+        <div className="shrink-0 relative">
           <div className="absolute inset-0 rounded-full pointer-events-none"
             style={{
               background: `radial-gradient(circle, ${teamColor}55 0%, ${teamColor}22 45%, transparent 72%)`,
@@ -456,10 +434,21 @@ function Hero({ meta, profile, teamColor, teamSecondary }: {
               background: `radial-gradient(circle at 40% 35%, ${darkBlend(teamSecondary, 0.50)} 0%, ${darkBlend(teamSecondary, 0.88)} 60%, #080a0c 100%)`,
               boxShadow: `0 0 0 3px ${teamColor}, 0 0 0 5px rgba(255,255,255,0.16), 0 0 30px ${teamColor}cc, 0 0 60px ${teamColor}55, 0 8px 32px rgba(0,0,0,0.7)`,
             }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={logoUrl(meta.team)} alt={meta.team} className="w-[72px] h-[72px] object-contain" />
+            <CoachAvatar imageUrl={meta.image_url ?? null} team={meta.team} />
           </div>
-        </a>
+          {/* Small team logo badge bottom-right of avatar */}
+          <a href={`/teams/${meta.team}`}
+            className="absolute -bottom-1 -right-1 w-9 h-9 rounded-full flex items-center justify-center border-2 hover:scale-110 transition-transform"
+            style={{
+              borderColor: teamColor,
+              background: darkBlend(teamSecondary, 0.85),
+              boxShadow: `0 0 8px ${teamColor}aa`,
+            }}
+            title={`View ${TEAM_FULL_NAMES[meta.team] ?? meta.team}`}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={logoUrl(meta.team)} alt={meta.team} className="w-6 h-6 object-contain" />
+          </a>
+        </div>
         <div className="w-px shrink-0 bg-white/[0.10]" style={{ height: 88 }} />
 
         <div className="flex-1 min-w-0">
@@ -613,7 +602,7 @@ function DossierTab({ profile, accent }: { profile: CoachProfile; accent: string
   const va = profile.venue_atmosphere?.row;
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      <HudCard title="Career with Team" subtitle="4.7" accent={accent}>
+      <HudPanel title="Career with Team" subtitle="season totals · record" themeColor={accent} allCorners>
         {cp ? (
           <>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
@@ -637,9 +626,9 @@ function DossierTab({ profile, accent }: { profile: CoachProfile; accent: string
         ) : (
           <p className="text-[10px] font-mono text-white/40">No coach profile yet.</p>
         )}
-      </HudCard>
+      </HudPanel>
 
-      <HudCard title="Decision Aggression" subtitle="4.17" accent={accent}>
+      <HudPanel title="Decision Aggression" subtitle="tendencies composite" themeColor={accent} allCorners>
         {dn ? (
           <>
             <div className="flex items-center justify-center mb-3">
@@ -657,10 +646,10 @@ function DossierTab({ profile, accent }: { profile: CoachProfile; accent: string
         ) : (
           <p className="text-[10px] font-mono text-white/40">No decision profile yet.</p>
         )}
-      </HudCard>
+      </HudPanel>
 
       {va && (
-        <HudCard title="Home Venue Scare" subtitle="4.19" accent={accent}>
+        <HudPanel title="Home Venue Scare" subtitle="home-ice edge" themeColor={accent} allCorners>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
             <StatPill label="Scare"      value={(va.scare_factor >= 0 ? "+" : "") + va.scare_factor.toFixed(2)}
               color={va.scare_factor > 0.3 ? "text-[#f87171]" : va.scare_factor > 0 ? "text-[#fbbf24]" : "text-white/55"} />
@@ -672,11 +661,11 @@ function DossierTab({ profile, accent }: { profile: CoachProfile; accent: string
               color={va.ref_pp_delta > 0 ? "text-[#4ade80]" : "text-white/55"} />
           </div>
           <p className="text-[9px] font-mono text-white/25">rank {(va.scare_rank * 100).toFixed(0)}th percentile · {va.home_gp} home GP</p>
-        </HudCard>
+        </HudPanel>
       )}
 
       {profile.playoff_elimination?.row && profile.playoff_elimination.row.elimination_drag > 0 && (
-        <HudCard title="Playoff Elimination" subtitle="4.20" accent="#fbbf24">
+        <HudPanel title="Playoff Elimination" subtitle="elimination drag" themeColor="#fbbf24" allCorners>
           {(() => {
             const pe = profile.playoff_elimination!.row!;
             return (
@@ -690,7 +679,7 @@ function DossierTab({ profile, accent }: { profile: CoachProfile; accent: string
               </>
             );
           })()}
-        </HudCard>
+        </HudPanel>
       )}
     </div>
   );
@@ -703,7 +692,7 @@ function TacticsTab({ profile, accent }: { profile: CoachProfile; accent: string
 
   return (
     <div className="space-y-4">
-      <HudCard title="Projected Lines · F + D" subtitle="4.1" accent={accent}>
+      <HudPanel title="Projected Lines · F + D" subtitle="deployment forecast" themeColor={accent} allCorners>
         {ld.length === 0 ? (
           <p className="text-[10px] font-mono text-white/40">No deployment data.</p>
         ) : (
@@ -726,11 +715,11 @@ function TacticsTab({ profile, accent }: { profile: CoachProfile; accent: string
             ))}
           </div>
         )}
-      </HudCard>
+      </HudPanel>
 
       <div className="grid gap-4 md:grid-cols-2">
         <MatchingPanel data={lm} accent={accent} />
-        <HudCard title="Special Teams Units" subtitle="4.3" accent={accent}>
+        <HudPanel title="Special Teams Units" subtitle="PP1/PP2 · PK1/PK2" themeColor={accent} allCorners>
           {st.length === 0 ? (
             <p className="text-[10px] font-mono text-white/40">No ST data.</p>
           ) : (
@@ -761,7 +750,7 @@ function TacticsTab({ profile, accent }: { profile: CoachProfile; accent: string
               })}
             </div>
           )}
-        </HudCard>
+        </HudPanel>
       </div>
     </div>
   );
@@ -773,7 +762,7 @@ function MatchingPanel({ data, accent }: {
 }) {
   const [lineType, setLineType] = useState<"F" | "D">("F");
   const [venue, setVenue] = useState<"home" | "away" | "all">("all");
-  if (!data) return <HudCard title="Matching" subtitle="4.2" accent={accent}><p className="text-[10px] font-mono text-white/40">—</p></HudCard>;
+  if (!data) return <HudPanel title="Matching" subtitle="line matchups" themeColor={accent} allCorners><p className="text-[10px] font-mono text-white/40">—</p></HudPanel>;
   const rows = lineType === "F" ? data.F : data.D;
   const ranks = lineType === "F" ? [1,2,3,4] : [1,2,3];
   function lookup(own: number, opp: number): number | null {
@@ -788,7 +777,7 @@ function MatchingPanel({ data, accent }: {
     return `${accent}${Math.round(15 + Math.min(1, v) * 220).toString(16).padStart(2, "0")}`;
   }
   return (
-    <HudCard title="Matching Profile" subtitle="4.2" accent={accent}
+    <HudPanel title="Matching Profile" subtitle="P(own | opp) matrix" themeColor={accent} allCorners
       right={
         <div className="flex items-center gap-1">
           <div className="flex gap-0.5 border border-white/[0.08] rounded overflow-hidden">
@@ -833,7 +822,7 @@ function MatchingPanel({ data, accent }: {
           </div>
         </>
       )}
-    </HudCard>
+    </HudPanel>
   );
 }
 
@@ -844,7 +833,7 @@ function InGameTab({ profile, accent }: { profile: CoachProfile; accent: string 
   const to = profile.timeout_usage?.rows ?? [];
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      <HudCard title="Goalie Pull Timing" subtitle="4.5" accent={accent}>
+      <HudPanel title="Goalie Pull Timing" subtitle="pulls by deficit" themeColor={accent} allCorners>
         {gp.length === 0 ? (
           <p className="text-[10px] font-mono text-white/40">No pulls observed.</p>
         ) : (
@@ -862,9 +851,9 @@ function InGameTab({ profile, accent }: { profile: CoachProfile; accent: string 
             ))}
           </div>
         )}
-      </HudCard>
+      </HudPanel>
 
-      <HudCard title="Penalty Tendency" subtitle="4.6" accent={accent}>
+      <HudPanel title="Penalty Tendency" subtitle="discipline · PP earned" themeColor={accent} allCorners>
         {!pt ? (
           <p className="text-[10px] font-mono text-white/40">No data.</p>
         ) : (
@@ -881,9 +870,9 @@ function InGameTab({ profile, accent }: { profile: CoachProfile; accent: string 
             </p>
           </>
         )}
-      </HudCard>
+      </HudPanel>
 
-      <HudCard title="Timeout Usage" subtitle="4.4" accent={accent} right={to.length === 0 ? <SkeletonBadge /> : undefined}>
+      <HudPanel title="Timeout Usage" subtitle="period × score state" themeColor={accent} allCorners right={to.length === 0 ? <SkeletonBadge /> : undefined}>
         {to.length === 0 ? (
           <p className="text-[10px] font-mono text-white/35">PBP ingester doesn&apos;t yet capture team timeouts. Model is built; will populate once data lands.</p>
         ) : (
@@ -899,7 +888,7 @@ function InGameTab({ profile, accent }: { profile: CoachProfile; accent: string 
             ))}
           </div>
         )}
-      </HudCard>
+      </HudPanel>
     </div>
   );
 }
@@ -914,7 +903,7 @@ function StaffTab({ profile, accent }: { profile: CoachProfile; accent: string }
   return (
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-2">
-        <HudCard title="PP Coordinator" subtitle="4.9" accent="#4ade80">
+        <HudPanel title="PP Coordinator" subtitle="system efficiency" themeColor="#4ade80" allCorners>
           {pp ? (
             <>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
@@ -938,9 +927,9 @@ function StaffTab({ profile, accent }: { profile: CoachProfile; accent: string }
               </div>
             </>
           ) : <p className="text-[10px] font-mono text-white/40">No data.</p>}
-        </HudCard>
+        </HudPanel>
 
-        <HudCard title="PK Coordinator" subtitle="4.10" accent="#60a5fa">
+        <HudPanel title="PK Coordinator" subtitle="kill efficiency" themeColor="#60a5fa" allCorners>
           {pk ? (
             <>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
@@ -957,10 +946,10 @@ function StaffTab({ profile, accent }: { profile: CoachProfile; accent: string }
               <p className="mt-2 text-[9px] font-mono text-white/25">{pk.pk_sa} SA · {pk.pk_ga} GA · {pk.sh_goals_for} SHG</p>
             </>
           ) : <p className="text-[10px] font-mono text-white/40">No data.</p>}
-        </HudCard>
+        </HudPanel>
       </div>
 
-      <HudCard title="Goalie Coach Curve" subtitle="4.8" accent={accent}>
+      <HudPanel title="Goalie Coach Curve" subtitle="SV% trajectory" themeColor={accent} allCorners>
         {gc ? (
           <>
             <div className="grid grid-cols-3 gap-2 mb-3">
@@ -984,10 +973,10 @@ function StaffTab({ profile, accent }: { profile: CoachProfile; accent: string }
             )}
           </>
         ) : <p className="text-[10px] font-mono text-white/40">No data.</p>}
-      </HudCard>
+      </HudPanel>
 
       {(sc.length > 0 || fo.length > 0) && (
-        <HudCard title="Staff / FO Changes" subtitle="4.13 + 4.14" accent={accent}>
+        <HudPanel title="Staff / FO Changes" subtitle="regime change log" themeColor={accent} allCorners>
           <div className="space-y-1.5">
             {sc.map((r, i) => (
               <div key={`s${i}`} className="flex items-center gap-3 px-3 py-2 rounded bg-white/[0.02] border border-[#f87171]/25">
@@ -1006,7 +995,7 @@ function StaffTab({ profile, accent }: { profile: CoachProfile; accent: string }
               </div>
             ))}
           </div>
-        </HudCard>
+        </HudPanel>
       )}
     </div>
   );
@@ -1018,7 +1007,7 @@ function IdentityTab({ profile, accent }: { profile: CoachProfile; accent: strin
   const va = profile.venue_atmosphere?.row;
   return (
     <div className="space-y-4">
-      <HudCard title="Coaching Style Vector" subtitle="4.11 · 8-dim radar" accent={accent}>
+      <HudPanel title="Coaching Style Vector" subtitle="8-dim radar" themeColor={accent} allCorners>
         {cs ? (
           <div className="flex items-center gap-6 flex-wrap">
             <StyleRadar dims={cs.dimensions} accent={accent} />
@@ -1040,10 +1029,10 @@ function IdentityTab({ profile, accent }: { profile: CoachProfile; accent: strin
             </div>
           </div>
         ) : <p className="text-[10px] font-mono text-white/40">No data.</p>}
-      </HudCard>
+      </HudPanel>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <HudCard title="Roster Fit Score" subtitle="4.12" accent={accent}>
+        <HudPanel title="Roster Fit Score" subtitle="archetype alignment" themeColor={accent} allCorners>
           {rf ? (
             <>
               <div className="flex items-center justify-center mb-3">
@@ -1075,9 +1064,9 @@ function IdentityTab({ profile, accent }: { profile: CoachProfile; accent: strin
               )}
             </>
           ) : <p className="text-[10px] font-mono text-white/40">No data.</p>}
-        </HudCard>
+        </HudPanel>
 
-        <HudCard title="Home Venue Atmosphere" subtitle="4.19" accent={accent}>
+        <HudPanel title="Home Venue Atmosphere" subtitle="scare factor breakdown" themeColor={accent} allCorners>
           {va ? (
             <>
               <div className="grid grid-cols-2 gap-2 mb-3">
@@ -1094,7 +1083,7 @@ function IdentityTab({ profile, accent }: { profile: CoachProfile; accent: strin
               <p className="mt-2 text-[9px] font-mono text-white/25">{va.home_gp} home GP</p>
             </>
           ) : <p className="text-[10px] font-mono text-white/40">No data.</p>}
-        </HudCard>
+        </HudPanel>
       </div>
     </div>
   );
@@ -1109,7 +1098,7 @@ function ContextTab({ profile, accent }: { profile: CoachProfile; accent: string
   return (
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-2">
-        <HudCard title="Buyer / Seller" subtitle="4.15" accent={accent}>
+        <HudPanel title="Buyer / Seller" subtitle="trade deadline posture" themeColor={accent} allCorners>
           {bs ? (
             <>
               <div className={`rounded border px-4 py-3 mb-3 ${
@@ -1142,9 +1131,9 @@ function ContextTab({ profile, accent }: { profile: CoachProfile; accent: string
               )}
             </>
           ) : <p className="text-[10px] font-mono text-white/40">No data.</p>}
-        </HudCard>
+        </HudPanel>
 
-        <HudCard title="Playoff Elimination" subtitle="4.20" accent={accent}>
+        <HudPanel title="Playoff Elimination" subtitle="P(playoff) · drag" themeColor={accent} allCorners>
           {pe ? (
             <>
               <div className="flex items-center justify-center mb-2">
@@ -1164,10 +1153,10 @@ function ContextTab({ profile, accent }: { profile: CoachProfile; accent: string
               )}
             </>
           ) : <p className="text-[10px] font-mono text-white/40">No data.</p>}
-        </HudCard>
+        </HudPanel>
       </div>
 
-      <HudCard title="GM Behavioral Fingerprint" subtitle="4.18" accent={accent}>
+      <HudPanel title="GM Behavioral Fingerprint" subtitle="trade archetype mix" themeColor={accent} allCorners>
         {gm ? (
           <>
             <div className="flex items-center gap-3 mb-3 px-3 py-2 rounded bg-white/[0.02] border border-white/[0.05]">
@@ -1190,7 +1179,7 @@ function ContextTab({ profile, accent }: { profile: CoachProfile; accent: string
             </div>
           </>
         ) : <p className="text-[10px] font-mono text-white/40">No data.</p>}
-      </HudCard>
+      </HudPanel>
     </div>
   );
 }
@@ -1204,6 +1193,7 @@ export default function CoachPage() {
   const rawName = decodeURIComponent(params?.name ?? "");
   const [profile, setProfile] = useState<CoachProfile | null>(null);
   const [tab, setTab] = useState<Tab>("dossier");
+  const { setPreviewTheme } = useTheme();
 
   useEffect(() => {
     if (!rawName) return;
@@ -1212,6 +1202,20 @@ export default function CoachPage() {
       .then(r => r.json()).then(setProfile)
       .catch(() => setProfile({ status: "not_found", name: rawName }));
   }, [rawName]);
+
+  // Apply the coach's team theme so shared HudPanel/HudTitle/HudBadge
+  // accents pick up var(--brand-hex) automatically.
+  useEffect(() => {
+    const team = profile?.meta?.team;
+    if (!team) return;
+    setPreviewTheme({
+      abbrev: team,
+      primaryColor: TEAM_COLORS[team] ?? "#fb923c",
+      secondaryColor: TEAM_SECONDARY[team] ?? "#1a1a2e",
+      logoUrl: logoUrl(team),
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.meta?.team]);
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -1250,7 +1254,7 @@ export default function CoachPage() {
           COACH DOSSIER · {meta.team}
         </span>
         <span className="hud-mono text-[9px] uppercase tracking-[0.16em] text-white/40">
-          · phase 4 · all 21 features
+          · {meta.name}
         </span>
         <span className="ml-auto text-white/40 text-xs font-mono">{today}</span>
       </div>

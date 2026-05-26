@@ -8,6 +8,7 @@ interface CoachEntry {
   name: string;
   team: string;
   first_named_head_coach?: string | null;
+  image_url?: string | null;
 }
 
 interface CoachProfileSummary {
@@ -56,7 +57,9 @@ export default function CoachesPage() {
         const res = await fetch("/api/coaches");
         const data = await res.json();
         const coaches: CoachEntry[] = (data.coaches ?? []).map((c: any) => ({
-          name: c.name, team: c.team, first_named_head_coach: c.first_named_head_coach,
+          name: c.name, team: c.team,
+          first_named_head_coach: c.first_named_head_coach,
+          image_url: c.image_url ?? null,
         }));
 
         const results: CoachCard[] = [];
@@ -98,7 +101,7 @@ export default function CoachesPage() {
           COACH DIRECTORY
         </span>
         <span className="hud-mono text-[9px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
-          &middot; 32 head coaches &middot; phase 4 dossiers
+          &middot; 32 head coaches
         </span>
         <span className="ml-auto text-[#777] text-xs font-mono">{today}</span>
       </div>
@@ -113,9 +116,6 @@ export default function CoachesPage() {
             {s === "pts" ? "Points %" : s === "gp" ? "GP" : "Team"}
           </button>
         ))}
-        <a href="/phase4" className="ml-auto text-[9px] font-mono text-[#fb923c] hover:text-white transition-colors uppercase tracking-wider">
-          Phase 4 Dev &rarr;
-        </a>
       </div>
 
       {loading ? (
@@ -129,7 +129,28 @@ export default function CoachesPage() {
               className="hud-panel hud-panel--all-corners jarvis-shimmer p-3 flex flex-col gap-2 hover:bg-white/[0.04] transition-all group"
             >
               <div className="flex items-center gap-3">
-                <TeamLogo team={coach.team} size={32} />
+                {/* Coach headshot with small team logo badge */}
+                <div className="relative shrink-0">
+                  <div className="w-12 h-12 rounded-full overflow-hidden border-2 flex items-center justify-center bg-white/[0.04]"
+                    style={{ borderColor: "rgba(251,146,60,0.40)" }}>
+                    {coach.image_url ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img src={coach.image_url} alt={coach.name}
+                        className="w-full h-full object-cover object-top scale-110 origin-top"
+                        onError={(e) => {
+                          const t = e.currentTarget as HTMLImageElement;
+                          t.style.display = "none";
+                          const fallback = t.nextElementSibling as HTMLElement;
+                          if (fallback) fallback.style.display = "flex";
+                        }} />
+                    ) : null}
+                    <span className="text-[9px] font-bold text-[#fb923c] tracking-wider"
+                      style={{ display: coach.image_url ? "none" : "flex" }}>HC</span>
+                  </div>
+                  <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-black/80 flex items-center justify-center border border-white/[0.10]">
+                    <TeamLogo team={coach.team} size={14} />
+                  </div>
+                </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-[12px] font-semibold text-white group-hover:text-[#fb923c] transition-colors truncate">
                     {coach.name}

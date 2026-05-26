@@ -347,7 +347,7 @@ export default function TeamPage() {
   } | null>(null);
 
   // Head coach for the team — drives the hero section + tab link to /coaches/{name}.
-  const [headCoach, setHeadCoach] = useState<{ name: string; first_named_head_coach: string | null } | null>(null);
+  const [headCoach, setHeadCoach] = useState<{ name: string; first_named_head_coach: string | null; image_url?: string | null } | null>(null);
   const [coachProfile, setCoachProfile] = useState<Record<string, any> | null>(null);
   useEffect(() => {
     setCoachProfile(null);
@@ -356,7 +356,11 @@ export default function TeamPage() {
       .then((d) => {
         const row = (d.coaches ?? []).find((c: { team: string }) => c.team === team);
         if (row) {
-          setHeadCoach({ name: row.name, first_named_head_coach: row.first_named_head_coach ?? null });
+          setHeadCoach({
+            name: row.name,
+            first_named_head_coach: row.first_named_head_coach ?? null,
+            image_url: row.image_url ?? null,
+          });
           fetch(`/api/coaches/${encodeURIComponent(row.name)}`)
             .then(r2 => r2.json())
             .then(setCoachProfile)
@@ -738,10 +742,21 @@ export default function TeamPage() {
               >
                 <div className="flex items-center gap-4 px-4 py-3.5">
                   <div
-                    className="w-14 h-14 rounded-full border-2 flex items-center justify-center shrink-0"
-                    style={{ borderColor: `${teamColor}80`, background: `${teamColor}12` }}
+                    className="w-16 h-16 rounded-full border-2 flex items-center justify-center shrink-0 overflow-hidden relative"
+                    style={{
+                      borderColor: `${teamColor}80`,
+                      background: `${teamColor}12`,
+                      boxShadow: `0 0 14px ${teamColor}55, inset 0 0 0 2px rgba(255,255,255,0.10)`,
+                    }}
                   >
-                    <span className="text-[15px] font-bold tracking-wider" style={{ color: teamColor }}>HC</span>
+                    {headCoach.image_url ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img src={headCoach.image_url} alt={headCoach.name}
+                        className="w-full h-full object-cover object-top scale-110 origin-top"
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+                    ) : (
+                      <span className="text-[15px] font-bold tracking-wider" style={{ color: teamColor }}>HC</span>
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">

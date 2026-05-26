@@ -5027,6 +5027,7 @@ async def list_coaches() -> dict:
             "position":               "HC",  # head coach
             "first_named_head_coach": c.get("first_named_head_coach"),
             "notes":                  c.get("notes") or "",
+            "image_url":              c.get("image_url"),
         }
         for c in coaches
         if c.get("name") and c.get("team")
@@ -5070,6 +5071,7 @@ async def coach_profile(name: str) -> dict:
             "team":                       team,
             "first_named_head_coach":     match.get("first_named_head_coach"),
             "notes":                      match.get("notes") or "",
+            "image_url":                  match.get("image_url"),
         },
     }
 
