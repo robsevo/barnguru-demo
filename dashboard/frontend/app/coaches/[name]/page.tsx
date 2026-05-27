@@ -93,15 +93,6 @@ interface FoRegimeRow {
   date: string; fo_role: string; person_out: string; person_in: string;
   description: string; decay_games: number;
 }
-interface BuyerSellerRow {
-  team: string; season: number; gp: number; points_pct: number;
-  classification: "buyer" | "seller" | "neutral";
-  confidence: number; gap: number; threshold: number;
-}
-interface SellerMotivationRow {
-  team: string; seller_drag: number; efficiency_multiplier: number;
-  games_since_deadline: number; contextual_flag: string;
-}
 interface CoachDecisionRow {
   coach_name: string; team: string;
   timeout_aggression: number; pull_aggression: number;
@@ -145,8 +136,6 @@ interface CoachProfile {
   roster_fit?:       { row: RosterFitRow | null; as_of: string | null };
   staff_changes?:    { rows: StaffChangeRow[]; as_of: string | null };
   fo_regime_changes?:{ rows: FoRegimeRow[]; as_of: string | null };
-  buyer_seller?:     { row: BuyerSellerRow | null; as_of: string | null };
-  seller_motivation?:{ row: SellerMotivationRow | null; as_of: string | null };
   coach_decision_net?:{ row: CoachDecisionRow | null; as_of: string | null };
   gm_fingerprint?:   { row: GmFingerprintRow | null; as_of: string | null };
   venue_atmosphere?: { row: VenueAtmosphereRow | null; as_of: string | null };
@@ -487,7 +476,6 @@ function Hero({ meta, profile, teamColor, teamSecondary }: {
   teamSecondary: string;
 }) {
   const cp = profile.coach_profile?.row;
-  const bs = profile.buyer_seller?.row;
   return (
     <div className="relative jarvis-shimmer mb-3 rounded-2xl border overflow-hidden hud-panel--all-corners"
       style={{
@@ -591,15 +579,6 @@ function Hero({ meta, profile, teamColor, teamSecondary }: {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <span className="text-[9px] font-mono uppercase tracking-[0.20em]" style={{ color: teamColor }}>HEAD COACH</span>
-            {bs && (
-              <span className={`px-1.5 py-0.5 rounded text-[8px] font-mono font-semibold uppercase border ${
-                bs.classification === "buyer" ? "border-[#4ade80]/40 text-[#4ade80] bg-[#4ade80]/[0.06]"
-                : bs.classification === "seller" ? "border-[#f87171]/40 text-[#f87171] bg-[#f87171]/[0.06]"
-                : "border-[#fbbf24]/40 text-[#fbbf24] bg-[#fbbf24]/[0.06]"
-              }`}>
-                {bs.classification} · conf {(bs.confidence * 100).toFixed(0)}%
-              </span>
-            )}
           </div>
           <h1 className="text-[22px] sm:text-[28px] lg:text-[30px] font-bold text-white tracking-tight leading-tight truncate">
             {meta.name}
@@ -722,7 +701,7 @@ function TabBar({ active, onChange, teamColor }: {
     { id: "ingame",   label: "In-Game",  glyph: "◭", subtitle: "decisions · pulls · pens" },
     { id: "staff",    label: "Staff",    glyph: "◆", subtitle: "coordinators · changes" },
     { id: "identity", label: "Identity", glyph: "⌖", subtitle: "style · fit · venue" },
-    { id: "context",  label: "Context",  glyph: "◉", subtitle: "buyer/seller · GM · playoff" },
+    { id: "context",  label: "Context",  glyph: "◉", subtitle: "GM · playoff posture" },
   ];
 
   // Flex-sibling arrow pattern — copied from ScoreboardBar. Must not use
@@ -1325,71 +1304,32 @@ function IdentityTab({ profile, accent }: { profile: CoachProfile; accent: strin
 }
 
 function ContextTab({ profile, accent }: { profile: CoachProfile; accent: string }) {
-  const bs = profile.buyer_seller?.row;
-  const sm = profile.seller_motivation?.row;
   const pe = profile.playoff_elimination?.row;
   const gm = profile.gm_fingerprint?.row;
   const archs = ["stand_pat","add_rental","sell_veteran","rebuild","package_deal"] as const;
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2">
-        <HudPanel title="Buyer / Seller" subtitle="trade deadline posture" themeColor={accent} allCorners>
-          {bs ? (
-            <>
-              <div className={`rounded border px-4 py-3 mb-3 ${
-                bs.classification === "buyer"  ? "border-[#4ade80]/30 bg-[#4ade80]/[0.04]"
-                : bs.classification === "seller" ? "border-[#f87171]/30 bg-[#f87171]/[0.04]"
-                : "border-[#fbbf24]/30 bg-[#fbbf24]/[0.04]"
-              }`}>
-                <div className="flex items-center gap-3">
-                  <span className={`text-[20px] font-mono font-bold uppercase ${
-                    bs.classification === "buyer"  ? "text-[#4ade80]"
-                    : bs.classification === "seller" ? "text-[#f87171]"
-                    : "text-[#fbbf24]"
-                  }`}>{bs.classification}</span>
-                  <span className="text-[10px] font-mono text-white/40">conf {(bs.confidence * 100).toFixed(0)}%</span>
+      <HudPanel title="Playoff Elimination" subtitle="P(playoff) · drag" themeColor={accent} allCorners>
+        {pe ? (
+          <>
+            <div className="flex items-center justify-center mb-2">
+              <Gauge value={pe.playoff_prob} max={1} accent={
+                pe.playoff_prob >= 0.6 ? "#4ade80" : pe.playoff_prob >= 0.25 ? "#fbbf24" : "#f87171"
+              } w={220} h={120} />
+            </div>
+            <p className="text-center text-[9px] font-mono text-white/30 mb-2">P(playoff) · {pe.games_remaining} games remaining</p>
+            {pe.elimination_drag > 0 && (
+              <div className="rounded border border-[#fbbf24]/30 bg-[#fbbf24]/[0.04] px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono font-semibold text-[#fbbf24]">ELIMINATION DRAG</span>
+                  <span className="text-[13px] font-mono font-bold text-[#fbbf24]">{(pe.elimination_drag * 100).toFixed(0)}%</span>
+                  <span className="ml-auto text-[9px] font-mono text-white/30">×{pe.efficiency_multiplier.toFixed(3)}</span>
                 </div>
-                <p className="text-[9px] font-mono text-white/35 mt-1">
-                  P% {(bs.points_pct * 100).toFixed(1)} · threshold {(bs.threshold * 100).toFixed(1)} · gap {bs.gap >= 0 ? "+" : ""}{(bs.gap * 100).toFixed(1)} · {bs.gp} GP
-                </p>
               </div>
-              {sm && sm.seller_drag > 0 && (
-                <div className="rounded border border-[#f87171]/30 bg-[#f87171]/[0.04] px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono font-semibold text-[#f87171]">SELLER DRAG</span>
-                    <span className="text-[13px] font-mono font-bold text-[#f87171]">{(sm.seller_drag * 100).toFixed(0)}%</span>
-                    <span className="ml-auto text-[9px] font-mono text-white/30">
-                      ×{sm.efficiency_multiplier.toFixed(3)} · ~{sm.games_since_deadline}g post-DL
-                    </span>
-                  </div>
-                </div>
-              )}
-            </>
-          ) : <p className="text-[10px] font-mono text-white/40">No data.</p>}
-        </HudPanel>
-
-        <HudPanel title="Playoff Elimination" subtitle="P(playoff) · drag" themeColor={accent} allCorners>
-          {pe ? (
-            <>
-              <div className="flex items-center justify-center mb-2">
-                <Gauge value={pe.playoff_prob} max={1} accent={
-                  pe.playoff_prob >= 0.6 ? "#4ade80" : pe.playoff_prob >= 0.25 ? "#fbbf24" : "#f87171"
-                } w={220} h={120} />
-              </div>
-              <p className="text-center text-[9px] font-mono text-white/30 mb-2">P(playoff) · {pe.games_remaining} games remaining</p>
-              {pe.elimination_drag > 0 && (
-                <div className="rounded border border-[#fbbf24]/30 bg-[#fbbf24]/[0.04] px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono font-semibold text-[#fbbf24]">ELIMINATION DRAG</span>
-                    <span className="text-[13px] font-mono font-bold text-[#fbbf24]">{(pe.elimination_drag * 100).toFixed(0)}%</span>
-                    <span className="ml-auto text-[9px] font-mono text-white/30">×{pe.efficiency_multiplier.toFixed(3)}</span>
-                  </div>
-                </div>
-              )}
-            </>
-          ) : <p className="text-[10px] font-mono text-white/40">No data.</p>}
-        </HudPanel>
-      </div>
+            )}
+          </>
+        ) : <p className="text-[10px] font-mono text-white/40">No data.</p>}
+      </HudPanel>
 
       <HudPanel title="GM Behavioral Fingerprint" subtitle="trade archetype mix" themeColor={accent} allCorners scanline>
         {gm ? (

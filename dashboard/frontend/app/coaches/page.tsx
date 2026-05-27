@@ -19,11 +19,6 @@ interface CoachProfileSummary {
   ot_losses: number;
 }
 
-interface BuyerSellerSummary {
-  classification: string;
-  confidence: number;
-}
-
 interface VenueSummary {
   scare_factor: number;
   scare_rank: number;
@@ -32,7 +27,6 @@ interface VenueSummary {
 interface CoachCard {
   coach: CoachEntry;
   profile?: CoachProfileSummary | null;
-  buyer_seller?: BuyerSellerSummary | null;
   venue?: VenueSummary | null;
 }
 
@@ -71,7 +65,6 @@ export default function CoachesPage() {
               results.push({
                 coach,
                 profile: p.coach_profile?.row ?? null,
-                buyer_seller: p.buyer_seller?.row ?? null,
                 venue: p.venue_atmosphere?.row ?? null,
               });
             } catch {
@@ -122,7 +115,7 @@ export default function CoachesPage() {
         <p className="text-[10px] font-semibold uppercase tracking-widest text-[#777] animate-pulse relative z-10">LOADING...</p>
       ) : (
         <div className="relative z-10 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {sorted.map(({ coach, profile, buyer_seller, venue }) => (
+          {sorted.map(({ coach, profile, venue }) => (
             <a
               key={coach.team}
               href={`/coaches/${encodeURIComponent(coach.name)}`}
@@ -161,15 +154,6 @@ export default function CoachesPage() {
                     {TEAM_FULL_NAMES[coach.team] ?? coach.team}
                   </div>
                 </div>
-                {buyer_seller && (
-                  <span className={`px-1.5 py-0.5 rounded text-[8px] font-mono font-semibold uppercase border ${
-                    buyer_seller.classification === "buyer" ? "border-[#4ade80]/30 text-[#4ade80]"
-                    : buyer_seller.classification === "seller" ? "border-[#f87171]/30 text-[#f87171]"
-                    : "border-[#fbbf24]/30 text-[#fbbf24]"
-                  }`}>
-                    {buyer_seller.classification}
-                  </span>
-                )}
               </div>
 
               {profile ? (

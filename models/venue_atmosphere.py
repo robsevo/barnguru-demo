@@ -21,10 +21,18 @@ Components (per home-team building, per season)
      + 0.20 × z(ref_pp_delta) + 0.20 × z(−visiting_xgf_delta)``
 
 All components z-scored across the 32 buildings.  Higher scare_factor =
-scarier building for visiting teams.  Canonical: Bell Centre (MTL).
+scarier building for visiting teams.
 
-Dynamic scaling (v2): multiply scare_factor by home team's current EWMA
-form trend (2.13).  v1 outputs the static per-season number.
+v2 — team-strength normalization
+--------------------------------
+The v1 deltas conflated venue effect with home-team quality: when a
+team is strong, visiting goalies face better shots regardless of the
+building, dragging the visiting SV% delta downward → falsely scary.
+Conversely, a loud building hosting a weak team (NSH, MSG, United
+Center in recent seasons) looked unscary.  v2 residualises each delta
+against the home team's overall goal differential per game before
+z-scoring, so scare_factor reflects the part of the delta that is NOT
+explained by the home team simply being better.
 
 Output: ``venue_atmosphere/venue_atmosphere_{season}.parquet``
 """
@@ -38,7 +46,7 @@ from typing import Any
 import polars as pl
 
 
-MODEL_VERSION = "venue_atmosphere_v1"
+MODEL_VERSION = "venue_atmosphere_v2"
 
 
 class DataMissingWarning(UserWarning):
@@ -69,6 +77,29 @@ def _z_scores(values: list[float]) -> list[float]:
     if std < 1e-12:
         return [0.0] * n
     return [(v - mean) / std for v in values]
+
+
+def _residualize(values: list[float], covariate: list[float]) -> list[float]:
+    """Remove the linear effect of ``covariate`` from ``values`` via OLS.
+
+    Returns the residuals (observed - predicted) where the prediction is a
+    single-variable linear fit ``y = a·x + b``.  With <3 valid samples we
+    return ``values`` unchanged.  Used to strip home-team-strength bias
+    from each venue delta before composing scare_factor.
+    """
+    n = len(values)
+    if n != len(covariate) or n < 3:
+        return list(values)
+    sx = sum(covariate)
+    sy = sum(values)
+    sxx = sum(x * x for x in covariate)
+    sxy = sum(x * y for x, y in zip(covariate, values))
+    denom = n * sxx - sx * sx
+    if abs(denom) < 1e-12:
+        return list(values)
+    slope = (n * sxy - sx * sy) / denom
+    intercept = (sy - slope * sx) / n
+    return [v - (slope * x + intercept) for v, x in zip(values, covariate)]
 
 
 def _percentile_rank(values: list[float]) -> list[float]:
@@ -196,7 +227,37 @@ def compute_venue_atmosphere(
         else:
             pp_away[abbrev] = pp_away.get(abbrev, 0) + cnt
 
-    # --- 4. Visiting xGF delta per building (from MoneyPuck shots) ---
+    # --- 4. Team strength proxy — overall goal differential per game.
+    #        Used as a covariate to residualise venue deltas (v2).
+    #        Computed across BOTH home and away games so it isn't confounded
+    #        with home-ice effects we're trying to isolate.
+    team_gf:  dict[str, int] = {}
+    team_ga:  dict[str, int] = {}
+    team_gp:  dict[str, int] = {}
+    goals_only = pbp_df.filter(pl.col("event_type") == "goal").select(
+        ["home_team_id", "away_team_id", "event_owner_team_id"]
+    )
+    for r in goals_only.iter_rows(named=True):
+        h = int(r["home_team_id"]); a = int(r["away_team_id"]); o = int(r["event_owner_team_id"])
+        h_ab = team_lookup.get(h); a_ab = team_lookup.get(a)
+        if not h_ab or not a_ab:
+            continue
+        if o == h:
+            team_gf[h_ab] = team_gf.get(h_ab, 0) + 1
+            team_ga[a_ab] = team_ga.get(a_ab, 0) + 1
+        elif o == a:
+            team_gf[a_ab] = team_gf.get(a_ab, 0) + 1
+            team_ga[h_ab] = team_ga.get(h_ab, 0) + 1
+    games_per_team = (
+        pbp_df.select(["game_id", "home_team_id", "away_team_id"]).unique()
+    )
+    for r in games_per_team.iter_rows(named=True):
+        h_ab = team_lookup.get(int(r["home_team_id"]))
+        a_ab = team_lookup.get(int(r["away_team_id"]))
+        if h_ab: team_gp[h_ab] = team_gp.get(h_ab, 0) + 1
+        if a_ab: team_gp[a_ab] = team_gp.get(a_ab, 0) + 1
+
+    # --- 5. Visiting xGF delta per building (from MoneyPuck shots) ---
     visiting_xgf: dict[str, float] = {}
     visiting_shots_count: dict[str, int] = {}
     if not shots_df.is_empty() and {"home_team", "away_team", "shooting_team", "x_goal"}.issubset(shots_df.columns):
@@ -257,11 +318,24 @@ def compute_venue_atmosphere(
     if not rows:
         return pl.DataFrame(schema=VENUE_ATMOSPHERE_SCHEMA)
 
-    # Compute scare_factor from z-scored components
-    z_sv  = _z_scores([-r["visiting_sv_delta"] for r in rows])
-    z_fow = _z_scores([-r["visiting_fow_delta"] for r in rows])
-    z_pp  = _z_scores([r["ref_pp_delta"] for r in rows])
-    z_xgf = _z_scores([-r["visiting_xgf_delta"] for r in rows])
+    # v2 normalization — residualise each delta against the home team's
+    # goal differential per game so scare_factor isolates the venue-only
+    # signal. League-average team strength (≈0) is used when a team has
+    # no GP recorded (shouldn't happen but safe).
+    strength = [
+        (team_gf.get(r["team"], 0) - team_ga.get(r["team"], 0)) / max(1, team_gp.get(r["team"], 0))
+        for r in rows
+    ]
+    sv_resid  = _residualize([-r["visiting_sv_delta"]  for r in rows], strength)
+    fow_resid = _residualize([-r["visiting_fow_delta"] for r in rows], strength)
+    pp_resid  = _residualize([ r["ref_pp_delta"]       for r in rows], strength)
+    xgf_resid = _residualize([-r["visiting_xgf_delta"] for r in rows], strength)
+
+    # Compute scare_factor from z-scored residuals
+    z_sv  = _z_scores(sv_resid)
+    z_fow = _z_scores(fow_resid)
+    z_pp  = _z_scores(pp_resid)
+    z_xgf = _z_scores(xgf_resid)
 
     for i, r in enumerate(rows):
         r["scare_factor"] = round(

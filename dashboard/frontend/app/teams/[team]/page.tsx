@@ -763,18 +763,6 @@ export default function TeamPage() {
                       <span className="text-[15px] font-semibold text-white group-hover:text-white transition-colors">
                         {headCoach.name}
                       </span>
-                      {(() => {
-                        const bs = coachProfile?.buyer_seller?.row;
-                        return bs ? (
-                          <span className={`px-1.5 py-0.5 rounded text-[8px] font-mono font-semibold uppercase border ${
-                            bs.classification === "buyer" ? "border-[#4ade80]/30 text-[#4ade80]"
-                            : bs.classification === "seller" ? "border-[#f87171]/30 text-[#f87171]"
-                            : "border-[#fbbf24]/30 text-[#fbbf24]"
-                          }`}>
-                            {bs.classification}
-                          </span>
-                        ) : null;
-                      })()}
                     </div>
                     <div className="text-[10px] font-mono text-white/40 mt-0.5 flex items-center gap-1.5 flex-wrap">
                       <span className="uppercase tracking-[0.18em]" style={{ color: teamColor }}>Head Coach</span>
