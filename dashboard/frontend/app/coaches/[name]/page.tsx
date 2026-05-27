@@ -823,7 +823,7 @@ function DossierTab({ profile, accent }: { profile: CoachProfile; accent: string
   const va = profile.venue_atmosphere?.row;
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      <HudPanel title="Career with Team" subtitle="season totals · record" themeColor={accent} allCorners scanline>
+      <HudPanel title="Recent Seasons with Team" subtitle="last 3 ingested seasons · record" themeColor={accent} allCorners scanline>
         {cp ? (
           <>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
@@ -842,7 +842,9 @@ function DossierTab({ profile, accent }: { profile: CoachProfile; accent: string
               <StatPill label="PP %"     value={`${(cp.pp_pct * 100).toFixed(1)}%`} color={cp.pp_pct >= 0.20 ? "text-[#4ade80]" : "text-white"} />
               <StatPill label="PK %"     value={`${(cp.pk_pct * 100).toFixed(1)}%`} color={cp.pk_pct >= 0.80 ? "text-[#4ade80]" : "text-white"} />
             </div>
-            <p className="mt-3 text-[9px] font-mono text-white/25">seasons {cp.seasons_covered.join(", ")}</p>
+            <p className="mt-3 text-[9px] font-mono text-white/25">
+              seasons {cp.seasons_covered.join(", ")} · PBP ingestion limited to 3 seasons
+            </p>
           </>
         ) : (
           <p className="text-[10px] font-mono text-white/40">No coach profile yet.</p>
@@ -870,7 +872,7 @@ function DossierTab({ profile, accent }: { profile: CoachProfile; accent: string
       </HudPanel>
 
       {va && (
-        <HudPanel title="Home Venue Scare" subtitle="home-ice edge" themeColor={accent} allCorners>
+        <HudPanel title="Home Outcome Edge" subtitle="visiting-team performance deltas" themeColor={accent} allCorners>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
             <StatPill label="Scare"      value={(va.scare_factor >= 0 ? "+" : "") + va.scare_factor.toFixed(2)}
               color={va.scare_factor > 0.3 ? "text-[#f87171]" : va.scare_factor > 0 ? "text-[#fbbf24]" : "text-white/55"} />
@@ -883,6 +885,10 @@ function DossierTab({ profile, accent }: { profile: CoachProfile; accent: string
           </div>
           <p className="text-[9px] font-mono text-white/25">
             league rank #{Math.round((1 - va.scare_rank) * 31) + 1} of 32 · {va.home_gp} home GP
+          </p>
+          <p className="mt-1 text-[8px] font-mono text-white/20 leading-relaxed">
+            measures how much visiting teams underperform at this rink (SV%, FOW%, ref PP, xGF).
+            Conflates home-team quality with venue intimidation — does not capture crowd-noise.
           </p>
         </HudPanel>
       )}
@@ -1293,7 +1299,7 @@ function IdentityTab({ profile, accent }: { profile: CoachProfile; accent: strin
           ) : <p className="text-[10px] font-mono text-white/40">No data.</p>}
         </HudPanel>
 
-        <HudPanel title="Home Venue Atmosphere" subtitle="scare factor breakdown" themeColor={accent} allCorners>
+        <HudPanel title="Home Outcome Edge" subtitle="visiting-team deltas · not crowd-noise based" themeColor={accent} allCorners>
           {va ? (
             <>
               <div className="grid grid-cols-2 gap-2 mb-3">
