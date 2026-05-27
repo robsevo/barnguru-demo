@@ -16,29 +16,41 @@ Components (per home-team building, per season)
    away xGF/60 when playing in this building.  Negative = offense
    suppressed.
 
-**scare_factor** = weighted composite:
-    ``0.35 × z(−visiting_sv_delta) + 0.25 × z(−visiting_fow_delta)
-     + 0.20 × z(ref_pp_delta) + 0.20 × z(−visiting_xgf_delta)``
+**scare_factor (v3)** = weighted composite of five components:
+    ``0.30 × z(crowd_intensity)
+     + 0.20 × z(−visiting_xgf_delta_resid)
+     + 0.20 × z(−visiting_sv_delta_resid)
+     + 0.15 × z(−visiting_fow_delta_resid)
+     + 0.15 × z(ref_pp_delta_resid)``
 
 All components z-scored across the 32 buildings.  Higher scare_factor =
 scarier building for visiting teams.
 
 v2 — team-strength normalization
 --------------------------------
-The v1 deltas conflated venue effect with home-team quality: when a
-team is strong, visiting goalies face better shots regardless of the
-building, dragging the visiting SV% delta downward → falsely scary.
-Conversely, a loud building hosting a weak team (NSH, MSG, United
-Center in recent seasons) looked unscary.  v2 residualises each delta
-against the home team's overall goal differential per game before
-z-scoring, so scare_factor reflects the part of the delta that is NOT
-explained by the home team simply being better.
+The v1 deltas conflated venue effect with home-team quality.  v2
+residualises each delta against the home team's overall goal
+differential per game before z-scoring, so scare_factor reflects the
+part of the delta that is NOT explained by the home team being better.
+
+v3 — crowd / market reputation prior
+------------------------------------
+v2 still missed the obvious: hardcore hockey markets (MTL, MSG, TD
+Garden, Bridgestone) are objectively more terrifying than non-hockey
+markets (SJS, UTH, SEA).  v3 adds ``crowd_intensity`` from
+``data/venue_reputation.json`` — editorial prior on a roughly z-scored
+scale capturing Original Six religion, Canadian-market intensity,
+known-loud barns, and the inverse for Sun Belt / recent expansion.
+crowd_intensity carries the largest single weight (30%) because the
+measured outcome deltas don't fully capture crowd impact on visitor
+psyche.
 
 Output: ``venue_atmosphere/venue_atmosphere_{season}.parquet``
 """
 
 from __future__ import annotations
 
+import json
 import warnings
 from pathlib import Path
 from typing import Any
@@ -46,7 +58,39 @@ from typing import Any
 import polars as pl
 
 
-MODEL_VERSION = "venue_atmosphere_v2"
+MODEL_VERSION = "venue_atmosphere_v3"
+
+_REPUTATION_PATH = Path(__file__).resolve().parents[1] / "data" / "venue_reputation.json"
+
+
+def _load_crowd_intensity() -> dict[str, float]:
+    """Load per-team crowd intensity priors from data/venue_reputation.json.
+
+    Returns ``{team_abbrev: crowd_intensity}``.  Missing file or malformed
+    entries fall back to 0.0 (league-average prior) with a loud warning.
+    """
+    if not _REPUTATION_PATH.exists():
+        warnings.warn(
+            f"venue_reputation.json not found at {_REPUTATION_PATH} — crowd prior disabled.",
+            DataMissingWarning,
+            stacklevel=2,
+        )
+        return {}
+    try:
+        blob = json.loads(_REPUTATION_PATH.read_text(encoding="utf-8"))
+    except Exception as e:
+        warnings.warn(
+            f"failed to parse venue_reputation.json: {e!r} — crowd prior disabled.",
+            DataMissingWarning,
+            stacklevel=2,
+        )
+        return {}
+    out: dict[str, float] = {}
+    for team, entry in (blob.get("venues") or {}).items():
+        ci = entry.get("crowd_intensity")
+        if isinstance(ci, (int, float)):
+            out[team] = float(ci)
+    return out
 
 
 class DataMissingWarning(UserWarning):
@@ -61,6 +105,7 @@ VENUE_ATMOSPHERE_SCHEMA: dict[str, pl.DataType] = {
     "visiting_fow_delta":   pl.Float64,
     "ref_pp_delta":         pl.Float64,
     "visiting_xgf_delta":   pl.Float64,
+    "crowd_intensity":      pl.Float64,
     "scare_factor":         pl.Float64,
     "scare_rank":           pl.Float64,
     "model_version":        pl.Utf8,
@@ -313,6 +358,7 @@ def compute_venue_atmosphere(
             "visiting_fow_delta": round(fow_delta, 4),
             "ref_pp_delta":       round(pp_delta, 4),
             "visiting_xgf_delta": round(xgf_delta, 5),
+            "crowd_intensity":    0.0,  # filled in below
         })
 
     if not rows:
@@ -331,7 +377,18 @@ def compute_venue_atmosphere(
     pp_resid  = _residualize([ r["ref_pp_delta"]       for r in rows], strength)
     xgf_resid = _residualize([-r["visiting_xgf_delta"] for r in rows], strength)
 
-    # Compute scare_factor from z-scored residuals
+    # v3 — crowd intensity prior (Original Six + Canadian + known-loud
+    # barns score high; Sun Belt + recent expansion score low). Pulled
+    # from data/venue_reputation.json so the editorial layer is checked-in
+    # and reviewable.
+    crowd_lut = _load_crowd_intensity()
+    for r in rows:
+        r["crowd_intensity"] = round(float(crowd_lut.get(r["team"], 0.0)), 3)
+    crowd_z = _z_scores([r["crowd_intensity"] for r in rows])
+
+    # Compute scare_factor from z-scored residuals + crowd prior.
+    # Weights tuned so the editorial crowd component dominates (30%) and
+    # the four outcome residuals share the remaining 70%.
     z_sv  = _z_scores(sv_resid)
     z_fow = _z_scores(fow_resid)
     z_pp  = _z_scores(pp_resid)
@@ -339,7 +396,12 @@ def compute_venue_atmosphere(
 
     for i, r in enumerate(rows):
         r["scare_factor"] = round(
-            0.35 * z_sv[i] + 0.25 * z_fow[i] + 0.20 * z_pp[i] + 0.20 * z_xgf[i], 4
+            0.30 * crowd_z[i]
+            + 0.20 * z_xgf[i]
+            + 0.20 * z_sv[i]
+            + 0.15 * z_fow[i]
+            + 0.15 * z_pp[i],
+            4,
         )
 
     scare_vals = [r["scare_factor"] for r in rows]

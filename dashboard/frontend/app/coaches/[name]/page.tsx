@@ -110,6 +110,7 @@ interface VenueAtmosphereRow {
   team: string; home_gp: number;
   visiting_sv_delta: number; visiting_fow_delta: number;
   ref_pp_delta: number; visiting_xgf_delta: number;
+  crowd_intensity: number;
   scare_factor: number; scare_rank: number;
 }
 interface PlayoffEliminationRow {
@@ -862,12 +863,16 @@ function DossierTab({ profile, accent }: { profile: CoachProfile; accent: string
             <StatPill label="Ref PP Δ"   value={(va.ref_pp_delta >= 0 ? "+" : "") + va.ref_pp_delta.toFixed(2)}
               color={va.ref_pp_delta > 0 ? "text-[#4ade80]" : "text-white/55"} />
           </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
+            <StatPill label="Crowd"      value={(va.crowd_intensity >= 0 ? "+" : "") + va.crowd_intensity.toFixed(1)}
+              color={va.crowd_intensity >= 1.4 ? "text-[#4ade80]" : va.crowd_intensity >= 0.4 ? "text-white" : "text-[#f87171]"} />
+          </div>
           <p className="text-[9px] font-mono text-white/25">
             league rank #{Math.round((1 - va.scare_rank) * 31) + 1} of 32 · {va.home_gp} home GP
           </p>
           <p className="mt-1 text-[8px] font-mono text-white/20 leading-relaxed">
-            measures how much visiting teams underperform at this rink (SV%, FOW%, ref PP, xGF).
-            Conflates home-team quality with venue intimidation — does not capture crowd-noise.
+            v3: 30% crowd-reputation prior + 70% residualised visiting-team outcome deltas
+            (SV%, FOW%, ref PP, xGF). Crowd prior editable in data/venue_reputation.json.
           </p>
         </HudPanel>
       )}
@@ -1278,12 +1283,14 @@ function IdentityTab({ profile, accent }: { profile: CoachProfile; accent: strin
           ) : <p className="text-[10px] font-mono text-white/40">No data.</p>}
         </HudPanel>
 
-        <HudPanel title="Home Outcome Edge" subtitle="visiting-team deltas · not crowd-noise based" themeColor={accent} allCorners>
+        <HudPanel title="Building Scare" subtitle="crowd prior + visiting-outcome deltas" themeColor={accent} allCorners>
           {va ? (
             <>
-              <div className="grid grid-cols-2 gap-2 mb-3">
+              <div className="grid grid-cols-3 gap-2 mb-3">
                 <StatPill label="Scare Factor"   value={(va.scare_factor >= 0 ? "+" : "") + va.scare_factor.toFixed(2)}
                   color={va.scare_factor > 0.3 ? "text-[#f87171]" : va.scare_factor > 0 ? "text-[#fbbf24]" : "text-white/55"} />
+                <StatPill label="Crowd"          value={(va.crowd_intensity >= 0 ? "+" : "") + va.crowd_intensity.toFixed(1)}
+                  color={va.crowd_intensity >= 1.4 ? "text-[#4ade80]" : va.crowd_intensity >= 0.4 ? "text-white" : "text-[#f87171]"} />
                 <StatPill label="League Rank"
                   value={`#${Math.round((1 - va.scare_rank) * 31) + 1}/32`}
                   color={va.scare_rank >= 0.66 ? "text-[#4ade80]" : va.scare_rank >= 0.33 ? "text-white" : "text-[#f87171]"} />
@@ -1294,7 +1301,9 @@ function IdentityTab({ profile, accent }: { profile: CoachProfile; accent: strin
                 <BarRow label="Ref PP Edge"   value={Math.max(0, va.ref_pp_delta)} accent={accent} max={1} />
                 <BarRow label="vxGF Suppress" value={Math.max(0, -va.visiting_xgf_delta * 100)} accent={accent} max={1} />
               </div>
-              <p className="mt-2 text-[9px] font-mono text-white/25">{va.home_gp} home GP</p>
+              <p className="mt-2 text-[9px] font-mono text-white/25">
+                {va.home_gp} home GP · crowd prior 30% + outcome residuals 70%
+              </p>
             </>
           ) : <p className="text-[10px] font-mono text-white/40">No data.</p>}
         </HudPanel>

@@ -5570,6 +5570,7 @@ async def coach_profile(name: str) -> dict:
                 "visiting_fow_delta": float(r.get("visiting_fow_delta") or 0.0),
                 "ref_pp_delta":       float(r.get("ref_pp_delta") or 0.0),
                 "visiting_xgf_delta": float(r.get("visiting_xgf_delta") or 0.0),
+                "crowd_intensity":    float(r.get("crowd_intensity") or 0.0),
                 "scare_factor":       float(r.get("scare_factor") or 0.0),
                 "scare_rank":         float(r.get("scare_rank") or 0.0),
             }
