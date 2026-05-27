@@ -325,49 +325,54 @@ function BarRow({ label, value, accent, suffix = "", max = 1 }: {
   );
 }
 
-function Gauge({ value, max = 1, accent, w = 220, h = 90 }: {
+function Gauge({ value, max = 1, accent, w = 220, h = 120 }: {
   value: number; max?: number; accent: string; w?: number; h?: number;
 }) {
   const pct = Math.max(0, Math.min(1, value / max));
-  const cx = w / 2, cy = h - 8, r = h - 18;
+  // Gauge baseline sits near the bottom of the canvas. SVG y is inverted —
+  // negate sin so the arc bulges UP (above the value text), like a proper
+  // tachometer. Adds a tick ring + needle dot.
+  const cx = w / 2, cy = h - 16, r = h - 32;
   const start = Math.PI, end = 0;
   const angle = start + (end - start) * pct;
   const x1 = cx + Math.cos(start) * r;
-  const y1 = cy + Math.sin(start) * r;
+  const y1 = cy - Math.sin(start) * r;
   const x2 = cx + Math.cos(end) * r;
-  const y2 = cy + Math.sin(end) * r;
+  const y2 = cy - Math.sin(end) * r;
   const ax = cx + Math.cos(angle) * r;
-  const ay = cy + Math.sin(angle) * r;
-  // Tick marks for futuristic feel
+  const ay = cy - Math.sin(angle) * r;
   const ticks = Array.from({ length: 9 }, (_, i) => start + (end - start) * (i / 8));
   return (
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="block" aria-hidden>
-      {/* Outer ring */}
+      {/* Outer ring (background) */}
       <path d={`M ${x1} ${y1} A ${r} ${r} 0 0 1 ${x2} ${y2}`}
         fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={8} strokeLinecap="round" />
-      {/* Filled arc */}
+      {/* Filled arc — sweep flag 1 with negated-sin endpoints bulges UP */}
       <path d={`M ${x1} ${y1} A ${r} ${r} 0 0 1 ${ax} ${ay}`}
         fill="none" stroke={accent} strokeWidth={8} strokeLinecap="round"
         style={{ filter: `drop-shadow(0 0 6px ${accent})` }} />
-      {/* Inner concentric ring */}
-      <path d={`M ${cx + Math.cos(start) * (r - 12)} ${cy + Math.sin(start) * (r - 12)} A ${r - 12} ${r - 12} 0 0 1 ${cx + Math.cos(end) * (r - 12)} ${cy + Math.sin(end) * (r - 12)}`}
+      {/* Inner concentric dashed ring */}
+      <path d={`M ${cx + Math.cos(start) * (r - 12)} ${cy - Math.sin(start) * (r - 12)} A ${r - 12} ${r - 12} 0 0 1 ${cx + Math.cos(end) * (r - 12)} ${cy - Math.sin(end) * (r - 12)}`}
         fill="none" stroke={`${accent}33`} strokeWidth={0.8} strokeDasharray="2 4" />
-      {/* Tick marks */}
+      {/* Outward tick marks */}
       {ticks.map((a, i) => (
         <line key={i}
-          x1={cx + Math.cos(a) * (r + 3)} y1={cy + Math.sin(a) * (r + 3)}
-          x2={cx + Math.cos(a) * (r + 9)} y2={cy + Math.sin(a) * (r + 9)}
+          x1={cx + Math.cos(a) * (r + 3)} y1={cy - Math.sin(a) * (r + 3)}
+          x2={cx + Math.cos(a) * (r + 9)} y2={cy - Math.sin(a) * (r + 9)}
           stroke={i === 8 ? accent : `${accent}66`} strokeWidth={i % 2 === 0 ? 1.2 : 0.6}
           style={{ filter: `drop-shadow(0 0 2px ${accent}66)` }} />
       ))}
-      {/* Needle dot at current value */}
+      {/* Needle dot */}
       <circle cx={ax} cy={ay} r={3.5} fill={accent}
         style={{ filter: `drop-shadow(0 0 6px ${accent})` }} />
-      <text x={cx} y={cy - 12} textAnchor="middle" fontSize={20} fontFamily="monospace" fontWeight={700} fill={accent}
+      {/* Value text — centered inside the dome */}
+      <text x={cx} y={cy - r * 0.40} textAnchor="middle" fontSize={20}
+        fontFamily="monospace" fontWeight={700} fill={accent}
         style={{ filter: `drop-shadow(0 0 4px ${accent}88)` }}>
         {value.toFixed(2)}
       </text>
-      <text x={cx} y={cy + 6} textAnchor="middle" fontSize={8} fontFamily="monospace" fill="rgba(255,255,255,0.4)">
+      <text x={cx} y={cy - r * 0.40 + 12} textAnchor="middle" fontSize={8}
+        fontFamily="monospace" fill="rgba(255,255,255,0.4)">
         / {max.toFixed(1)}
       </text>
     </svg>
@@ -848,7 +853,7 @@ function DossierTab({ profile, accent }: { profile: CoachProfile; accent: string
         {dn ? (
           <>
             <div className="flex items-center justify-center mb-3">
-              <Gauge value={dn.overall_aggression} max={1} accent={accent} w={220} h={100} />
+              <Gauge value={dn.overall_aggression} max={1} accent={accent} w={220} h={120} />
             </div>
             <div className="space-y-0.5">
               <BarRow label="Timeout"     value={dn.timeout_aggression} accent={accent} />
@@ -876,7 +881,9 @@ function DossierTab({ profile, accent }: { profile: CoachProfile; accent: string
             <StatPill label="Ref PP Δ"   value={(va.ref_pp_delta >= 0 ? "+" : "") + va.ref_pp_delta.toFixed(2)}
               color={va.ref_pp_delta > 0 ? "text-[#4ade80]" : "text-white/55"} />
           </div>
-          <p className="text-[9px] font-mono text-white/25">rank {(va.scare_rank * 100).toFixed(0)}th percentile · {va.home_gp} home GP</p>
+          <p className="text-[9px] font-mono text-white/25">
+            league rank #{Math.round((1 - va.scare_rank) * 31) + 1} of 32 · {va.home_gp} home GP
+          </p>
         </HudPanel>
       )}
 
@@ -1226,9 +1233,11 @@ function IdentityTab({ profile, accent }: { profile: CoachProfile; accent: strin
       <HudPanel title="Coaching Style Vector" subtitle="8-dim radar · style DNA" themeColor={accent} allCorners scanline>
         {cs ? (
           <>
-            <div className="flex items-center gap-6 flex-wrap">
-              <StyleRadar dims={cs.dimensions} accent={accent} />
-              <div className="flex-1 min-w-[200px] space-y-1">
+            <div className="flex flex-col lg:flex-row items-center justify-center gap-6">
+              <div className="shrink-0 flex justify-center">
+                <StyleRadar dims={cs.dimensions} accent={accent} />
+              </div>
+              <div className="w-full max-w-md space-y-1">
                 {["forecheck_aggression","dz_structure","pace","physicality","oz_structure","nz_tendency","line_match","st_aggression"].map(k => {
                   const d = cs.dimensions[k];
                   const rank = d?.rank;
@@ -1256,7 +1265,7 @@ function IdentityTab({ profile, accent }: { profile: CoachProfile; accent: strin
               <div className="flex items-center justify-center mb-3">
                 <Gauge value={rf.fit_score} max={1} accent={
                   rf.fit_score >= 0.55 ? "#4ade80" : rf.fit_score >= 0.40 ? "#fbbf24" : "#f87171"
-                } w={220} h={100} />
+                } w={220} h={120} />
               </div>
               <div className="grid grid-cols-2 gap-2 mb-3">
                 <StatPill label="Top Archetype" value={rf.archetype_top || "—"} />
@@ -1290,7 +1299,9 @@ function IdentityTab({ profile, accent }: { profile: CoachProfile; accent: strin
               <div className="grid grid-cols-2 gap-2 mb-3">
                 <StatPill label="Scare Factor"   value={(va.scare_factor >= 0 ? "+" : "") + va.scare_factor.toFixed(2)}
                   color={va.scare_factor > 0.3 ? "text-[#f87171]" : va.scare_factor > 0 ? "text-[#fbbf24]" : "text-white/55"} />
-                <StatPill label="League Rank"    value={(va.scare_rank * 100).toFixed(0) + "th"} />
+                <StatPill label="League Rank"
+                  value={`#${Math.round((1 - va.scare_rank) * 31) + 1}/32`}
+                  color={va.scare_rank >= 0.66 ? "text-[#4ade80]" : va.scare_rank >= 0.33 ? "text-white" : "text-[#f87171]"} />
               </div>
               <div className="space-y-0.5">
                 <BarRow label="vSV% Suppress" value={Math.max(0, -va.visiting_sv_delta * 10)} accent={accent} max={1} />
@@ -1357,7 +1368,7 @@ function ContextTab({ profile, accent }: { profile: CoachProfile; accent: string
               <div className="flex items-center justify-center mb-2">
                 <Gauge value={pe.playoff_prob} max={1} accent={
                   pe.playoff_prob >= 0.6 ? "#4ade80" : pe.playoff_prob >= 0.25 ? "#fbbf24" : "#f87171"
-                } w={220} h={100} />
+                } w={220} h={120} />
               </div>
               <p className="text-center text-[9px] font-mono text-white/30 mb-2">P(playoff) · {pe.games_remaining} games remaining</p>
               {pe.elimination_drag > 0 && (
