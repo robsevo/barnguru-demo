@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { logoUrl, TEAM_FULL_NAMES, TEAM_COLORS, TEAM_SECONDARY } from "@/utils/nhl";
 import { useTheme } from "@/utils/themeContext";
@@ -338,20 +338,136 @@ function Gauge({ value, max = 1, accent, w = 220, h = 90 }: {
   const y2 = cy + Math.sin(end) * r;
   const ax = cx + Math.cos(angle) * r;
   const ay = cy + Math.sin(angle) * r;
+  // Tick marks for futuristic feel
+  const ticks = Array.from({ length: 9 }, (_, i) => start + (end - start) * (i / 8));
   return (
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="block" aria-hidden>
+      {/* Outer ring */}
       <path d={`M ${x1} ${y1} A ${r} ${r} 0 0 1 ${x2} ${y2}`}
         fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={8} strokeLinecap="round" />
+      {/* Filled arc */}
       <path d={`M ${x1} ${y1} A ${r} ${r} 0 0 1 ${ax} ${ay}`}
         fill="none" stroke={accent} strokeWidth={8} strokeLinecap="round"
         style={{ filter: `drop-shadow(0 0 6px ${accent})` }} />
-      <text x={cx} y={cy - 12} textAnchor="middle" fontSize={20} fontFamily="monospace" fontWeight={700} fill={accent}>
+      {/* Inner concentric ring */}
+      <path d={`M ${cx + Math.cos(start) * (r - 12)} ${cy + Math.sin(start) * (r - 12)} A ${r - 12} ${r - 12} 0 0 1 ${cx + Math.cos(end) * (r - 12)} ${cy + Math.sin(end) * (r - 12)}`}
+        fill="none" stroke={`${accent}33`} strokeWidth={0.8} strokeDasharray="2 4" />
+      {/* Tick marks */}
+      {ticks.map((a, i) => (
+        <line key={i}
+          x1={cx + Math.cos(a) * (r + 3)} y1={cy + Math.sin(a) * (r + 3)}
+          x2={cx + Math.cos(a) * (r + 9)} y2={cy + Math.sin(a) * (r + 9)}
+          stroke={i === 8 ? accent : `${accent}66`} strokeWidth={i % 2 === 0 ? 1.2 : 0.6}
+          style={{ filter: `drop-shadow(0 0 2px ${accent}66)` }} />
+      ))}
+      {/* Needle dot at current value */}
+      <circle cx={ax} cy={ay} r={3.5} fill={accent}
+        style={{ filter: `drop-shadow(0 0 6px ${accent})` }} />
+      <text x={cx} y={cy - 12} textAnchor="middle" fontSize={20} fontFamily="monospace" fontWeight={700} fill={accent}
+        style={{ filter: `drop-shadow(0 0 4px ${accent}88)` }}>
         {value.toFixed(2)}
       </text>
       <text x={cx} y={cy + 6} textAnchor="middle" fontSize={8} fontFamily="monospace" fill="rgba(255,255,255,0.4)">
         / {max.toFixed(1)}
       </text>
     </svg>
+  );
+}
+
+// Coaching Style Bars — vertical glowing pillars showing 8 style dims.
+// Rises on mount (CSS keyframe). Used in Identity tab alongside the radar.
+function StyleBars({ dims, accent }: { dims: Record<string, CoachingStyleDim>; accent: string }) {
+  const items: { key: string; label: string; tip: string }[] = [
+    { key: "forecheck_aggression", label: "FCK", tip: "Forecheck aggression" },
+    { key: "dz_structure",         label: "DZ",  tip: "Defensive zone structure" },
+    { key: "pace",                 label: "PCE", tip: "Pace of play" },
+    { key: "physicality",          label: "PHY", tip: "Physicality" },
+    { key: "oz_structure",         label: "OZ",  tip: "Offensive zone structure" },
+    { key: "nz_tendency",          label: "NZ",  tip: "Neutral zone tendency" },
+    { key: "line_match",           label: "MAT", tip: "Line matching" },
+    { key: "st_aggression",        label: "ST",  tip: "Special teams aggression" },
+  ];
+  const W = 320, H = 90, PAD_X = 14, PAD_Y = 18;
+  const innerW = W - PAD_X * 2;
+  const colW = innerW / items.length;
+  return (
+    <div className="rounded border px-2 py-2 relative overflow-hidden mt-3"
+      style={{
+        borderColor: `${accent}33`,
+        background: "linear-gradient(180deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.32) 100%)",
+        boxShadow: `0 0 12px ${accent}1a, inset 0 0 18px rgba(0,0,0,0.4)`,
+      }}>
+      <div className="flex items-center gap-2 mb-1 px-1">
+        <span className="hud-pulse-dot" style={{ background: accent, boxShadow: `0 0 4px ${accent}` }} />
+        <span className="hud-mono text-[9px] uppercase tracking-[0.22em]"
+          style={{ color: accent, textShadow: `0 0 5px ${accent}55` }}>
+          ◢ STYLE DNA
+        </span>
+        <span className="hud-mono text-[8px] uppercase tracking-[0.18em] text-white/40">· 8-dim signature</span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }}>
+        <defs>
+          <linearGradient id="sb_grad" x1="0%" y1="100%" x2="0%" y2="0%">
+            <stop offset="0%"  stopColor={`${accent}33`} />
+            <stop offset="100%" stopColor={accent} />
+          </linearGradient>
+          <filter id="sb_glow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="1.4" result="b" />
+            <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
+        </defs>
+        {/* Baseline */}
+        <line x1={PAD_X - 2} y1={H - PAD_Y} x2={W - PAD_X + 2} y2={H - PAD_Y}
+          stroke={`${accent}44`} strokeWidth={0.5} strokeDasharray="2 3" />
+        {/* Median marker */}
+        <line x1={PAD_X - 2} y1={H - PAD_Y - (H - PAD_Y - 6) * 0.5}
+          x2={W - PAD_X + 2} y2={H - PAD_Y - (H - PAD_Y - 6) * 0.5}
+          stroke="rgba(255,255,255,0.10)" strokeWidth={0.4} strokeDasharray="1 4" />
+        {items.map((it, i) => {
+          const rank = dims?.[it.key]?.rank;
+          const v = rank != null && Number.isFinite(rank) ? Math.max(0, Math.min(1, rank)) : null;
+          const x = PAD_X + i * colW + colW / 2;
+          const barW = Math.max(8, colW * 0.55);
+          const fullH = H - PAD_Y - 6;
+          const barH = v != null ? fullH * v : 0;
+          const yTop = H - PAD_Y - barH;
+          return (
+            <g key={it.key}>
+              <title>{it.tip}{v != null ? ` — ${(v * 100).toFixed(0)}th pct` : " — n/a"}</title>
+              {/* Empty pillar (track) */}
+              <rect x={x - barW / 2} y={H - PAD_Y - fullH} width={barW} height={fullH}
+                rx={2} fill={`${accent}10`} stroke={`${accent}22`} strokeWidth={0.4} />
+              {/* Filled pillar */}
+              {v != null ? (
+                <rect x={x - barW / 2} y={yTop} width={barW} height={barH}
+                  rx={2} fill="url(#sb_grad)"
+                  style={{
+                    filter: "url(#sb_glow)",
+                    animation: `styleBarRise 800ms cubic-bezier(0.22,1,0.36,1) ${i * 70}ms both`,
+                    transformOrigin: `${x.toFixed(2)}px ${(H - PAD_Y).toFixed(2)}px`,
+                  }} />
+              ) : null}
+              {/* Top cap */}
+              {v != null ? (
+                <line x1={x - barW / 2} y1={yTop} x2={x + barW / 2} y2={yTop}
+                  stroke={accent} strokeWidth={1.1}
+                  style={{ filter: `drop-shadow(0 0 3px ${accent})` }} />
+              ) : null}
+              <text x={x} y={H - PAD_Y + 11} fontSize={7.5} fontFamily="monospace"
+                fill="rgba(255,255,255,0.55)" textAnchor="middle" letterSpacing="0.06em">
+                {it.label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      <style jsx>{`
+        @keyframes styleBarRise {
+          from { transform: scaleY(0); }
+          to   { transform: scaleY(1); }
+        }
+      `}</style>
+    </div>
   );
 }
 
@@ -403,6 +519,11 @@ function Hero({ meta, profile, teamColor, teamSecondary }: {
       <style jsx>{`
         @keyframes coachHeroRingSlow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @keyframes coachHeroRingRev  { from { transform: rotate(360deg); } to { transform: rotate(0deg); } }
+        @keyframes coachAvatarPulse {
+          0%   { transform: scale(1);   opacity: 0.85; }
+          60%  { transform: scale(1.45); opacity: 0;   }
+          100% { transform: scale(1.45); opacity: 0;   }
+        }
       `}</style>
 
       {/* TARGET PROFILE bar */}
@@ -420,7 +541,7 @@ function Hero({ meta, profile, teamColor, teamSecondary }: {
       </div>
 
       {/* Content */}
-      <div className="relative z-10 flex items-center gap-5 px-5 py-5">
+      <div className="relative z-10 flex items-center gap-3 sm:gap-5 px-3 sm:px-5 py-4 sm:py-5">
         {/* Coach headshot (or team logo fallback) with team-color halo */}
         <div className="shrink-0 relative">
           <div className="absolute inset-0 rounded-full pointer-events-none"
@@ -429,7 +550,18 @@ function Hero({ meta, profile, teamColor, teamSecondary }: {
               transform: "scale(1.5)",
               filter: "blur(14px)",
             }} />
-          <div className="relative h-24 w-24 rounded-full overflow-hidden flex items-center justify-center"
+          {/* Animated concentric pulse rings — JARVIS feel */}
+          <span aria-hidden className="absolute inset-0 rounded-full pointer-events-none"
+            style={{
+              border: `1px solid ${teamColor}66`,
+              animation: "coachAvatarPulse 2.8s ease-out infinite",
+            }} />
+          <span aria-hidden className="absolute inset-0 rounded-full pointer-events-none"
+            style={{
+              border: `1px solid ${teamColor}44`,
+              animation: "coachAvatarPulse 2.8s ease-out 1.4s infinite",
+            }} />
+          <div className="relative h-20 w-20 sm:h-24 sm:w-24 rounded-full overflow-hidden flex items-center justify-center"
             style={{
               background: `radial-gradient(circle at 40% 35%, ${darkBlend(teamSecondary, 0.50)} 0%, ${darkBlend(teamSecondary, 0.88)} 60%, #080a0c 100%)`,
               boxShadow: `0 0 0 3px ${teamColor}, 0 0 0 5px rgba(255,255,255,0.16), 0 0 30px ${teamColor}cc, 0 0 60px ${teamColor}55, 0 8px 32px rgba(0,0,0,0.7)`,
@@ -438,7 +570,7 @@ function Hero({ meta, profile, teamColor, teamSecondary }: {
           </div>
           {/* Small team logo badge bottom-right of avatar */}
           <a href={`/teams/${meta.team}`}
-            className="absolute -bottom-1 -right-1 w-9 h-9 rounded-full flex items-center justify-center border-2 hover:scale-110 transition-transform"
+            className="absolute -bottom-1 -right-1 w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center border-2 hover:scale-110 transition-transform"
             style={{
               borderColor: teamColor,
               background: darkBlend(teamSecondary, 0.85),
@@ -446,10 +578,10 @@ function Hero({ meta, profile, teamColor, teamSecondary }: {
             }}
             title={`View ${TEAM_FULL_NAMES[meta.team] ?? meta.team}`}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={logoUrl(meta.team)} alt={meta.team} className="w-6 h-6 object-contain" />
+            <img src={logoUrl(meta.team)} alt={meta.team} className="w-5 h-5 sm:w-6 sm:h-6 object-contain" />
           </a>
         </div>
-        <div className="w-px shrink-0 bg-white/[0.10]" style={{ height: 88 }} />
+        <div className="hidden sm:block w-px shrink-0 bg-white/[0.10]" style={{ height: 88 }} />
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -464,10 +596,10 @@ function Hero({ meta, profile, teamColor, teamSecondary }: {
               </span>
             )}
           </div>
-          <h1 className="text-[26px] sm:text-[30px] font-bold text-white tracking-tight leading-tight">
+          <h1 className="text-[22px] sm:text-[28px] lg:text-[30px] font-bold text-white tracking-tight leading-tight truncate">
             {meta.name}
           </h1>
-          <p className="text-[11px] font-mono text-white/45 mt-1">
+          <p className="text-[11px] font-mono text-white/45 mt-1 truncate">
             <a href={`/teams/${meta.team}`} className="hover:text-white">
               {TEAM_FULL_NAMES[meta.team] ?? meta.team}
             </a>
@@ -478,10 +610,10 @@ function Hero({ meta, profile, teamColor, teamSecondary }: {
               </>
             )}
           </p>
-          {meta.notes && <p className="text-[10px] text-white/35 mt-1.5 italic max-w-2xl">{meta.notes}</p>}
+          {meta.notes && <p className="hidden md:block text-[10px] text-white/35 mt-1.5 italic max-w-2xl">{meta.notes}</p>}
         </div>
 
-        {/* Right side: career headline stats */}
+        {/* Right side: career headline stats — desktop */}
         {cp && (
           <div className="hidden lg:flex flex-col items-end gap-2 shrink-0">
             <div className="flex items-center gap-3">
@@ -510,6 +642,37 @@ function Hero({ meta, profile, teamColor, teamSecondary }: {
           </div>
         )}
       </div>
+
+      {/* Mobile / tablet vitals strip — shown below the avatar row when the
+          right-side stats are hidden. Keeps the headline numbers in view on
+          phones where the hero would otherwise feel empty. */}
+      {cp && (
+        <div className="relative z-10 lg:hidden border-t flex items-stretch divide-x"
+          style={{
+            borderColor: `${teamColor}22`,
+            background: `linear-gradient(90deg, ${teamColor}10 0%, transparent 70%)`,
+            ["--tw-divide-opacity" as string]: "1",
+          }}>
+          <div className="flex-1 px-3 py-2 flex flex-col items-start" style={{ borderColor: `${teamColor}18` }}>
+            <span className="text-[8px] uppercase tracking-wider text-white/35 font-mono">Points %</span>
+            <span className={`text-[17px] font-mono font-bold leading-none mt-0.5 ${
+              cp.points_pct >= 0.55 ? "text-[#4ade80]" : cp.points_pct >= 0.45 ? "text-white" : "text-[#f87171]"
+            }`}>
+              {(cp.points_pct * 100).toFixed(1)}%
+            </span>
+          </div>
+          <div className="flex-1 px-3 py-2 flex flex-col items-start" style={{ borderColor: `${teamColor}18` }}>
+            <span className="text-[8px] uppercase tracking-wider text-white/35 font-mono">Record</span>
+            <span className="text-[14px] font-mono text-white/90 leading-none mt-0.5">
+              {cp.wins}-{cp.losses}-{cp.ot_losses}
+            </span>
+          </div>
+          <div className="flex-1 px-3 py-2 flex flex-col items-start" style={{ borderColor: `${teamColor}18` }}>
+            <span className="text-[8px] uppercase tracking-wider text-white/35 font-mono">GP</span>
+            <span className="text-[14px] font-mono text-white/90 leading-none mt-0.5">{cp.gp_under_coach}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -519,6 +682,31 @@ function Hero({ meta, profile, teamColor, teamSecondary }: {
 // ---------------------------------------------------------------------------
 
 type Tab = "dossier" | "tactics" | "ingame" | "staff" | "identity" | "context";
+
+function TabArrow({ dir, onClick, visible, teamColor }: {
+  dir: "left" | "right"; onClick: () => void; visible: boolean; teamColor: string;
+}) {
+  return (
+    <div className="flex shrink-0 w-7 items-stretch">
+      <button
+        onClick={onClick}
+        aria-label={dir === "left" ? "Scroll tabs left" : "Scroll tabs right"}
+        className={`w-7 flex items-center justify-center transition-all duration-200 ${visible ? "opacity-100" : "opacity-25 pointer-events-none"}`}
+        style={{
+          background: `linear-gradient(${dir === "left" ? "90deg" : "270deg"}, ${teamColor}1a, transparent)`,
+          color: visible ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.30)",
+          textShadow: visible ? `0 0 6px ${teamColor}aa` : "none",
+        }}
+      >
+        <span className="hud-mono text-[12px] font-black select-none leading-none">
+          {dir === "left" ? "❮" : "❯"}
+        </span>
+      </button>
+    </div>
+  );
+}
+
+const TAB_SCROLL_STEP = 180;
 
 function TabBar({ active, onChange, teamColor }: {
   active: Tab; onChange: (t: Tab) => void; teamColor: string;
@@ -531,12 +719,39 @@ function TabBar({ active, onChange, teamColor }: {
     { id: "identity", label: "Identity", glyph: "⌖", subtitle: "style · fit · venue" },
     { id: "context",  label: "Context",  glyph: "◉", subtitle: "buyer/seller · GM · playoff" },
   ];
+
+  // Flex-sibling arrow pattern — copied from ScoreboardBar. Must not use
+  // absolute-positioned overlays (per memory: that pattern broke 5+ times).
+  const railRef = useRef<HTMLDivElement | null>(null);
+  const [canLeft, setCanLeft]   = useState(false);
+  const [canRight, setCanRight] = useState(false);
+  const updateArrows = () => {
+    const el = railRef.current;
+    if (!el) return;
+    setCanLeft(el.scrollLeft > 0);
+    setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+  };
+  const scroll = (dir: "left" | "right") => {
+    railRef.current?.scrollBy({ left: dir === "left" ? -TAB_SCROLL_STEP : TAB_SCROLL_STEP, behavior: "smooth" });
+  };
+  useEffect(() => {
+    const el = railRef.current;
+    if (!el) return;
+    updateArrows();
+    el.addEventListener("scroll", updateArrows, { passive: true });
+    const ro = new ResizeObserver(updateArrows);
+    ro.observe(el);
+    return () => { el.removeEventListener("scroll", updateArrows); ro.disconnect(); };
+  }, []);
+
   return (
-    <div className="hud-panel hud-panel--all-corners jarvis-boot mb-4 overflow-x-auto"
+    <div className="hud-panel hud-panel--all-corners jarvis-boot mb-4 flex items-stretch"
       style={{ ["--hud-corner" as string]: `${teamColor}aa` }}>
       <span className="hud-panel__corner-tr" />
       <span className="hud-panel__corner-bl" />
-      <div className="flex items-stretch min-w-min">
+      <TabArrow dir="left" onClick={() => scroll("left")} visible={canLeft} teamColor={teamColor} />
+      <div ref={railRef}
+        className="flex items-stretch flex-1 min-w-0 overflow-x-auto scroll-smooth-x">
         {tabs.map(tab => {
           const isActive = active === tab.id;
           return (
@@ -582,6 +797,7 @@ function TabBar({ active, onChange, teamColor }: {
           );
         })}
       </div>
+      <TabArrow dir="right" onClick={() => scroll("right")} visible={canRight} teamColor={teamColor} />
       <style jsx>{`
         @keyframes coachRailScan {
           0%   { transform: translateX(-100%); }
@@ -602,7 +818,7 @@ function DossierTab({ profile, accent }: { profile: CoachProfile; accent: string
   const va = profile.venue_atmosphere?.row;
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      <HudPanel title="Career with Team" subtitle="season totals · record" themeColor={accent} allCorners>
+      <HudPanel title="Career with Team" subtitle="season totals · record" themeColor={accent} allCorners scanline>
         {cp ? (
           <>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
@@ -628,7 +844,7 @@ function DossierTab({ profile, accent }: { profile: CoachProfile; accent: string
         )}
       </HudPanel>
 
-      <HudPanel title="Decision Aggression" subtitle="tendencies composite" themeColor={accent} allCorners>
+      <HudPanel title="Decision Aggression" subtitle="tendencies composite" themeColor={accent} allCorners scanline>
         {dn ? (
           <>
             <div className="flex items-center justify-center mb-3">
@@ -1007,32 +1223,34 @@ function IdentityTab({ profile, accent }: { profile: CoachProfile; accent: strin
   const va = profile.venue_atmosphere?.row;
   return (
     <div className="space-y-4">
-      <HudPanel title="Coaching Style Vector" subtitle="8-dim radar" themeColor={accent} allCorners>
+      <HudPanel title="Coaching Style Vector" subtitle="8-dim radar · style DNA" themeColor={accent} allCorners scanline>
         {cs ? (
-          <div className="flex items-center gap-6 flex-wrap">
-            <StyleRadar dims={cs.dimensions} accent={accent} />
-            <div className="flex-1 min-w-[200px] space-y-1">
-              {["forecheck_aggression","dz_structure","pace","physicality","oz_structure","nz_tendency","line_match","st_aggression"].map(k => {
-                const d = cs.dimensions[k];
-                const rank = d?.rank;
-                const raw  = d?.raw;
-                if (rank == null || Number.isNaN(rank)) {
-                  return (
-                    <div key={k} className="flex items-center gap-2 py-0.5">
-                      <span className="text-[10px] font-mono text-white/45 w-28 truncate">{k.replace(/_/g, " ")}</span>
-                      <span className="text-[10px] font-mono text-white/25 flex-1">—</span>
-                    </div>
-                  );
-                }
-                return <BarRow key={k} label={k.replace(/_/g, " ")} value={rank} accent={accent} />;
-              })}
+          <>
+            <div className="flex items-center gap-6 flex-wrap">
+              <StyleRadar dims={cs.dimensions} accent={accent} />
+              <div className="flex-1 min-w-[200px] space-y-1">
+                {["forecheck_aggression","dz_structure","pace","physicality","oz_structure","nz_tendency","line_match","st_aggression"].map(k => {
+                  const d = cs.dimensions[k];
+                  const rank = d?.rank;
+                  if (rank == null || Number.isNaN(rank)) {
+                    return (
+                      <div key={k} className="flex items-center gap-2 py-0.5">
+                        <span className="text-[10px] font-mono text-white/45 w-28 truncate">{k.replace(/_/g, " ")}</span>
+                        <span className="text-[10px] font-mono text-white/25 flex-1">—</span>
+                      </div>
+                    );
+                  }
+                  return <BarRow key={k} label={k.replace(/_/g, " ")} value={rank} accent={accent} />;
+                })}
+              </div>
             </div>
-          </div>
+            <StyleBars dims={cs.dimensions} accent={accent} />
+          </>
         ) : <p className="text-[10px] font-mono text-white/40">No data.</p>}
       </HudPanel>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <HudPanel title="Roster Fit Score" subtitle="archetype alignment" themeColor={accent} allCorners>
+        <HudPanel title="Roster Fit Score" subtitle="archetype alignment" themeColor={accent} allCorners scanline>
           {rf ? (
             <>
               <div className="flex items-center justify-center mb-3">
@@ -1156,7 +1374,7 @@ function ContextTab({ profile, accent }: { profile: CoachProfile; accent: string
         </HudPanel>
       </div>
 
-      <HudPanel title="GM Behavioral Fingerprint" subtitle="trade archetype mix" themeColor={accent} allCorners>
+      <HudPanel title="GM Behavioral Fingerprint" subtitle="trade archetype mix" themeColor={accent} allCorners scanline>
         {gm ? (
           <>
             <div className="flex items-center gap-3 mb-3 px-3 py-2 rounded bg-white/[0.02] border border-white/[0.05]">
