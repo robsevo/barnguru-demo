@@ -9881,6 +9881,20 @@ _LOUNGE_CABLE_KEYWORDS = [
     "stack tv", "stack hd", "stacktv", "w network", "showcase", "slice",
     # Streaming-services-as-channel
     "paramount",
+    # ── News — US + CA (added 2026-06-27) ──
+    "cnn", "fox news", "bloomberg", "bnn", "hln", "cp24", "global news",
+    "ctv news", "msnbc",
+    # ── Canadian basic networks ──
+    "global", "citytv", "city tv", "ctv",
+    # ── Quebec French (CA) ──
+    "noovo", "rdi", "lcn", "ici ", "tv5", "canal d", "canal vie",
+    # ── More sports (US/CA) ──
+    "dazn", "bein", "nfl", "redzone",
+    # ── True crime ──
+    "court tv", "true crime", "reelz",
+    # ── Adult animation — 24/7 single-show channels ──
+    "family guy", "american dad", "rick and morty", "south park",
+    "futurama", "simpsons", "king of the hill", "bob's burgers", "bobs burgers",
 ]
 
 # Combined filter used at IPTV-channel enumeration time. Sources upstream of
@@ -10790,6 +10804,13 @@ def _normalize_ch(title: str) -> str:
     # separator, not a language separator). Without this guard the regex was
     # munching "CA - SP" off "CA - SPORTSNET EAST" and breaking matches.
     t = _re_bc.sub(r"^(?:CA|US|UK)(?:[-_]+[A-Z]{2})?\s*(?:\([A-Z]{2}\))?\s*[\|:\-]?\s*", "", t, flags=_re_bc.I)
+    # Strip a leading numeric sort prefix ("02. ", "01) ") and an UPPERCASE
+    # provider-category pipe tag ("DEP | ", "NOT | ", "PRIME| ", "2MB | "). The
+    # category strip is uppercase-only so mixed-case real names ("Fox Sports |…")
+    # are never eaten. Added 2026-06-27 to match labels like "02. DAZN1" and
+    # "DEP | Bein Sports 02 (USA)".
+    t = _re_bc.sub(r"^\s*\d{1,3}[.\)]\s*", "", t)
+    t = _re_bc.sub(r"^[A-Z0-9]{2,5}\s*\|\s*", "", t)
     # Strip trailing language flag "(FR)" / "(EN)" / "(ES)" / "(DE)" — lunar
     # keeps this after "CA:" prefix consumption.
     t = _re_bc.sub(r"\s*\((?:FR|EN|ES|DE)\)\s*$", "", t, flags=_re_bc.I)
@@ -10815,6 +10836,11 @@ def _normalize_ch(title: str) -> str:
     # "Fox Sports 1" / "FOX SPORTS 2" → "fs1" / "fs2". kstv & most US providers
     # spell out "Fox Sports", but BarnCentre's slate uses the FS contraction.
     t = _re_bc.sub(r"(?i)^fox\s*sports\s*(\d+)$", r"FS\1", t)
+    # DAZN / beIN number normalization (added 2026-06-27): providers label these
+    # "DAZN1", "Bein Sports 02" — normalize to the spaced, zero-stripped form so
+    # they match "DAZN 1" / "beIN Sports 2". Anchored to the whole string.
+    t = _re_bc.sub(r"(?i)^dazn\s*0?(\d+)$", r"dazn \1", t)
+    t = _re_bc.sub(r"(?i)^be\s?in\s*sports?\s*0?(\d+)$", r"bein sports \1", t)
     return t.strip().lower()
 
 
@@ -11986,12 +12012,13 @@ _LOUNGE_CHANNEL_NAMES: list[str] = [
     # ── Canadian premium cable (80-89) ──
     "Stack TV", "W Network", "Showcase", "Slice",
     # ── News — US + CA (added 2026-06-27; US/CA only) ──
-    "CNN", "CNN International", "HLN", "Bloomberg", "Bloomberg Television",
-    "MSNBC", "Fox News", "CBC News Network", "CTV News Channel", "CP24", "Global News",
+    "CNN", "CNN International", "HLN", "Bloomberg", "BNN Bloomberg",
+    "MSNBC", "Fox News", "CBC News Network", "CTV News", "CTV News Network",
+    "CP24", "Global News",
     # ── Canadian basic networks ──
     "CBC", "CTV", "CTV 2", "Global", "Citytv",
-    # ── Quebec French — TV / news / sports (CA) ──
-    "TVA", "Noovo", "ICI Télé", "ICI RDI", "RDI", "LCN", "TVA Sports 2",
+    # ── Quebec French — TV / news / sports (CA; names match provider labels, no accents) ──
+    "TVA", "Noovo", "ICI Tele", "ICI RDI", "RDI", "LCN", "TVA Sports 2",
     "RDS2", "TV5", "Canal D", "Canal Vie",
     # ── More sports — US/CA ──
     "DAZN 1", "DAZN 2", "DAZN 3", "DAZN 4", "DAZN 5",
