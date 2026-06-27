@@ -13403,26 +13403,16 @@ async def lounge_vod_catalog(service: str = "") -> dict:
 # embed services need a server pick before their iframes load and tend
 # to be slower (~10s) but cover more obscure titles.
 
+# Embed fallback = vidlink ONLY (Bob, 2026-06-27). The other aggregators
+# (moviesapi, 2embed, multiembed, nontongo, pstream) served ads / broken players,
+# so they're dropped. vidlink is the single embed and the LAST source the client
+# tries — direct/resolved stream_urls play first, vidlink is the safety net.
 def _vidsrc_movie_embeds(tmdb_id: str) -> list[str]:
-    return [
-        f"https://vidlink.pro/movie/{tmdb_id}",
-        f"https://moviesapi.club/movie/{tmdb_id}",
-        f"https://www.2embed.cc/embed/{tmdb_id}",
-        f"https://multiembed.mov/?video_id={tmdb_id}&tmdb=1",
-        f"https://nontongo.win/embed/movie/{tmdb_id}",
-        f"https://pstream.org/embed/movie/{tmdb_id}",
-    ]
+    return [f"https://vidlink.pro/movie/{tmdb_id}"]
 
 
 def _vidsrc_episode_embeds(tmdb_id: str, season: int, episode: int) -> list[str]:
-    return [
-        f"https://vidlink.pro/tv/{tmdb_id}/{season}/{episode}",
-        f"https://moviesapi.club/tv/{tmdb_id}-{season}-{episode}",
-        f"https://www.2embed.cc/embedtv/{tmdb_id}&s={season}&e={episode}",
-        f"https://multiembed.mov/?video_id={tmdb_id}&tmdb=1&s={season}&e={episode}",
-        f"https://nontongo.win/embed/tv/{tmdb_id}/{season}/{episode}",
-        f"https://pstream.org/embed/tv/{tmdb_id}/{season}/{episode}",
-    ]
+    return [f"https://vidlink.pro/tv/{tmdb_id}/{season}/{episode}"]
 
 
 @app.get("/lounge/vod/details/{tmdb_id}")
