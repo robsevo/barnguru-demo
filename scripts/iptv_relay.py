@@ -596,33 +596,48 @@ async def proxy_vod(u: str, request: Request) -> Response:
     if rng:
         fwd["Range"] = rng
 
-    cl = await _get_upstream_http()
+    # Dedicated client per VOD stream (NOT the shared _get_upstream_http, whose
+    # short read-timeout is tuned for tiny live segments and would abort a movie,
+    # and whose pooled connection can close when this handler returns). The
+    # client + open stream are kept alive by opening them INSIDE the body
+    # generator and closing in its finally — so the connection lives exactly as
+    # long as the StreamingResponse consumes it.
+    client = httpx.AsyncClient(
+        follow_redirects=True,
+        timeout=httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=10.0),
+    )
+
+    # Open upstream first so we can surface a clean status before streaming.
     try:
-        req = cl.build_request("GET", url, headers=fwd)
-        r = await cl.send(req, stream=True)
+        req = client.build_request("GET", url, headers=fwd)
+        upstream = await client.send(req, stream=True)
     except Exception as e:
+        await client.aclose()
         raise HTTPException(status_code=502, detail=f"upstream: {e}")
-    if r.status_code not in (200, 206):
-        code = r.status_code
-        await r.aclose()
+
+    if upstream.status_code not in (200, 206):
+        code = upstream.status_code
+        await upstream.aclose()
+        await client.aclose()
         raise HTTPException(status_code=code)
 
     passthru = {**_CORS, "Accept-Ranges": "bytes"}
     for hh in ("content-type", "content-length", "content-range"):
-        if hh in r.headers:
-            passthru[hh] = r.headers[hh]
+        if hh in upstream.headers:
+            passthru[hh] = upstream.headers[hh]
 
     async def _body():
         try:
-            async for chunk in r.aiter_raw():
+            async for chunk in upstream.aiter_raw():
                 yield chunk
         finally:
-            await r.aclose()
+            await upstream.aclose()
+            await client.aclose()
 
     return StreamingResponse(
         _body(),
-        status_code=r.status_code,
-        media_type=r.headers.get("content-type") or "video/mp4",
+        status_code=upstream.status_code,
+        media_type=upstream.headers.get("content-type") or "video/mp4",
         headers=passthru,
     )
 
