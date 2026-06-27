@@ -12272,7 +12272,9 @@ async def _build_lounge_payload() -> dict:
                 continue
             host_used[h] = host_used.get(h, 0) + 1
             backup_src.append(c["url"])
-            if len(backup_src) >= 12:
+            # 5 sources max per channel (1 primary + 4 backups), per product
+            # requirement — same cap as the BarnCentre builder.
+            if len(backup_src) >= 4:
                 break
 
         chosen_out  = _apply_recode(cast(str, chosen), ch_name)
