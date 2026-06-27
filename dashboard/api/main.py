@@ -10222,6 +10222,8 @@ async def _fetch_upstream_channels(
             if line.startswith("#EXTINF"):
                 name_m = _re_iptv.search(r'tvg-name="([^"]+)"', line)
                 ch_name = name_m.group(1) if name_m else line.split(",")[-1].strip()
+                grp_m = _re_iptv.search(r'group-title="([^"]*)"', line)
+                category = grp_m.group(1) if grp_m else ""
                 stream_url = lines[i + 1].strip() if i + 1 < len(lines) else ""
                 if (
                     stream_url.startswith("http")
@@ -10229,6 +10231,7 @@ async def _fetch_upstream_channels(
                 ):
                     out.append({
                         "title":      f"{ch_name} ({label})",
+                        "category":   category,
                         "url":        _rewrite_iptv_url(stream_url),
                         "source":     "upstream",
                         "feed":       "iptv",
@@ -10244,17 +10247,24 @@ async def _fetch_upstream_channels(
         """Last-resort: enumerate live streams via the JSON API and build
         upstream-convention URLs. Required for panels (kstv) that 404 get.php.
         """
+        cat_map: dict[str, str] = {}
         try:
             async with _httpx_backup.AsyncClient(timeout=20.0, follow_redirects=True) as hx:
-                r = await hx.get(
-                    _upstream_fetch_url(
+                cr, r = await asyncio.gather(
+                    hx.get(_upstream_fetch_url(
                         f"{base}/player_api.php?username={username}&password={password}"
-                        "&action=get_live_streams",
-                        host,
-                    ),
-                    headers={"User-Agent": ua},
+                        "&action=get_live_categories", host), headers={"User-Agent": ua}),
+                    hx.get(_upstream_fetch_url(
+                        f"{base}/player_api.php?username={username}&password={password}"
+                        "&action=get_live_streams", host), headers={"User-Agent": ua}),
+                    return_exceptions=True,
                 )
-            if r.status_code != 200:
+            if hasattr(cr, "status_code") and cr.status_code == 200:
+                cats = cr.json()
+                if isinstance(cats, list):
+                    cat_map = {str(c.get("category_id")): c.get("category_name", "")
+                               for c in cats if isinstance(c, dict)}
+            if not hasattr(r, "status_code") or r.status_code != 200:
                 return []
             streams = r.json()
         except Exception:
@@ -10272,12 +10282,14 @@ async def _fetch_upstream_channels(
                 continue
             if not any(k in ch_name.lower() for k in _IPTV_CHANNEL_KEYWORDS):
                 continue
+            category = cat_map.get(str(s.get("category_id", "")), "")
             # Prefer .m3u8 — relay's /m3u8 endpoint passthrough-rewrites cheaply
             # (no ffmpeg). Panels that only serve raw TS will redirect to a /ts
             # variant; ffmpeg transmux at the relay handles that fallback.
             stream_url = f"{base}/live/{username}/{password}/{sid}.m3u8"
             out.append({
                 "title":      f"{ch_name} ({label})",
+                "category":   category,
                 "url":        _rewrite_iptv_url(stream_url),
                 "source":     "upstream",
                 "feed":       "iptv",
@@ -10875,6 +10887,59 @@ _FOREIGN_FEED_RE = _re_bc.compile(
     r"colombia|argentina|venezuela|chile|per[uú]|opci[oó]n|op)\b",
     _re_bc.I,
 )
+
+
+# ── English/US-CA allowlist (rigorous, replaces the old foreign DENYLIST) ──
+# Region tags we ACCEPT as a leading title prefix. US/CA cover US + Canada
+# (incl. Quebec French, which is CA-tagged: "CA (FR) NOOVO"); EN/ENG/NA are
+# explicit-English. Everything else (a real country tag) is rejected.
+_ALLOWED_REGION_TAGS = {"us", "usa", "ca", "can", "na", "en", "eng"}
+# Any leading token in this set means the title IS region-tagged, so the decision
+# is made purely on whether it's in the allowed set above. A token NOT in here is
+# treated as "no region tag" (a normal word like "Discovery"/"CMT"/"ESPN").
+_KNOWN_REGION_TAGS = _ALLOWED_REGION_TAGS | {
+    "uk", "gb", "ie", "au", "nz", "za", "sa", "in", "ph", "pk", "sg",
+    "dk", "fi", "no", "se", "nl", "be", "de", "at", "ch", "fr", "it",
+    "es", "pt", "pl", "tr", "gr", "ru", "ua", "ro", "hu", "cz", "sk",
+    "hr", "rs", "bg", "br", "bra", "mx", "mxc", "ar", "arg", "co", "cl",
+    "pe", "ve", "uy", "ec", "do", "pa", "lat", "latam", "esp", "deu",
+    "fra", "ita", "rus", "afr", "uga", "ken", "ngn", "mena", "ara", "arab",
+    "dstv", "dep",
+}
+# Foreign-language / non-US-CA category markers (for UNTAGGED titles). Spanish
+# 'cultura' won't match English 'culture'; this is intentional.
+_FOREIGN_CATEGORY_RE = _re_bc.compile(
+    r"(?:cultura|latino|latinos|latam|espa(?:n|ñ)|deportes|novela|infantil|"
+    r"m[eé]xico|argentin|colombia|venezuela|brasil|brazil|portugu|"
+    r"\bara\b|arab|t[uü]rk|deutsch|italia|fran[cç]a|denmark|finland|"
+    r"sverige|norge|polska|россия|romania|greek|\bdstv\b|\bafr\b|africa)",
+    _re_bc.I,
+)
+
+
+def _region_tag(title: str) -> str:
+    """Leading region tag of a stream title ('us','dk','fr',…) or '' if none.
+    Recognizes 'DK| …', 'US | …', 'CA: …', 'CA (FR) …', 'CA-FR | …', and bare
+    'USA …'/'CA …' when the leading token is a KNOWN region code."""
+    t = (title or "").strip().lower()
+    m = _re_bc.match(r"^([a-z]{2,5})(?:[\s_-]*(?:fr|en|es|hd|sd))?\s*[|:\(\-]", t)
+    if m and m.group(1) in _KNOWN_REGION_TAGS:
+        return m.group(1)
+    m = _re_bc.match(r"^([a-z]{2,4})\s", t)
+    if m and m.group(1) in _KNOWN_REGION_TAGS:
+        return m.group(1)
+    return ""
+
+
+def _candidate_is_english(title: str, category: str = "") -> bool:
+    """Allowlist gate: True only if this stream is positively US/CA/English.
+    Tagged title → must be an allowed region. Untagged → reject if its category
+    reads foreign-language; accept otherwise (English providers use English
+    categories). This replaces the old fragile foreign-marker denylist."""
+    tag = _region_tag(title)
+    if tag:
+        return tag in _ALLOWED_REGION_TAGS
+    return not _FOREIGN_CATEGORY_RE.search(category or "")
 
 
 def _ch_matches(raw_title: str, ch_name: str) -> bool:
@@ -11798,6 +11863,12 @@ async def _build_barncentre_payload() -> dict:
         for ch in all_channels:
             if id(ch) in assigned:
                 continue
+            # English/US-CA allowlist gate (rigorous) — reject foreign-region or
+            # foreign-language-category streams BEFORE name matching so a Danish
+            # "DK| DISCOVERY" or a Latino "Discovery Channel HD" (cat=CULTURA)
+            # can never land on a US/CA channel.
+            if not _candidate_is_english(ch.get("title", ""), ch.get("category", "")):
+                continue
             if _ch_matches(ch.get("title", ""), ch_name):
                 assigned[id(ch)] = ch_name
 
@@ -12296,6 +12367,12 @@ async def _build_lounge_payload() -> dict:
         for ch in all_channels:
             if id(ch) in assigned:
                 continue
+            # English/US-CA allowlist gate (rigorous) — reject foreign-region or
+            # foreign-language-category streams BEFORE name matching so a Danish
+            # "DK| DISCOVERY" or a Latino "Discovery Channel HD" (cat=CULTURA)
+            # can never land on a US/CA channel.
+            if not _candidate_is_english(ch.get("title", ""), ch.get("category", "")):
+                continue
             if _ch_matches(ch.get("title", ""), ch_name):
                 assigned[id(ch)] = ch_name
 
@@ -12321,12 +12398,27 @@ async def _build_lounge_payload() -> dict:
     def _candidate_upstream_host(u: str) -> str:
         return _backup_upstream_host(u)
 
+    # Dedup on the INNER upstream stream, not the wrapped relay URL — the same
+    # upstream can produce two wrapped URLs (token/format differences) and show
+    # up as duplicate "sources" (e.g. TLC had mundo2.pro/307688 twice).
+    def _dedup_key(u: str) -> str:
+        if "localhost:8000" in u and "u=" in u:
+            try:
+                inner = _bl_unquote(_bl_parse_qs(urlparse(u).query).get("u", [""])[0])
+                p = urlparse(inner)
+                return f"{p.hostname}{p.path}"  # drop query (tokens) + scheme
+            except Exception:
+                return u
+        p = urlparse(u)
+        return f"{p.hostname}{p.path}"
+
     for name, cands in list(channel_candidates.items()):
         seen_urls: set[str] = set()
         unique: list[dict] = []
         for c in cands:
-            if c["url"] not in seen_urls:
-                seen_urls.add(c["url"])
+            k = _dedup_key(c["url"])
+            if k not in seen_urls:
+                seen_urls.add(k)
                 unique.append(c)
         blocked = _LOUNGE_HOST_BLOCKLIST.get(name) or _active_blocklist(name)
         if blocked:
