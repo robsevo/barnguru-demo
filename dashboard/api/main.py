@@ -12019,7 +12019,7 @@ _LOUNGE_CHANNEL_NAMES: list[str] = [
     "CBC", "CTV", "CTV 2", "Global", "Citytv",
     # ── Quebec French — TV / news / sports (CA; names match provider labels, no accents) ──
     "TVA", "Noovo", "ICI Tele", "ICI RDI", "RDI", "LCN", "TVA Sports 2",
-    "RDS2", "TV5", "Canal D", "Canal Vie",
+    "TV5", "Canal D", "Canal Vie",
     # ── More sports — US/CA ──
     "DAZN 1", "DAZN 2", "DAZN 3", "DAZN 4", "DAZN 5",
     "NFL Network", "NFL RedZone",
@@ -12027,7 +12027,7 @@ _LOUNGE_CHANNEL_NAMES: list[str] = [
     "beIN Sports 4", "beIN Sports 5",
     "TSN", "Sportsnet", "TVA Sports",
     # ── True crime (US/CA) ──
-    "Court TV", "True Crime Network", "Oxygen True Crime", "ID",
+    "Court TV", "True Crime Network", "ID",
     # ── Adult animation — 24/7 single-show channels (common on IPTV, like 24/7 Pokemon) ──
     "24/7 Family Guy", "24/7 American Dad", "24/7 Rick and Morty",
     "24/7 South Park", "24/7 Bob's Burgers", "24/7 Futurama",
