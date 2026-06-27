@@ -31,7 +31,13 @@ def _load_iptv_env_file() -> None:
             if not s or s.startswith("#") or "=" not in s:
                 continue
             k, _, v = s.partition("=")
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            # iptv.env is the deploy's source of truth: OVERRIDE os.environ rather
+            # than setdefault, so a stale value baked into the systemd unit (which
+            # lives server-side, outside this repo) can't shadow the file. This is
+            # why STREAM_RESOLVER_ENABLED stayed off despite the file having it.
+            os.environ[k] = v
     except Exception:
         pass
 _load_iptv_env_file()
