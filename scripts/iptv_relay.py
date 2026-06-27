@@ -580,6 +580,20 @@ async def proxy_ts(u: str, request: Request) -> Response:
     )
 
 
+@app.get("/vod-debug")
+async def vod_debug() -> Response:
+    """TEMP: report what the relay actually sees for the dynamic allowlist."""
+    hosts, suffixes = _dynamic_hosts()
+    info = {
+        "dynamic_hosts_file": str(DYNAMIC_HOSTS_FILE),
+        "file_exists": DYNAMIC_HOSTS_FILE.exists(),
+        "dynamic_hosts": sorted(hosts),
+        "static_allowed": sorted(ALLOWED_HOSTS),
+        "hottest_allowed": "hottest.plus" in hosts or "hottest.plus" in ALLOWED_HOSTS,
+    }
+    return Response(content=json.dumps(info, indent=2), media_type="application/json")
+
+
 @app.get("/vod")
 async def proxy_vod(u: str, request: Request) -> Response:
     """Range-aware passthrough for VOD movie/episode files (mp4/mkv/avi) from
