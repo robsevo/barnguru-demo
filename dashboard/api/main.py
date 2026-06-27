@@ -12840,6 +12840,12 @@ async def _build_vod_stream_index() -> dict[str, list[str]]:
             url = mv.get("url")
             if not tid or not url:
                 continue
+            # Browser-playable containers only: mp4 (native) / m3u8 (hls.js).
+            # mkv/avi return fine from upstream but the <video>/MSE player can't
+            # decode them, so they "skip" — drop them so direct sources actually
+            # play (mkv-only titles fall back to vidlink).
+            if not _re_bc.search(r"\.(mp4|m3u8)(\?|$)", url, _re_bc.I):
+                continue
             key = str(tid)
             wrapped = _relay_wrap_vod(url)
             lst = idx.setdefault(key, [])
@@ -12972,8 +12978,11 @@ async def _episode_streams_for(tmdb_id: str) -> dict[tuple[int, int], list[str]]
                     except (TypeError, ValueError):
                         continue
                     eid = ep.get("id")
-                    ext = ep.get("container_extension") or "mp4"
+                    ext = (ep.get("container_extension") or "mp4").lower()
                     if eid is None:
+                        continue
+                    # Browser-playable only (mp4/m3u8); mkv/avi "skip" in <video>.
+                    if ext not in ("mp4", "m3u8"):
                         continue
                     url = _relay_wrap_vod(f"{base}/series/{loc['user']}/{loc['pw']}/{eid}.{ext}")
                     slot = out.setdefault((s_i, e_i), [])
