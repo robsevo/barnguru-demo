@@ -10230,13 +10230,16 @@ async def _fetch_upstream_channels(
                     and any(k in ch_name.lower() for k in _IPTV_CHANNEL_KEYWORDS)
                 ):
                     out.append({
-                        "title":      f"{ch_name} ({label})",
-                        "category":   category,
-                        "url":        _rewrite_iptv_url(stream_url),
-                        "source":     "upstream",
-                        "feed":       "iptv",
-                        "priority":   1,
-                        "embed_only": False,
+                        "title":          f"{ch_name} ({label})",
+                        "category":       category,
+                        "url":            _rewrite_iptv_url(stream_url),
+                        "source":         "upstream",
+                        "feed":           "iptv",
+                        "priority":       1,
+                        "embed_only":     False,
+                        # Scraped (fresh-*) panels are multi-language → untrusted;
+                        # hardcoded panels are English-default → trusted.
+                        "english_default": not label.startswith("fresh-"),
                     })
                 i += 2
             else:
@@ -10288,13 +10291,14 @@ async def _fetch_upstream_channels(
             # variant; ffmpeg transmux at the relay handles that fallback.
             stream_url = f"{base}/live/{username}/{password}/{sid}.m3u8"
             out.append({
-                "title":      f"{ch_name} ({label})",
-                "category":   category,
-                "url":        _rewrite_iptv_url(stream_url),
-                "source":     "upstream",
-                "feed":       "iptv",
-                "priority":   1,
-                "embed_only": False,
+                "title":           f"{ch_name} ({label})",
+                "category":        category,
+                "url":             _rewrite_iptv_url(stream_url),
+                "source":          "upstream",
+                "feed":            "iptv",
+                "priority":        1,
+                "embed_only":      False,
+                "english_default": not label.startswith("fresh-"),
             })
         return out
 
@@ -10906,13 +10910,22 @@ _KNOWN_REGION_TAGS = _ALLOWED_REGION_TAGS | {
     "fra", "ita", "rus", "afr", "uga", "ken", "ngn", "mena", "ara", "arab",
     "dstv", "dep",
 }
-# Foreign-language / non-US-CA category markers (for UNTAGGED titles). Spanish
-# 'cultura' won't match English 'culture'; this is intentional.
-_FOREIGN_CATEGORY_RE = _re_bc.compile(
-    r"(?:cultura|latino|latinos|latam|espa(?:n|ñ)|deportes|novela|infantil|"
-    r"m[eé]xico|argentin|colombia|venezuela|brasil|brazil|portugu|"
-    r"\bara\b|arab|t[uü]rk|deutsch|italia|fran[cç]a|denmark|finland|"
-    r"sverige|norge|polska|россия|romania|greek|\bdstv\b|\bafr\b|africa)",
+# Foreign-language tokens (Spanish/Latino especially) that mark a non-English
+# feed in EITHER the title or the category. Word-boundaried so 'cine' catches the
+# Spanish "CINE | HBO" wrapper but NOT "Cinemax"; 'cultura' (es) ≠ 'culture' (en).
+_FOREIGN_LANG_RE = _re_bc.compile(
+    r"\b(?:cine|pel[ií]cula?s?|novela?s?|telenovela|infantil|deportes?|"
+    r"exclusiv\w*|en\s+vivo|canal(?:es)?\s+\d|espa(?:n|ñ)ol\w*|latino?s?|latam|"
+    r"cultura|m[eé]xico|argentin\w*|colombia\w*|venezuela\w*|brasil|portugu\w*|"
+    r"t[uü]rk\w*|deutsch|italiano?|fran[cç]ais|denmark|finland|sverige|norge|"
+    r"polska|romania|greek|arab\w*|\bara\b|\bdstv\b|\bafr\b|africa)\b",
+    _re_bc.I,
+)
+# Explicit US/CA markers — when present, they OVERRIDE a Spanish-provider wrapper
+# (e.g. "DEP | beIN Sports 02 (USA)" is a US feed filed under a Spanish category).
+_US_CA_MARKER_RE = _re_bc.compile(
+    r"(?:\b(?:usa|can|canada)\b|\(\s*(?:us|usa|ca|can)\s*\)|"
+    r"\b(?:us|ca)\s*\||\|\s*(?:us|ca)\b)",
     _re_bc.I,
 )
 
@@ -10931,15 +10944,28 @@ def _region_tag(title: str) -> str:
     return ""
 
 
-def _candidate_is_english(title: str, category: str = "") -> bool:
-    """Allowlist gate: True only if this stream is positively US/CA/English.
-    Tagged title → must be an allowed region. Untagged → reject if its category
-    reads foreign-language; accept otherwise (English providers use English
-    categories). This replaces the old fragile foreign-marker denylist."""
+def _candidate_is_english(title: str, category: str = "", trusted: bool = True) -> bool:
+    """Allowlist gate: True only if a stream is positively US/CA/English.
+
+    `trusted` = the stream came from a known English-default provider (the
+    hardcoded NHL/cable panels: an upstream host, an upstream host, bgdc, kstv, tvpass,
+    thetvapp). Those carry English audio on untagged titles, so a clean untagged
+    title passes. SCRAPED providers (mundo2/hottest/any fresh-* account) are
+    multi-language, so for them an untagged title can't be proven English and is
+    REJECTED — they only contribute streams that are EXPLICITLY US/CA-tagged.
+
+    An explicit US/CA marker always wins; a foreign region tag (DK|/FR|) or a
+    Spanish/foreign language token (CINE|, Exclusivo, Deportes) always loses."""
+    if _US_CA_MARKER_RE.search(title or ""):
+        return True
     tag = _region_tag(title)
-    if tag:
-        return tag in _ALLOWED_REGION_TAGS
-    return not _FOREIGN_CATEGORY_RE.search(category or "")
+    if tag and tag not in _ALLOWED_REGION_TAGS:
+        return False
+    if _FOREIGN_LANG_RE.search(f"{title} {category}"):
+        return False
+    # No explicit US/CA marker and no foreign signal: trust only known-English
+    # providers; reject the multi-language scraped ones (can't prove English).
+    return bool(trusted)
 
 
 def _ch_matches(raw_title: str, ch_name: str) -> bool:
@@ -11867,7 +11893,7 @@ async def _build_barncentre_payload() -> dict:
             # foreign-language-category streams BEFORE name matching so a Danish
             # "DK| DISCOVERY" or a Latino "Discovery Channel HD" (cat=CULTURA)
             # can never land on a US/CA channel.
-            if not _candidate_is_english(ch.get("title", ""), ch.get("category", "")):
+            if not _candidate_is_english(ch.get("title", ""), ch.get("category", ""), ch.get("english_default", True)):
                 continue
             if _ch_matches(ch.get("title", ""), ch_name):
                 assigned[id(ch)] = ch_name
@@ -12371,7 +12397,7 @@ async def _build_lounge_payload() -> dict:
             # foreign-language-category streams BEFORE name matching so a Danish
             # "DK| DISCOVERY" or a Latino "Discovery Channel HD" (cat=CULTURA)
             # can never land on a US/CA channel.
-            if not _candidate_is_english(ch.get("title", ""), ch.get("category", "")):
+            if not _candidate_is_english(ch.get("title", ""), ch.get("category", ""), ch.get("english_default", True)):
                 continue
             if _ch_matches(ch.get("title", ""), ch_name):
                 assigned[id(ch)] = ch_name
@@ -12853,6 +12879,107 @@ def _vod_streams_for(tmdb_id: str) -> list[str]:
     if data is None or age > _VOD_STREAM_INDEX_TTL:
         _kick_vod_stream_index_refresh()
     return (data or {}).get(str(tmdb_id), [])
+
+
+# Series direct-stream index: tmdb_id -> [{host,port,user,pw,series_id}] from each
+# account's get_series (cheap metadata list, cached + bg-built, English-only). The
+# per-episode stream URLs are resolved ON DEMAND (one get_series_info call when a
+# user actually opens that series) — a full episode index would be thousands of
+# calls. This mirrors the movie direct-stream path so series episodes get the same
+# direct-source-first / vidlink-last choice.
+_series_loc_index: dict = {"data": None, "ts": 0.0}
+_series_loc_inflight: bool = False
+
+
+async def _build_series_loc_index() -> dict[str, list[dict]]:
+    per = await asyncio.gather(
+        *[_fetch_upstream_vod_legacy(label, host, port, user, pw)
+          for label, host, port, user, pw in _upstream_ACCOUNTS],
+        return_exceptions=True,
+    )
+    idx: dict[str, list[dict]] = {}
+    for r in per:
+        if not isinstance(r, dict):
+            continue
+        for sv in r.get("series", []):
+            tid, sid = sv.get("tmdb_id"), sv.get("series_id")
+            if not tid or sid is None:
+                continue
+            lst = idx.setdefault(str(tid), [])
+            if len(lst) < 3:  # a few provider options per series
+                lst.append({"host": sv.get("host"), "port": sv.get("port"),
+                            "user": sv.get("user"), "pw": sv.get("pw"), "series_id": sid})
+    return idx
+
+
+def _kick_series_loc_index_refresh() -> None:
+    global _series_loc_inflight
+    if _series_loc_inflight:
+        return
+    _series_loc_inflight = True
+
+    async def _run() -> None:
+        global _series_loc_inflight
+        try:
+            idx = await _build_series_loc_index()
+            _series_loc_index["data"] = idx
+            _series_loc_index["ts"] = _time.time()
+        except Exception as e:
+            print(f"[series-index] build failed: {e}", flush=True)
+        finally:
+            _series_loc_inflight = False
+
+    try:
+        asyncio.create_task(_run())
+    except RuntimeError:
+        pass
+
+
+async def _episode_streams_for(tmdb_id: str) -> dict[tuple[int, int], list[str]]:
+    """On-demand: {(season,episode): [relay /vod URLs]} for a series, built by
+    calling get_series_info for the matched provider series_id(s). Bounded to a
+    couple of providers; every call is guarded so a slow/dead panel degrades to
+    vidlink rather than breaking the series page."""
+    data = _series_loc_index["data"]
+    age = _time.time() - _series_loc_index["ts"]
+    if data is None or age > _VOD_STREAM_INDEX_TTL:
+        _kick_series_loc_index_refresh()
+    locs = (data or {}).get(str(tmdb_id), [])
+    if not locs:
+        return {}
+    out: dict[tuple[int, int], list[str]] = {}
+    import httpx as _hx_ep
+    async with _hx_ep.AsyncClient(timeout=20.0, follow_redirects=True) as hx:
+        for loc in locs[:2]:  # at most 2 providers per series
+            base = f"http://{loc['host']}:{loc['port']}"
+            try:
+                r = await hx.get(f"{base}/player_api.php", params={
+                    "username": loc["user"], "password": loc["pw"],
+                    "action": "get_series_info", "series_id": loc["series_id"]},
+                    headers={"User-Agent": "VLC/3.0"})
+                info = r.json()
+            except Exception:
+                continue
+            for snum, eps in (info.get("episodes") or {}).items():
+                if not isinstance(eps, list):
+                    continue
+                for ep in eps:
+                    if not isinstance(ep, dict):
+                        continue
+                    try:
+                        s_i = int(snum)
+                        e_i = int(ep.get("episode_num") or ep.get("episode_number"))
+                    except (TypeError, ValueError):
+                        continue
+                    eid = ep.get("id")
+                    ext = ep.get("container_extension") or "mp4"
+                    if eid is None:
+                        continue
+                    url = _relay_wrap_vod(f"{base}/series/{loc['user']}/{loc['pw']}/{eid}.{ext}")
+                    slot = out.setdefault((s_i, e_i), [])
+                    if url not in slot and len(slot) < 4:  # ≤4 direct + vidlink = 5
+                        slot.append(url)
+    return out
 
 # Streaming services we expose on the Movies/Series picker. Order is the
 # order the UI renders them.
@@ -13699,6 +13826,13 @@ async def lounge_vod_series(series_key: str) -> dict:
     except Exception as e:
         return {"error": f"fetch_failed: {e}", "seasons": []}
 
+    # Direct IPTV episode streams (relay-wrapped), resolved once for the whole
+    # series. Guarded — never breaks the page; empty map ⇒ vidlink-only.
+    try:
+        ep_direct = await _episode_streams_for(series_key)
+    except Exception:
+        ep_direct = {}
+
     seasons: list[dict] = []
     for sm, sj in zip(season_meta, season_jsons):
         if not isinstance(sj, dict):
@@ -13719,9 +13853,16 @@ async def lounge_vod_series(series_key: str) -> dict:
             # an empty stream_urls and falls back to embed_urls. Their
             # WebView capture populates the cache via a background task,
             # so the next viewer plays instantly.
-            ep_stream_urls = _resolve_stream_urls_episode_cache_only(
-                series_key, sn, ep_n,
-            )
+            # Direct IPTV streams FIRST, then resolver cache; vidlink (embed_urls)
+            # is the last fallback — same source order as movies. ≤4 here so the
+            # total with vidlink stays at the 5-source max.
+            resolved = _resolve_stream_urls_episode_cache_only(series_key, sn, ep_n)
+            ep_stream_urls: list[str] = []
+            for u in ep_direct.get((sn, ep_n), []) + resolved:
+                if u and u not in ep_stream_urls:
+                    ep_stream_urls.append(u)
+                if len(ep_stream_urls) >= 4:
+                    break
             episodes.append({
                 "episode_number": ep_n,
                 "title":          (e.get("name") or "").strip(),
