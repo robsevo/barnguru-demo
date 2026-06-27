@@ -11203,7 +11203,44 @@ def _quality_score(title: str, url: str) -> int:
     return t_score * 10 + q_score
 
 
-def _sort_by_url_priority(candidates: list[dict]) -> list[dict]:
+# Channels whose correct feed is the CANADIAN one (Canadian networks + Quebec
+# French). Used to prefer the right-region source so "same channel, different
+# region" doesn't put the US feed on a Canadian channel (different schedule).
+# Everything not here defaults to US-preferred.
+_CANADIAN_CHANNELS = {
+    "global", "global news", "citytv", "noovo", "rdi", "ici rdi", "ici tele",
+    "lcn", "tv5", "canal d", "canal vie", "cp24", "w network", "showcase",
+    "slice", "stack tv", "teletoon", "muchmusic", "bnn bloomberg",
+    "cbc news network", "ctv news", "ctv news network", "ctv 2",
+}
+_CA_PREFIXES = ("tsn", "sportsnet", "rds", "tva", "cbc", "ctv")
+
+
+def _expected_region(ch_name: str | None) -> str | None:
+    """'ca' for Canadian/Quebec channels, 'us' otherwise. None if no name given
+    (game-page callers pass none → region axis is a no-op there)."""
+    if not ch_name:
+        return None
+    n = ch_name.lower()
+    if n in _CANADIAN_CHANNELS or n.startswith(_CA_PREFIXES):
+        return "ca"
+    return "us"
+
+
+def _title_region(title: str) -> str:
+    """Region tag parsed from a stream/xmltv title prefix: 'us' | 'ca' | ''."""
+    m = _re_bc.match(r"\s*(usa?|can?|uk)\b", title or "", _re_bc.I)
+    if not m:
+        return ""
+    tag = m.group(1).lower()
+    if tag in ("us", "usa"):
+        return "us"
+    if tag in ("ca", "can"):
+        return "ca"
+    return ""
+
+
+def _sort_by_url_priority(candidates: list[dict], ch_name: str | None = None) -> list[dict]:
     """Sort channel candidates for initial game-page playback.
 
     Three-axis sort. Primary axis (Bob, 2026-05-18): an upstream host candidates
@@ -11237,9 +11274,26 @@ def _sort_by_url_priority(candidates: list[dict]) -> list[dict]:
             return 5
         return 6
 
-    def _key(m: dict) -> tuple[int, int, int]:
+    # Region axis (added 2026-06-27): when a channel name is given, prefer the
+    # candidate whose title region matches the channel's expected region — a
+    # Canadian channel gets its CA feed, a US channel its US feed, so the wrong
+    # region's schedule doesn't play. Unknown-region candidates stay neutral
+    # (between match and mismatch). Ranked ABOVE quality because correct content
+    # beats a sharper picture of the wrong feed. No-op for game-page callers
+    # (ch_name=None) so an upstream host-first behavior there is unchanged.
+    expected = _expected_region(ch_name)
+
+    def _region_axis(m: dict) -> int:
+        if not expected:
+            return 0
+        r = _title_region(m.get("title", ""))
+        if not r:
+            return 1
+        return 0 if r == expected else 2
+
+    def _key(m: dict) -> tuple[int, int, int, int]:
         is_an upstream host = 0 if "an upstream host" in m["url"] else 1
-        return (is_an upstream host, _quality_score(m.get("title", ""), m["url"]), _host_prio(m))
+        return (is_an upstream host, _region_axis(m), _quality_score(m.get("title", ""), m["url"]), _host_prio(m))
 
     return sorted(candidates, key=_key)
 
@@ -11761,7 +11815,7 @@ async def _build_barncentre_payload() -> dict:
         blocked = _active_blocklist(name)
         if blocked:
             unique = [c for c in unique if _candidate_upstream_host(c["url"]) not in blocked]
-        channel_candidates[name] = _sort_by_url_priority(unique)
+        channel_candidates[name] = _sort_by_url_priority(unique, name)
 
     # ── 4. Verify each channel's primary stream in parallel ───────────────────
     async def _build_channel(ch_name: str, candidates: list[dict]) -> dict:
@@ -12265,7 +12319,7 @@ async def _build_lounge_payload() -> dict:
         blocked = _LOUNGE_HOST_BLOCKLIST.get(name) or _active_blocklist(name)
         if blocked:
             unique = [c for c in unique if _candidate_upstream_host(c["url"]) not in blocked]
-        channel_candidates[name] = _sort_by_url_priority(unique)
+        channel_candidates[name] = _sort_by_url_priority(unique, name)
 
     async def _build_one(ch_name: str, candidates: list[dict]) -> dict:
         # Same upstream-bias logic as barncentre — the verifier's 10s window
@@ -12475,12 +12529,40 @@ async def _build_lounge_epg() -> dict:
         ],
         return_exceptions=True,
     )
+    # Re-key each account's raw XMLTV channels to OUR channel names so the guide
+    # lines up with the channels we serve, and so foreign feeds don't leak their
+    # guide onto a US/CA channel (added 2026-06-27). Without this, EPG was keyed
+    # by raw xmltv display-names — most never matched our names, and the ones that
+    # did sometimes grabbed a Latin feed's guide ("Sin información"). Exact
+    # normalized match covers most; a bounded prefix/foreign-aware pass (via
+    # _ch_matches) handles multi-word + "24/7 …" names, and junk titles are dropped.
+    _norm_exact = {nm.lower(): nm for nm in _LOUNGE_CHANNEL_NAMES}
+    _prefix_names = [nm for nm in _LOUNGE_CHANNEL_NAMES
+                     if (" " in nm or nm.lower() in _SHORT_FR_DISPLAYS or nm.startswith("24/7"))]
+    _junk_title = _re_bc.compile(
+        r"^\s*(?:sin informaci|no information|no info\b|sans titre|n/?a$|no epg|"
+        r"programaci[oó]n no|to be announced|tba\b|\.+$)", _re_bc.I)
+
+    def _our_channel_for(raw_key: str) -> "str | None":
+        our = _norm_exact.get(_normalize_ch(raw_key))
+        if our is not None:
+            return our
+        for nm in _prefix_names:
+            if _ch_matches(raw_key, nm):
+                return nm
+        return None
+
     merged: dict[str, list[dict]] = {}
     for r in per_account:
         if not isinstance(r, dict):
             continue
         for k, v in r.items():
-            merged.setdefault(k, []).extend(v)
+            our = _our_channel_for(k)
+            if our is None:
+                continue
+            good = [p for p in v if not _junk_title.match(p.get("title", "") or "")]
+            if good:
+                merged.setdefault(our, []).extend(good)
     # Fold in sports programs from the Lounge channel list (already
     # populated when /lounge/live-channels last ran).
     if isinstance(_lounge_cache.get("data"), list):
