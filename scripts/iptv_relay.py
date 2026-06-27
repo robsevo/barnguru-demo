@@ -37,7 +37,7 @@ import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 
 PORT          = int(os.environ.get("IPTV_RELAY_PORT", "9000"))
 TOKEN         = os.environ.get("IPTV_RELAY_TOKEN") or None
@@ -577,6 +577,53 @@ async def proxy_ts(u: str, request: Request) -> Response:
         content=data,
         media_type=ct,
         headers={**_CORS, "X-Cache": "MISS", "Cache-Control": "public, max-age=60, immutable"},
+    )
+
+
+@app.get("/vod")
+async def proxy_vod(u: str, request: Request) -> Response:
+    """Range-aware passthrough for VOD movie/episode files (mp4/mkv/avi) from
+    allowlisted upstream hosts — same relay path as live TV, so films play in the
+    browser over https without the VPS-block / mixed-content problems. Streams
+    bytes (no full-file buffering) and forwards the client's Range header so the
+    player can seek and start instantly. Token-gated + host-allowlisted."""
+    _check_token(request)
+    url = unquote(u)
+    _check_host(url)
+
+    fwd = {"User-Agent": _UPSTREAM_UA, "Accept-Encoding": "identity"}
+    rng = request.headers.get("range")
+    if rng:
+        fwd["Range"] = rng
+
+    cl = await _get_upstream_http()
+    try:
+        req = cl.build_request("GET", url, headers=fwd)
+        r = await cl.send(req, stream=True)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"upstream: {e}")
+    if r.status_code not in (200, 206):
+        code = r.status_code
+        await r.aclose()
+        raise HTTPException(status_code=code)
+
+    passthru = {**_CORS, "Accept-Ranges": "bytes"}
+    for hh in ("content-type", "content-length", "content-range"):
+        if hh in r.headers:
+            passthru[hh] = r.headers[hh]
+
+    async def _body():
+        try:
+            async for chunk in r.aiter_raw():
+                yield chunk
+        finally:
+            await r.aclose()
+
+    return StreamingResponse(
+        _body(),
+        status_code=r.status_code,
+        media_type=r.headers.get("content-type") or "video/mp4",
+        headers=passthru,
     )
 
 

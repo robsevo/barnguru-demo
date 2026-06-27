@@ -10118,6 +10118,18 @@ def _rewrite_iptv_url(url: str) -> str:
     return f"{tunnel}/{endpoint}?u={quote(inner, safe='')}{tq}"
 
 
+def _relay_wrap_vod(url: str) -> str:
+    """Wrap a direct upstream VOD file URL (mp4/mkv) through the relay's /vod
+    endpoint so films play over https on the same residential relay as live TV
+    (avoids VPS-block + mixed-content). No-op if the relay tunnel isn't set."""
+    tunnel = (os.environ.get("IPTV_LOCAL_PROXY_URL") or "").rstrip("/")
+    if not tunnel or not url.startswith("http"):
+        return url
+    token = os.environ.get("IPTV_RELAY_TOKEN") or ""
+    tq = f"&t={quote(token, safe='')}" if token else ""
+    return f"{tunnel}/vod?u={quote(url, safe='')}{tq}"
+
+
 # upstream hosts that firewall the VPS IP. Channel enumeration for these has
 # to go through the residential relay — same trick we already use for stream
 # playback. Add a host here when a previously-working provider starts
@@ -12683,6 +12695,73 @@ async def lounge_epg(channels: str = "") -> dict:
 _lounge_vod_cache: dict = {"data": None, "ts": 0.0}
 _LOUNGE_VOD_TTL = 24 * 3600  # 24h — VOD catalog is slow-moving
 
+# tmdb_id -> [relay-wrapped direct VOD URLs]. Built from each upstream account's
+# get_vod_streams (tmdb-tagged, English-only) so movie pages can play a real
+# direct stream through the relay's /vod endpoint, with vidlink as the last
+# fallback. Slow to build (downloads every account's VOD list) → cached + built
+# in the background, never on the request hot path.
+_vod_stream_index: dict = {"data": None, "ts": 0.0}
+_VOD_STREAM_INDEX_TTL = 12 * 3600
+_vod_stream_index_inflight: bool = False
+
+
+async def _build_vod_stream_index() -> dict[str, list[str]]:
+    """{tmdb_id: [relay /vod URLs]} from all accounts' get_vod_streams.
+    _fetch_upstream_vod_legacy already builds direct URLs + drops Spanish entries."""
+    per = await asyncio.gather(
+        *[_fetch_upstream_vod_legacy(label, host, port, user, pw)
+          for label, host, port, user, pw in _upstream_ACCOUNTS],
+        return_exceptions=True,
+    )
+    idx: dict[str, list[str]] = {}
+    for r in per:
+        if not isinstance(r, dict):
+            continue
+        for mv in r.get("movies", []):
+            tid = mv.get("tmdb_id")
+            url = mv.get("url")
+            if not tid or not url:
+                continue
+            key = str(tid)
+            wrapped = _relay_wrap_vod(url)
+            lst = idx.setdefault(key, [])
+            if wrapped not in lst and len(lst) < 4:  # ≤4 direct + vidlink = 5 max
+                lst.append(wrapped)
+    return idx
+
+
+def _kick_vod_stream_index_refresh() -> None:
+    global _vod_stream_index_inflight
+    if _vod_stream_index_inflight:
+        return
+    _vod_stream_index_inflight = True
+
+    async def _run() -> None:
+        global _vod_stream_index_inflight
+        try:
+            idx = await _build_vod_stream_index()
+            _vod_stream_index["data"] = idx
+            _vod_stream_index["ts"] = _time.time()
+        except Exception as e:
+            print(f"[vod-index] build failed: {e}", flush=True)
+        finally:
+            _vod_stream_index_inflight = False
+
+    try:
+        asyncio.create_task(_run())
+    except RuntimeError:
+        pass
+
+
+def _vod_streams_for(tmdb_id: str) -> list[str]:
+    """Cached lookup of relay VOD URLs for a tmdb_id. Kicks a background build
+    on cold cache / TTL expiry and returns what's available now (maybe [])."""
+    data = _vod_stream_index["data"]
+    age = _time.time() - _vod_stream_index["ts"]
+    if data is None or age > _VOD_STREAM_INDEX_TTL:
+        _kick_vod_stream_index_refresh()
+    return (data or {}).get(str(tmdb_id), [])
+
 # Streaming services we expose on the Movies/Series picker. Order is the
 # order the UI renders them.
 _LOUNGE_VOD_SERVICES: list[str] = [
@@ -13440,7 +13519,17 @@ async def lounge_vod_details(tmdb_id: str) -> dict:
     # the client try playback. Metadata-only fields fall back to None.
     head: dict = instances[0] if instances else {}
 
-    stream_urls = await _resolve_stream_urls_movie(tmdb_id)
+    # Direct IPTV VOD streams (relay-wrapped) play FIRST; the embed-scraper
+    # resolver fills any remaining slots; vidlink (embed_urls) is the last
+    # fallback. Capped at 4 so the total with vidlink stays at the 5-source max.
+    iptv_streams = _vod_streams_for(tmdb_id)
+    resolved = await _resolve_stream_urls_movie(tmdb_id)
+    stream_urls: list[str] = []
+    for s in iptv_streams + resolved:
+        if s and s not in stream_urls:
+            stream_urls.append(s)
+        if len(stream_urls) >= 4:
+            break
 
     return {
         "title":         head.get("english_name") or head.get("name") or "",
