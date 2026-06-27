@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -202,6 +203,37 @@ ALLOWED_HOSTS = {
 }
 ALLOWED_SUFFIXES = tuple(f".{h}" for h in ALLOWED_HOSTS)
 
+# Dynamic allowlist: the link-freshness pipeline verifies fresh upstream hosts and
+# writes them here, so newly-scraped providers can be relayed without a code edit
+# + redeploy. Still token-gated (_check_token), so this only widens which hosts a
+# token-bearing caller may proxy — not an open proxy. File is a JSON list of
+# hostnames: ["mundo2.pro", "host2.tld", ...]. Reloaded on mtime change (cheap).
+DYNAMIC_HOSTS_FILE = Path(
+    os.environ.get(
+        "IPTV_RELAY_DYNAMIC_HOSTS",
+        str(Path(__file__).resolve().parent.parent / "data" / "relay_allowed_hosts.json"),
+    )
+)
+_dyn_cache: tuple[float, frozenset[str], tuple[str, ...]] = (0.0, frozenset(), ())
+
+
+def _dynamic_hosts() -> tuple[frozenset[str], tuple[str, ...]]:
+    """(hosts, suffixes) from the pipeline-written allowlist, cached by mtime."""
+    global _dyn_cache
+    try:
+        mtime = DYNAMIC_HOSTS_FILE.stat().st_mtime
+    except OSError:
+        return frozenset(), ()
+    if mtime != _dyn_cache[0]:
+        try:
+            raw = json.loads(DYNAMIC_HOSTS_FILE.read_text())
+            hosts = frozenset(str(h).lower().strip() for h in raw if h)
+            suffixes = tuple(f".{h}" for h in hosts)
+            _dyn_cache = (mtime, hosts, suffixes)
+        except (OSError, ValueError):
+            return _dyn_cache[1], _dyn_cache[2]
+    return _dyn_cache[1], _dyn_cache[2]
+
 
 class _LRU:
     def __init__(self, max_bytes: int) -> None:
@@ -257,6 +289,9 @@ def _check_token(request: Request) -> None:
 def _check_host(url: str) -> None:
     host = (urlparse(url).hostname or "").lower()
     if host in ALLOWED_HOSTS or host.endswith(ALLOWED_SUFFIXES):
+        return
+    dyn_hosts, dyn_suffixes = _dynamic_hosts()
+    if host in dyn_hosts or (dyn_suffixes and host.endswith(dyn_suffixes)):
         return
     raise HTTPException(status_code=400, detail=f"host not allowed: {host}")
 

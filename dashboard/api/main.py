@@ -1,9 +1,11 @@
 import asyncio
+import collections.abc
 import json
 import os
 import sys
 from datetime import date as _date, datetime, timedelta, timezone
 from pathlib import Path
+from typing import cast
 
 import httpx
 from fastapi import FastAPI, Query
@@ -9380,7 +9382,7 @@ async def stream_proxy(url: str, request: Request) -> FastResponse:
                 await upstream.aclose()
             else:
                 up_ct = upstream.headers.get("content-type") or "video/mp2t"
-                async def _stream_segment() -> "asyncio.AsyncIterator[bytes]":
+                async def _stream_segment() -> "collections.abc.AsyncIterator[bytes]":
                     try:
                         async for chunk in upstream.aiter_bytes(64 * 1024):
                             yield chunk
@@ -9932,6 +9934,35 @@ _upstream_ACCOUNTS: list[tuple[str, str, int, str, str]] = [
     # ("lunar",       "lunar.pm",            8080, "JeffOglesby",           "Marriage101"),
 ]
 
+# Fresh upstream accounts discovered nightly by scripts/iptv_freshness.py (scrapes
+# r/REDACTED_SOURCE, verifies via player_api). Additive + deduped: absent/empty file
+# = no change, and a fresh account never displaces a hardcoded (purchased) one —
+# the hardcoded accounts above keep priority; these append as supplements/failover
+# and cover channels the dead/maxed providers (kstv, ampztl, an upstream host) dropped.
+# Their hosts must also be in the relay allowlist (the same script writes
+# data/relay_allowed_hosts.json, which iptv_relay.py reads).
+def _load_dynamic_upstream_accounts() -> list[tuple[str, str, int, str, str]]:
+    f = Path(__file__).resolve().parents[2] / "data" / "dynamic_upstream_accounts.json"
+    try:
+        rows = json.loads(f.read_text())
+    except (OSError, ValueError):
+        return []
+    out: list[tuple[str, str, int, str, str]] = []
+    for r in rows:
+        try:
+            label, host, port, user, pw = r
+            out.append((str(label), str(host), int(port), str(user), str(pw)))
+        except (ValueError, TypeError):
+            continue
+    return out
+
+
+_seen_upstream = {(h, u) for _, h, _p, u, _pw in _upstream_ACCOUNTS}
+for _row in _load_dynamic_upstream_accounts():
+    if (_row[1], _row[3]) not in _seen_upstream:
+        _upstream_ACCOUNTS.append(_row)
+        _seen_upstream.add((_row[1], _row[3]))
+
 # Residential relay — scripts/iptv_relay.py run on a laptop/Pi and exposed
 # via Cloudflare Tunnel (localhost:8000). When IPTV_LOCAL_PROXY_URL is set,
 # every stream URL we hand to the browser is rewritten to go through that
@@ -10322,9 +10353,17 @@ async def iptv_channels(force: bool = False):
 
     # First request after process start (or force=True): pay the cost.
     channels = await _build_iptv_channels()
-    _IPTV_CACHE["data"] = channels
-    _IPTV_CACHE["ts"] = now
-    return {"channels": channels, "count": len(channels), "cached": False}
+    # Guard against poisoning the cache with an empty/degraded cold build when a
+    # transient upstream outage coincides with process start / TTL expiry. The
+    # background refresher already guards (`if fresh:` in _kick_iptv_refresh) —
+    # the cold path was the only unguarded writer, so a single bad fan-out here
+    # could blank the whole channel pool for the full TTL. Keep last-known-good
+    # instead, and serve it so BarnCentre/Lounge stay watchable.
+    if channels or not _IPTV_CACHE["data"]:
+        _IPTV_CACHE["data"] = channels
+        _IPTV_CACHE["ts"] = now
+    served = _IPTV_CACHE["data"]
+    return {"channels": served, "count": len(served), "cached": not channels and bool(served)}
 
 
 async def _src_streams_json() -> list[dict]:
@@ -10781,11 +10820,31 @@ def _normalize_ch(title: str) -> str:
 
 _SHORT_FR_DISPLAYS = {"rds", "rds2", "rds info", "tva sports"}
 
+# Foreign-feed guard. Scraped upstream providers carry Latin-American / Brazilian /
+# other-region duplicates of US channels ("ESPN Brasil 2", "ESPN HD OP 2" =
+# opción) that would otherwise match the bare US channel name via the prefix
+# rule and put Portuguese/Spanish audio on the US channel. Curated channels are
+# US/CA English (RDS/TVA Sports are French-CANADIAN and matched separately, and
+# contain none of these markers). If a title carries one of these region/language
+# markers, it is NOT one of our channels — reject it. Word-ish markers use a
+# boundary so "op" can't fire inside other words.
+_FOREIGN_FEED_RE = _re_bc.compile(
+    r"\b(?:brasil|brazil|latino|latin|deportes|espa(?:n|ñ)ol|espa(?:n|ñ)a|"
+    r"m[eé]xico|portugu|arabic|arab|t[uü]rk|italia|italiano|deutsch|"
+    r"fran[cç]ais|colombia|argentina|venezuela|chile|per[uú]|opci[oó]n|op)\b",
+    _re_bc.I,
+)
+
 
 def _ch_matches(raw_title: str, ch_name: str) -> bool:
     """Return True if an IPTV channel title matches our BarnCentre channel name."""
     norm  = _normalize_ch(raw_title)
     want  = ch_name.lower()
+    # Reject foreign-region/language feeds outright (e.g. "ESPN Brasil",
+    # "ESPN HD OP 2") so they don't shadow the US channel — unless the curated
+    # name itself contains the marker (none currently do).
+    if _FOREIGN_FEED_RE.search(norm) and not _FOREIGN_FEED_RE.search(want):
+        return False
     # Exact match or starts with name + space (e.g. "tsn1" or "tsn1 hd")
     if norm == want or norm.startswith(want + " "):
         return True
@@ -11378,7 +11437,7 @@ async def _fetch_mlb_schedule() -> dict[str, list[dict]]:
 # ---------------------------------------------------------------------------
 # NBA schedule — cdn.nba.com static JSON with broadcast info
 # ---------------------------------------------------------------------------
-_NBA_NETWORK_TO_CHANNEL: dict[str, str] = {
+_NBA_NETWORK_TO_CHANNEL: dict[str, str | None] = {
     "ESPN":         "ESPN",
     "ESPN2":        "ESPN2",
     "ABC":          "ESPN",   # ABC games air on ESPN channel in our lineup
@@ -11572,7 +11631,7 @@ async def _build_barncentre_payload() -> dict:
                     home_score = (game.get("homeTeam") or {}).get("score")
                     for b in (game.get("tvBroadcasts") or []):
                         code    = b.get("network", "")
-                        display = _BROADCAST_CODE_MAP.get(code, code)
+                        display = cast(str, _BROADCAST_CODE_MAP.get(code, code))
                         programs.setdefault(display, []).append({
                             "game_id":    gid,
                             "title":      f"{away} @ {home}",
@@ -11768,12 +11827,14 @@ async def _build_barncentre_payload() -> dict:
                 continue
             host_used[h] = host_used.get(h, 0) + 1
             backup_src.append(c["url"])
-            if len(backup_src) >= 12:
+            # 5 sources max per channel (1 primary + 4 backups), per product
+            # requirement — keeps the player's source list tight + all-working.
+            if len(backup_src) >= 4:
                 break
 
         # Force re-encode for channels with irregular GOPs (TSN). See the
         # comment on _RECODE_CHANNELS for the live-evidence write-up.
-        chosen_out  = _apply_recode(chosen, ch_name)
+        chosen_out  = _apply_recode(cast(str, chosen), ch_name)
         backups_out = [_apply_recode(u, ch_name) for u in backup_src]
 
         return {
@@ -11870,9 +11931,20 @@ async def _build_barncentre_payload() -> dict:
     except Exception:
         pass
 
-    _barncentre_cache["data"] = result
-    _barncentre_cache["ts"]   = now_ts
-    return {"channels": result, "cached": False}
+    # Same poisoning guard as the Lounge builder: don't overwrite a good cache
+    # with a cold build that resolved zero playable streams during a transient
+    # upstream outage — keep last-known-good and serve it (flagged degraded) so
+    # BarnCentre stays watchable until the next successful background refresh.
+    if any(ch.get("primary_url") for ch in result) or _barncentre_cache["data"] is None:
+        _barncentre_cache["data"] = result
+        _barncentre_cache["ts"]   = now_ts
+        return {"channels": result, "cached": False}
+    return {
+        "channels": _barncentre_cache["data"],
+        "cached":   True,
+        "stale":    True,
+        "degraded": True,
+    }
 
 
 # ===========================================================================
@@ -12078,7 +12150,7 @@ async def _build_lounge_payload() -> dict:
                     home_score = (game.get("homeTeam") or {}).get("score")
                     for b in (game.get("tvBroadcasts") or []):
                         code    = b.get("network", "")
-                        display = _BROADCAST_CODE_MAP.get(code, code)
+                        display = cast(str, _BROADCAST_CODE_MAP.get(code, code))
                         programs.setdefault(display, []).append({
                             "game_id":    gid,
                             "title":      f"{away} @ {home}",
@@ -12203,7 +12275,7 @@ async def _build_lounge_payload() -> dict:
             if len(backup_src) >= 12:
                 break
 
-        chosen_out  = _apply_recode(chosen, ch_name)
+        chosen_out  = _apply_recode(cast(str, chosen), ch_name)
         backups_out = [_apply_recode(u, ch_name) for u in backup_src]
 
         return {
@@ -12233,9 +12305,22 @@ async def _build_lounge_payload() -> dict:
     except Exception:
         pass
 
-    _lounge_cache["data"] = result
-    _lounge_cache["ts"]   = now_ts
-    return {"channels": result, "cached": False}
+    # Only overwrite the cache when this build actually resolved playable
+    # streams. A cold build during a transient upstream/relay hiccup can return
+    # every channel with no primary_url; caching that would strand the Lounge
+    # on an all-dead list for the full TTL. Keep last-known-good instead and
+    # serve it (flagged degraded) so the at-home Fire TV stays watchable until
+    # the next successful background refresh.
+    if any(ch.get("primary_url") for ch in result) or _lounge_cache["data"] is None:
+        _lounge_cache["data"] = result
+        _lounge_cache["ts"]   = now_ts
+        return {"channels": result, "cached": False}
+    return {
+        "channels": _lounge_cache["data"],
+        "cached":   True,
+        "stale":    True,
+        "degraded": True,
+    }
 
 
 # ─── /lounge/epg — TV guide for the cable + sports channels ───────────────
@@ -12959,7 +13044,7 @@ async def _build_vod_catalog_tmdb() -> dict:
                 tasks.append(_tmdb_discover_titles(hx, api_key, "series", svc, ids, region=region))
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for r in results:
-            if isinstance(r, Exception) or not r:
+            if isinstance(r, BaseException) or not r:
                 continue
             for item in r:
                 (movies if item["kind"] == "movie" else series).append(item)
@@ -13285,7 +13370,7 @@ async def lounge_vod_series(series_key: str) -> dict:
             season_meta = [
                 sm for sm in (top_body.get("seasons") or [])
                 if isinstance(sm, dict) and isinstance(sm.get("season_number"), int)
-                and sm.get("season_number") > 0  # skip Specials (season 0)
+                and sm.get("season_number", 0) > 0  # skip Specials (season 0)
             ]
             # Fetch each season's episode list. Cap at 12 seasons so a
             # 20-season-long sitcom doesn't issue 20 TMDB calls per click.

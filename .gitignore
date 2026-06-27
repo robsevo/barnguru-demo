@@ -83,3 +83,7 @@ cv-static/
 *.swp
 *.swo
 .vercel
+
+# IPTV freshness runtime artifacts (regenerated on the self-hosted runner; contain creds)
+data/dynamic_upstream_accounts.json
+data/relay_allowed_hosts.json
