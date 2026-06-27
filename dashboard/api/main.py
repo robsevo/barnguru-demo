@@ -10830,8 +10830,11 @@ _SHORT_FR_DISPLAYS = {"rds", "rds2", "rds info", "tva sports"}
 # boundary so "op" can't fire inside other words.
 _FOREIGN_FEED_RE = _re_bc.compile(
     r"\b(?:brasil|brazil|latino|latin|deportes|espa(?:n|ñ)ol|espa(?:n|ñ)a|"
+    # NOTE: no French marker here on purpose — Quebec French channels (TVA, LCN,
+    # RDI, Noovo, RDS) are Canadian and wanted. France-the-country feeds are
+    # excluded by not adding their channel names, not by this guard.
     r"m[eé]xico|portugu|arabic|arab|t[uü]rk|italia|italiano|deutsch|"
-    r"fran[cç]ais|colombia|argentina|venezuela|chile|per[uú]|opci[oó]n|op)\b",
+    r"colombia|argentina|venezuela|chile|per[uú]|opci[oó]n|op)\b",
     _re_bc.I,
 )
 
@@ -11982,6 +11985,26 @@ _LOUNGE_CHANNEL_NAMES: list[str] = [
     "Discovery", "TLC", "Food Network", "HGTV", "Oxygen",
     # ── Canadian premium cable (80-89) ──
     "Stack TV", "W Network", "Showcase", "Slice",
+    # ── News — US + CA (added 2026-06-27; US/CA only) ──
+    "CNN", "CNN International", "HLN", "Bloomberg", "Bloomberg Television",
+    "MSNBC", "Fox News", "CBC News Network", "CTV News Channel", "CP24", "Global News",
+    # ── Canadian basic networks ──
+    "CBC", "CTV", "CTV 2", "Global", "Citytv",
+    # ── Quebec French — TV / news / sports (CA) ──
+    "TVA", "Noovo", "ICI Télé", "ICI RDI", "RDI", "LCN", "TVA Sports 2",
+    "RDS2", "TV5", "Canal D", "Canal Vie",
+    # ── More sports — US/CA ──
+    "DAZN 1", "DAZN 2", "DAZN 3", "DAZN 4", "DAZN 5",
+    "NFL Network", "NFL RedZone",
+    "beIN Sports", "beIN Sports 1", "beIN Sports 2", "beIN Sports 3",
+    "beIN Sports 4", "beIN Sports 5",
+    "TSN", "Sportsnet", "TVA Sports",
+    # ── True crime (US/CA) ──
+    "Court TV", "True Crime Network", "Oxygen True Crime", "ID",
+    # ── Adult animation — 24/7 single-show channels (common on IPTV, like 24/7 Pokemon) ──
+    "24/7 Family Guy", "24/7 American Dad", "24/7 Rick and Morty",
+    "24/7 South Park", "24/7 Bob's Burgers", "24/7 Futurama",
+    "24/7 The Simpsons", "24/7 King of the Hill",
 ]
 
 # Per-channel upstream-host blocklist. Same semantics as
