@@ -587,6 +587,19 @@ async def proxy_vod(u: str, request: Request) -> Response:
     browser over https without the VPS-block / mixed-content problems. Streams
     bytes (no full-file buffering) and forwards the client's Range header so the
     player can seek and start instantly. Token-gated + host-allowlisted."""
+    try:
+        return await _proxy_vod_impl(u, request)
+    except HTTPException:
+        raise
+    except Exception as e:
+        # TEMP diagnostic: surface the real error in the response so we can see
+        # why /vod 500s without server-log access. Revert to a generic 502 after.
+        import traceback as _tb
+        return Response(content=f"VOD_ERR: {type(e).__name__}: {e}\n{_tb.format_exc()[:600]}",
+                        status_code=599, media_type="text/plain")
+
+
+async def _proxy_vod_impl(u: str, request: Request) -> Response:
     _check_token(request)
     url = unquote(u)
     _check_host(url)
