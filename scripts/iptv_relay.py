@@ -606,11 +606,7 @@ async def proxy_vod(u: str, request: Request) -> Response:
     except HTTPException:
         raise
     except Exception as e:
-        # TEMP diagnostic: surface the real error in the response so we can see
-        # why /vod 500s without server-log access. Revert to a generic 502 after.
-        import traceback as _tb
-        return Response(content=f"VOD_ERR: {type(e).__name__}: {e}\n{_tb.format_exc()[:600]}",
-                        status_code=599, media_type="text/plain")
+        raise HTTPException(status_code=502, detail=f"vod upstream: {e}")
 
 
 async def _proxy_vod_impl(u: str, request: Request) -> Response:
