@@ -12920,6 +12920,17 @@ _series_loc_index: dict = {"data": None, "ts": 0.0}
 _series_loc_inflight: bool = False
 
 
+def _norm_series_name(name: str) -> str:
+    """Normalize a series title for cross-provider matching: lowercase, drop
+    year suffixes / quality tags / season markers / punctuation. So a provider's
+    'Breaking Bad (2008) HD' and TMDB's 'Breaking Bad' match."""
+    n = (name or "").lower()
+    n = _re_bc.sub(r"\(?\b(19|20)\d{2}\b\)?", "", n)          # years
+    n = _re_bc.sub(r"\b(s\d+|season\s*\d+|hd|fhd|sd|4k|uhd)\b", "", n)  # tags
+    n = _re_bc.sub(r"[^a-z0-9]+", "", n)                       # punctuation/space
+    return n
+
+
 async def _build_series_loc_index() -> dict[str, list[dict]]:
     per = await asyncio.gather(
         *[_fetch_upstream_vod_legacy(label, host, port, user, pw)
@@ -12932,15 +12943,28 @@ async def _build_series_loc_index() -> dict[str, list[dict]]:
         if not isinstance(r, dict):
             continue
         for sv in r.get("series", []):
-            tid, sid = sv.get("tmdb_id"), sv.get("series_id")
-            if not tid or sid is None:
+            sid = sv.get("series_id")
+            if sid is None:
                 continue
             if str(sv.get("host", "")).lower() in dead:
                 continue  # known-dead provider — its episodes would 502
-            lst = idx.setdefault(str(tid), [])
-            if len(lst) < 6:  # more provider options per series = more episode links
-                lst.append({"host": sv.get("host"), "port": sv.get("port"),
-                            "user": sv.get("user"), "pw": sv.get("pw"), "series_id": sid})
+            # Index by tmdb_id when the provider tags it, AND ALWAYS by
+            # normalized name — most scraped accounts tmdb-tag movies but NOT
+            # series, so a tmdb-only index is empty. Name keys let the series
+            # page (which knows the TMDB title) still find provider episodes.
+            keys = []
+            tid = sv.get("tmdb_id")
+            if tid:
+                keys.append(str(tid))
+            nm = _norm_series_name(sv.get("name") or "")
+            if nm:
+                keys.append("name:" + nm)
+            rec = {"host": sv.get("host"), "port": sv.get("port"),
+                   "user": sv.get("user"), "pw": sv.get("pw"), "series_id": sid}
+            for k in keys:
+                lst = idx.setdefault(k, [])
+                if len(lst) < 6:  # more provider options per series = more links
+                    lst.append(rec)
     return idx
 
 
@@ -12967,52 +12991,21 @@ def _kick_series_loc_index_refresh() -> None:
         pass
 
 
-@app.get("/lounge/vod-series-debug")
-async def vod_series_debug(tmdb_id: str = "1396") -> dict:
-    """TEMP: report series loc-index state to diagnose 0 episode links."""
-    if _series_loc_index["data"] is None:
-        _kick_series_loc_index_refresh()
-    data = _series_loc_index["data"]
-    locs = (data or {}).get(str(tmdb_id), [])
-    # sample one provider's get_series_info episode containers
-    sample = []
-    if locs:
-        loc = locs[0]
-        base = f"http://{loc['host']}:{loc['port']}"
-        try:
-            async with _httpx_backup.AsyncClient(timeout=15.0, follow_redirects=True) as hx:
-                r = await hx.get(f"{base}/player_api.php", params={
-                    "username": loc["user"], "password": loc["pw"],
-                    "action": "get_series_info", "series_id": loc["series_id"]},
-                    headers={"User-Agent": "VLC/3.0"})
-                info = r.json()
-            for snum, eps in list((info.get("episodes") or {}).items())[:1]:
-                for ep in (eps if isinstance(eps, list) else [])[:3]:
-                    sample.append({"s": snum, "ext": ep.get("container_extension"),
-                                   "id": ep.get("id")})
-        except Exception as e:
-            sample = [f"err: {e}"]
-    return {
-        "loc_index_built": data is not None,
-        "loc_index_size": len(data or {}),
-        "locs_for_tmdb": len(locs),
-        "loc_hosts": [l.get("host") for l in locs],
-        "sample_episodes": sample,
-    }
-
-
-async def _episode_streams_for(tmdb_id: str) -> dict[tuple[int, int], list[str]]:
+async def _episode_streams_for(tmdb_id: str, name: str = "") -> dict[tuple[int, int], list[str]]:
     """On-demand: {(season,episode): [relay /vod URLs]} for a series, built by
-    calling get_series_info for the matched provider series_id(s). Bounded to a
-    couple of providers; every call is guarded so a slow/dead panel degrades to
-    vidlink rather than breaking the series page."""
+    calling get_series_info for the matched provider series_id(s). Looks up by
+    tmdb_id first, then by normalized NAME (most scraped accounts don't tmdb-tag
+    series, so name matching is what actually finds episodes). Guarded so a
+    slow/dead panel degrades to vidlink rather than breaking the series page."""
     data = _series_loc_index["data"]
     age = _time.time() - _series_loc_index["ts"]
     if data is None or age > _VOD_STREAM_INDEX_TTL:
         _kick_series_loc_index_refresh()
     dead = _vod_dead_hosts()
-    locs = [l for l in (data or {}).get(str(tmdb_id), [])
-            if str(l.get("host", "")).lower() not in dead]
+    raw = (data or {}).get(str(tmdb_id), [])
+    if not raw and name:
+        raw = (data or {}).get("name:" + _norm_series_name(name), [])
+    locs = [l for l in raw if str(l.get("host", "")).lower() not in dead]
     if not locs:
         return {}
     import httpx as _hx_ep
@@ -13910,9 +13903,11 @@ async def lounge_vod_series(series_key: str) -> dict:
         return {"error": f"fetch_failed: {e}", "seasons": []}
 
     # Direct IPTV episode streams (relay-wrapped), resolved once for the whole
-    # series. Guarded — never breaks the page; empty map ⇒ vidlink-only.
+    # series. Pass the TMDB title so we can name-match providers that don't
+    # tmdb-tag their series. Guarded — never breaks the page; empty ⇒ vidlink.
     try:
-        ep_direct = await _episode_streams_for(series_key)
+        ep_direct = await _episode_streams_for(
+            series_key, top_body.get("name") or top_body.get("original_name") or "")
     except Exception:
         ep_direct = {}
 
