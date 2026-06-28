@@ -13008,12 +13008,24 @@ def _kick_series_loc_index_refresh() -> None:
         pass
 
 
+_episode_streams_cache: dict[str, tuple[float, dict]] = {}
+_EPISODE_CACHE_TTL = 6 * 3600  # 6h — episode stream_ids are stable for a session
+
+
 async def _episode_streams_for(tmdb_id: str, name: str = "") -> dict[tuple[int, int], list[str]]:
     """On-demand: {(season,episode): [relay /vod URLs]} for a series, built by
     calling get_series_info for the matched provider series_id(s). Looks up by
     tmdb_id first, then by normalized NAME (most scraped accounts don't tmdb-tag
-    series, so name matching is what actually finds episodes). Guarded so a
-    slow/dead panel degrades to vidlink rather than breaking the series page."""
+    series, so name matching is what actually finds episodes).
+
+    RESULTS ARE CACHED per series (6h): get_series_info is a live multi-provider
+    fetch, and re-running it on every series-detail request made responses slow
+    enough to 504 the frontend proxy. With the cache, only the first viewer (or
+    the deploy warm step) pays the cost; everyone after is instant. Guarded so a
+    slow/dead panel degrades to vidlink rather than breaking the page."""
+    cached = _episode_streams_cache.get(str(tmdb_id))
+    if cached and (_time.time() - cached[0]) < _EPISODE_CACHE_TTL:
+        return cached[1]
     data = _series_loc_index["data"]
     age = _time.time() - _series_loc_index["ts"]
     if data is None or age > _VOD_STREAM_INDEX_TTL:
@@ -13031,7 +13043,7 @@ async def _episode_streams_for(tmdb_id: str, name: str = "") -> dict[tuple[int, 
         """Fetch one provider's episode list → [(season, episode, relay_url)]."""
         base = f"http://{loc['host']}:{loc['port']}"
         try:
-            async with _hx_ep.AsyncClient(timeout=18.0, follow_redirects=True) as hx:
+            async with _hx_ep.AsyncClient(timeout=10.0, follow_redirects=True) as hx:
                 r = await hx.get(f"{base}/player_api.php", params={
                     "username": loc["user"], "password": loc["pw"],
                     "action": "get_series_info", "series_id": loc["series_id"]},
@@ -13072,6 +13084,10 @@ async def _episode_streams_for(tmdb_id: str, name: str = "") -> dict[tuple[int, 
             slot = out.setdefault((s_i, e_i), [])
             if url not in slot and len(slot) < 4:  # ≤4 direct + vidlink = 5 max
                 slot.append(url)
+    # Cache only non-empty results (don't pin an empty map while the loc index
+    # is still warming — let the next call retry).
+    if out:
+        _episode_streams_cache[str(tmdb_id)] = (_time.time(), out)
     return out
 
 # Streaming services we expose on the Movies/Series picker. Order is the
@@ -13922,10 +13938,14 @@ async def lounge_vod_series(series_key: str) -> dict:
 
     # Direct IPTV episode streams (relay-wrapped), resolved once for the whole
     # series. Pass the TMDB title so we can name-match providers that don't
-    # tmdb-tag their series. Guarded — never breaks the page; empty ⇒ vidlink.
+    # tmdb-tag their series. HARD 14s bound so a slow provider can't hang the
+    # response and 504 the frontend proxy — on timeout we serve vidlink and the
+    # background warm/cache fills it in for the next viewer. Cached after first.
     try:
-        ep_direct = await _episode_streams_for(
-            series_key, top_body.get("name") or top_body.get("original_name") or "")
+        ep_direct = await asyncio.wait_for(
+            _episode_streams_for(
+                series_key, top_body.get("name") or top_body.get("original_name") or ""),
+            timeout=14.0)
     except Exception:
         ep_direct = {}
 
