@@ -12829,55 +12829,34 @@ _VOD_STREAM_INDEX_TTL = 12 * 3600
 _vod_stream_index_inflight: bool = False
 
 
-async def _live_vod_hosts(candidate_urls: list[str]) -> set[str]:
-    """Probe each UNIQUE upstream host once THROUGH THE RELAY (the real serving
-    path) and return the set actually serving video now. Some allowlisted hosts
-    (e.g. 10431-plan.ott-cdn.me) pass the freshness scraper but later go down and
-    502, so a title whose source list included them gave the user a dead
-    manually-selectable source ("some won't work").
+_VOD_DEAD_HOSTS_FILE = Path(__file__).parent.parent.parent / "data" / "vod_dead_hosts.json"
 
-    CRITICAL: we must probe via _relay_wrap_vod(...) through the relay, NOT the
-    direct upstream URL — these hosts IP-block the API box directly (that's why
-    the relay exists), so a direct probe false-negatives EVERY host and empties
-    the index. The relay-wrapped probe matches exactly what the client fetches."""
-    from urllib.parse import urlparse as _u
-    sample: dict[str, str] = {}
-    for u in candidate_urls:
-        h = _u(u).hostname or ""
-        if h and h not in sample:
-            sample[h] = u  # one representative direct URL per host
-    async def _alive(host: str, direct_url: str) -> tuple[str, bool]:
-        try:
-            wrapped = _relay_wrap_vod(direct_url)  # localhost:8000/vod?u=...&t=...
-            async with _httpx_backup.AsyncClient(timeout=12.0, follow_redirects=True) as hx:
-                r = await hx.get(wrapped, headers={"Range": "bytes=0-1023"})
-            return host, r.status_code in (200, 206)
-        except Exception:
-            return host, False
-    results = await asyncio.gather(*[_alive(h, u) for h, u in sample.items()])
-    live = {h for h, ok in results if ok}
-    dead = [h for h, ok in results if not ok]
-    print(f"[vod-index] live hosts: {sorted(live)} | dead (excluded): {dead}", flush=True)
-    # Safety net: if the probe somehow fails for ALL hosts (relay down, tunnel
-    # hiccup), DON'T empty the index — fall back to trusting every host rather
-    # than serving zero sources.
-    if not live and sample:
-        print("[vod-index] WARNING: all hosts failed probe — keeping all (fail-open)", flush=True)
-        return set(sample.keys())
-    return live
+
+def _vod_dead_hosts() -> set[str]:
+    """Hosts known to be down (502/unreachable). Maintained by the nightly
+    freshness pipeline (cheap, runs on the residential box where reachability
+    matches the relay) and read here to exclude their sources from the index —
+    so a user never manually switches to a dead source. Static file read, no
+    per-request/build network calls (an earlier in-build relay probe destabilized
+    the API), so this can never empty the index or 502 the API."""
+    try:
+        return {str(h).lower() for h in json.loads(_VOD_DEAD_HOSTS_FILE.read_text())}
+    except Exception:
+        return set()
 
 
 async def _build_vod_stream_index() -> dict[str, list[str]]:
     """{tmdb_id: [relay /vod URLs]} from all accounts' get_vod_streams.
-    _fetch_upstream_vod_legacy already builds direct URLs + drops Spanish entries."""
+    _fetch_upstream_vod_legacy already builds direct URLs + drops Spanish entries.
+    Sources from known-dead hosts (data/vod_dead_hosts.json) are excluded."""
     per = await asyncio.gather(
         *[_fetch_upstream_vod_legacy(label, host, port, user, pw)
           for label, host, port, user, pw in _upstream_ACCOUNTS],
         return_exceptions=True,
     )
-    # Collect candidates first (mp4/m3u8 only), then drop dead hosts so the index
-    # only ever contains sources that actually play.
-    candidates: list[tuple[str, str]] = []  # (tmdb_id, direct_url)
+    from urllib.parse import urlparse as _u
+    dead = _vod_dead_hosts()
+    idx: dict[str, list[str]] = {}
     for r in per:
         if not isinstance(r, dict):
             continue
@@ -12889,19 +12868,12 @@ async def _build_vod_stream_index() -> dict[str, list[str]]:
             # Browser-playable containers only: mp4 (native) / m3u8 (hls.js).
             if not _re_bc.search(r"\.(mp4|m3u8)(\?|$)", url, _re_bc.I):
                 continue
-            candidates.append((str(tid), url))
-
-    live_hosts = await _live_vod_hosts([u for _, u in candidates])
-    from urllib.parse import urlparse as _u
-
-    idx: dict[str, list[str]] = {}
-    for tid, url in candidates:
-        if (_u(url).hostname or "") not in live_hosts:
-            continue  # host is down — don't present a source that 502s
-        wrapped = _relay_wrap_vod(url)
-        lst = idx.setdefault(tid, [])
-        if wrapped not in lst and len(lst) < 4:  # ≤4 direct + vidlink = 5 max
-            lst.append(wrapped)
+            if (_u(url).hostname or "").lower() in dead:
+                continue  # statically-known dead host — don't present a 502 source
+            wrapped = _relay_wrap_vod(url)
+            lst = idx.setdefault(str(tid), [])
+            if wrapped not in lst and len(lst) < 4:  # ≤4 direct + vidlink = 5 max
+                lst.append(wrapped)
     return idx
 
 
