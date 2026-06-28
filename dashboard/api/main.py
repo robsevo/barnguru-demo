@@ -12861,9 +12861,8 @@ async def _build_vod_stream_index() -> dict[str, list[str]]:
         if not isinstance(r, dict):
             continue
         for mv in r.get("movies", []):
-            tid = mv.get("tmdb_id")
             url = mv.get("url")
-            if not tid or not url:
+            if not url:
                 continue
             # Browser-playable containers only: mp4 (native) / m3u8 (hls.js).
             if not _re_bc.search(r"\.(mp4|m3u8)(\?|$)", url, _re_bc.I):
@@ -12871,9 +12870,22 @@ async def _build_vod_stream_index() -> dict[str, list[str]]:
             if (_u(url).hostname or "").lower() in dead:
                 continue  # statically-known dead host — don't present a 502 source
             wrapped = _relay_wrap_vod(url)
-            lst = idx.setdefault(str(tid), [])
-            if wrapped not in lst and len(lst) < 4:  # ≤4 direct + vidlink = 5 max
-                lst.append(wrapped)
+            # Index by tmdb_id when the provider tags it, AND ALWAYS by normalized
+            # name. Scraped accounts churn and many DON'T tmdb-tag get_vod_streams,
+            # so a tmdb-only index goes empty ("movies gone"). Name keys let the
+            # details endpoint (which knows the TMDB title) find provider streams
+            # regardless of whether the provider tagged them.
+            keys = []
+            tid = mv.get("tmdb_id")
+            if tid:
+                keys.append(str(tid))
+            nm = _norm_series_name(mv.get("name") or "")
+            if nm:
+                keys.append("name:" + nm)
+            for k in keys:
+                lst = idx.setdefault(k, [])
+                if wrapped not in lst and len(lst) < 4:  # ≤4 direct + vidlink = 5 max
+                    lst.append(wrapped)
     return idx
 
 
@@ -12900,14 +12912,19 @@ def _kick_vod_stream_index_refresh() -> None:
         pass
 
 
-def _vod_streams_for(tmdb_id: str) -> list[str]:
-    """Cached lookup of relay VOD URLs for a tmdb_id. Kicks a background build
-    on cold cache / TTL expiry and returns what's available now (maybe [])."""
+def _vod_streams_for(tmdb_id: str, name: str = "") -> list[str]:
+    """Cached lookup of relay VOD URLs for a tmdb_id. Tries the tmdb key first,
+    then the normalized TMDB title (providers often don't tmdb-tag movies, so the
+    name key is what actually matches). Kicks a background build on cold cache."""
     data = _vod_stream_index["data"]
     age = _time.time() - _vod_stream_index["ts"]
     if data is None or age > _VOD_STREAM_INDEX_TTL:
         _kick_vod_stream_index_refresh()
-    return (data or {}).get(str(tmdb_id), [])
+    data = data or {}
+    hits = data.get(str(tmdb_id), [])
+    if not hits and name:
+        hits = data.get("name:" + _norm_series_name(name), [])
+    return hits
 
 
 # Series direct-stream index: tmdb_id -> [{host,port,user,pw,series_id}] from each
@@ -13817,7 +13834,8 @@ async def lounge_vod_details(tmdb_id: str) -> dict:
     # Direct IPTV VOD streams (relay-wrapped) play FIRST; the embed-scraper
     # resolver fills any remaining slots; vidlink (embed_urls) is the last
     # fallback. Capped at 4 so the total with vidlink stays at the 5-source max.
-    iptv_streams = _vod_streams_for(tmdb_id)
+    # Pass the title so movies match providers that don't tmdb-tag their catalog.
+    iptv_streams = _vod_streams_for(tmdb_id, head.get("english_name") or head.get("name") or "")
     resolved = await _resolve_stream_urls_movie(tmdb_id)
     stream_urls: list[str] = []
     for s in iptv_streams + resolved:
