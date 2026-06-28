@@ -237,15 +237,43 @@ def main() -> int:
     args = ap.parse_args()
 
     posts = scrape_reddit(args.days)
-    if not posts:
-        print("No posts — nothing to do.", file=sys.stderr)
+    accounts = decode_credentials(posts) if posts else []
+
+    # ── Account accumulation ──────────────────────────────────────────────
+    # Reddit creds rotate, so each scrape finds a DIFFERENT set; replacing the
+    # account file every run made working VOD providers (e.g. thebiddox.xyz)
+    # vanish the next night ("it worked before, now it's gone"). Instead, merge
+    # the newly-scraped accounts with the already-DEPLOYED ones (the runner IS
+    # the prod box) and re-verify the whole union — working accounts persist,
+    # dead ones drop, new ones get added. Bounded by the keep cap below.
+    DEPLOYED_ACCOUNTS = Path("/app/gretzky/data/dynamic_upstream_accounts.json")
+    prior: list[tuple] = []
+    for src in (DEPLOYED_ACCOUNTS, ACCOUNTS_OUT):
+        try:
+            for row in json.loads(src.read_text()):
+                # rows are [label, host, port, user, pw]; verify wants (host,port,user,pw)
+                if isinstance(row, list) and len(row) >= 5:
+                    prior.append((row[1], int(row[2]), row[3], row[4]))
+        except (OSError, ValueError, TypeError):
+            continue
+    # Dedup the union. PRIOR accounts go FIRST: verify_accounts stops at the keep
+    # cap, so verifying known-good accumulated accounts first guarantees they
+    # persist run-to-run; freshly-scraped accounts then fill the remaining slots.
+    seen, pool = set(), []
+    for acct in prior + accounts:
+        key = (acct[0], acct[1], acct[2], acct[3])
+        if key not in seen:
+            seen.add(key)
+            pool.append(acct)
+    print(f"[accumulate] {len(prior)} prior + {len(accounts)} scraped = {len(pool)} to verify",
+          file=sys.stderr)
+    if not pool:
+        print("No accounts to verify — nothing to do.", file=sys.stderr)
         return 0
-    accounts = decode_credentials(posts)
-    if not accounts:
-        print("No accounts decoded.", file=sys.stderr)
-        return 0
-    good = verify_accounts(accounts, args.max_accounts)
-    print(f"\n[result] {len(good)} working accounts of {len(accounts)} decoded", file=sys.stderr)
+    # Keep more than a single run would, so accumulated good accounts survive.
+    keep = max(args.max_accounts, 20)
+    good = verify_accounts(pool, keep)
+    print(f"\n[result] {len(good)} working accounts of {len(pool)} (scraped+accumulated)", file=sys.stderr)
 
     # Account tuples for _upstream_ACCOUNTS: (label, host, port, username, password)
     acct_rows = [[f"fresh-{g['host']}", g["host"], g["port"], g["username"], g["password"]]
