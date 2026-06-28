@@ -12830,32 +12830,40 @@ _vod_stream_index_inflight: bool = False
 
 
 async def _live_vod_hosts(candidate_urls: list[str]) -> set[str]:
-    """Probe each UNIQUE upstream host once and return the set that's actually
-    serving video right now. Some allowlisted hosts (e.g. 10431-plan.ott-cdn.me)
-    pass the freshness scraper but later go down and 502 on every request — if we
-    keep their sources in the index the user manually switches to a dead source
-    ("some won't work"). One Range probe per host (not per title) is cheap and the
-    build runs on the residential box, so reachability matches the relay's."""
+    """Probe each UNIQUE upstream host once THROUGH THE RELAY (the real serving
+    path) and return the set actually serving video now. Some allowlisted hosts
+    (e.g. 10431-plan.ott-cdn.me) pass the freshness scraper but later go down and
+    502, so a title whose source list included them gave the user a dead
+    manually-selectable source ("some won't work").
+
+    CRITICAL: we must probe via _relay_wrap_vod(...) through the relay, NOT the
+    direct upstream URL — these hosts IP-block the API box directly (that's why
+    the relay exists), so a direct probe false-negatives EVERY host and empties
+    the index. The relay-wrapped probe matches exactly what the client fetches."""
     from urllib.parse import urlparse as _u
-    # One representative direct (un-wrapped) URL per host.
     sample: dict[str, str] = {}
     for u in candidate_urls:
         h = _u(u).hostname or ""
         if h and h not in sample:
-            sample[h] = u
-    async def _alive(host: str, url: str) -> tuple[str, bool]:
+            sample[h] = u  # one representative direct URL per host
+    async def _alive(host: str, direct_url: str) -> tuple[str, bool]:
         try:
-            async with _httpx_backup.AsyncClient(timeout=8.0, follow_redirects=True) as hx:
-                r = await hx.get(url, headers={"User-Agent": _BROWSER_HEADERS["User-Agent"],
-                                               "Range": "bytes=0-1023"})
+            wrapped = _relay_wrap_vod(direct_url)  # localhost:8000/vod?u=...&t=...
+            async with _httpx_backup.AsyncClient(timeout=12.0, follow_redirects=True) as hx:
+                r = await hx.get(wrapped, headers={"Range": "bytes=0-1023"})
             return host, r.status_code in (200, 206)
         except Exception:
             return host, False
     results = await asyncio.gather(*[_alive(h, u) for h, u in sample.items()])
     live = {h for h, ok in results if ok}
     dead = [h for h, ok in results if not ok]
-    if dead:
-        print(f"[vod-index] excluding dead hosts: {dead}", flush=True)
+    print(f"[vod-index] live hosts: {sorted(live)} | dead (excluded): {dead}", flush=True)
+    # Safety net: if the probe somehow fails for ALL hosts (relay down, tunnel
+    # hiccup), DON'T empty the index — fall back to trusting every host rather
+    # than serving zero sources.
+    if not live and sample:
+        print("[vod-index] WARNING: all hosts failed probe — keeping all (fail-open)", flush=True)
+        return set(sample.keys())
     return live
 
 
