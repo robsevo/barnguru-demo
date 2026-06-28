@@ -12829,6 +12829,36 @@ _VOD_STREAM_INDEX_TTL = 12 * 3600
 _vod_stream_index_inflight: bool = False
 
 
+async def _live_vod_hosts(candidate_urls: list[str]) -> set[str]:
+    """Probe each UNIQUE upstream host once and return the set that's actually
+    serving video right now. Some allowlisted hosts (e.g. 10431-plan.ott-cdn.me)
+    pass the freshness scraper but later go down and 502 on every request — if we
+    keep their sources in the index the user manually switches to a dead source
+    ("some won't work"). One Range probe per host (not per title) is cheap and the
+    build runs on the residential box, so reachability matches the relay's."""
+    from urllib.parse import urlparse as _u
+    # One representative direct (un-wrapped) URL per host.
+    sample: dict[str, str] = {}
+    for u in candidate_urls:
+        h = _u(u).hostname or ""
+        if h and h not in sample:
+            sample[h] = u
+    async def _alive(host: str, url: str) -> tuple[str, bool]:
+        try:
+            async with _httpx_backup.AsyncClient(timeout=8.0, follow_redirects=True) as hx:
+                r = await hx.get(url, headers={"User-Agent": _BROWSER_HEADERS["User-Agent"],
+                                               "Range": "bytes=0-1023"})
+            return host, r.status_code in (200, 206)
+        except Exception:
+            return host, False
+    results = await asyncio.gather(*[_alive(h, u) for h, u in sample.items()])
+    live = {h for h, ok in results if ok}
+    dead = [h for h, ok in results if not ok]
+    if dead:
+        print(f"[vod-index] excluding dead hosts: {dead}", flush=True)
+    return live
+
+
 async def _build_vod_stream_index() -> dict[str, list[str]]:
     """{tmdb_id: [relay /vod URLs]} from all accounts' get_vod_streams.
     _fetch_upstream_vod_legacy already builds direct URLs + drops Spanish entries."""
@@ -12837,7 +12867,9 @@ async def _build_vod_stream_index() -> dict[str, list[str]]:
           for label, host, port, user, pw in _upstream_ACCOUNTS],
         return_exceptions=True,
     )
-    idx: dict[str, list[str]] = {}
+    # Collect candidates first (mp4/m3u8 only), then drop dead hosts so the index
+    # only ever contains sources that actually play.
+    candidates: list[tuple[str, str]] = []  # (tmdb_id, direct_url)
     for r in per:
         if not isinstance(r, dict):
             continue
@@ -12847,16 +12879,21 @@ async def _build_vod_stream_index() -> dict[str, list[str]]:
             if not tid or not url:
                 continue
             # Browser-playable containers only: mp4 (native) / m3u8 (hls.js).
-            # mkv/avi return fine from upstream but the <video>/MSE player can't
-            # decode them, so they "skip" — drop them so direct sources actually
-            # play (mkv-only titles fall back to vidlink).
             if not _re_bc.search(r"\.(mp4|m3u8)(\?|$)", url, _re_bc.I):
                 continue
-            key = str(tid)
-            wrapped = _relay_wrap_vod(url)
-            lst = idx.setdefault(key, [])
-            if wrapped not in lst and len(lst) < 4:  # ≤4 direct + vidlink = 5 max
-                lst.append(wrapped)
+            candidates.append((str(tid), url))
+
+    live_hosts = await _live_vod_hosts([u for _, u in candidates])
+    from urllib.parse import urlparse as _u
+
+    idx: dict[str, list[str]] = {}
+    for tid, url in candidates:
+        if (_u(url).hostname or "") not in live_hosts:
+            continue  # host is down — don't present a source that 502s
+        wrapped = _relay_wrap_vod(url)
+        lst = idx.setdefault(tid, [])
+        if wrapped not in lst and len(lst) < 4:  # ≤4 direct + vidlink = 5 max
+            lst.append(wrapped)
     return idx
 
 
