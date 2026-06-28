@@ -270,8 +270,11 @@ def main() -> int:
     if not pool:
         print("No accounts to verify — nothing to do.", file=sys.stderr)
         return 0
-    # Keep more than a single run would, so accumulated good accounts survive.
-    keep = max(args.max_accounts, 20)
+    # Keep more than a single run would (so accumulated good accounts survive),
+    # but bounded: the VOD index build fetches get_vod_streams+get_series for
+    # EVERY account, and 20 made that build too heavy to complete (movies went
+    # empty). 12 accumulates meaningfully while staying buildable.
+    keep = max(args.max_accounts, 12)
     good = verify_accounts(pool, keep)
     print(f"\n[result] {len(good)} working accounts of {len(pool)} (scraped+accumulated)", file=sys.stderr)
 
