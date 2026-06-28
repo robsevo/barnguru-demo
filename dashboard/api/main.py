@@ -12926,6 +12926,7 @@ async def _build_series_loc_index() -> dict[str, list[dict]]:
           for label, host, port, user, pw in _upstream_ACCOUNTS],
         return_exceptions=True,
     )
+    dead = _vod_dead_hosts()
     idx: dict[str, list[dict]] = {}
     for r in per:
         if not isinstance(r, dict):
@@ -12934,8 +12935,10 @@ async def _build_series_loc_index() -> dict[str, list[dict]]:
             tid, sid = sv.get("tmdb_id"), sv.get("series_id")
             if not tid or sid is None:
                 continue
+            if str(sv.get("host", "")).lower() in dead:
+                continue  # known-dead provider — its episodes would 502
             lst = idx.setdefault(str(tid), [])
-            if len(lst) < 3:  # a few provider options per series
+            if len(lst) < 6:  # more provider options per series = more episode links
                 lst.append({"host": sv.get("host"), "port": sv.get("port"),
                             "user": sv.get("user"), "pw": sv.get("pw"), "series_id": sid})
     return idx
@@ -12973,44 +12976,58 @@ async def _episode_streams_for(tmdb_id: str) -> dict[tuple[int, int], list[str]]
     age = _time.time() - _series_loc_index["ts"]
     if data is None or age > _VOD_STREAM_INDEX_TTL:
         _kick_series_loc_index_refresh()
-    locs = (data or {}).get(str(tmdb_id), [])
+    dead = _vod_dead_hosts()
+    locs = [l for l in (data or {}).get(str(tmdb_id), [])
+            if str(l.get("host", "")).lower() not in dead]
     if not locs:
         return {}
-    out: dict[tuple[int, int], list[str]] = {}
     import httpx as _hx_ep
-    async with _hx_ep.AsyncClient(timeout=20.0, follow_redirects=True) as hx:
-        for loc in locs[:2]:  # at most 2 providers per series
-            base = f"http://{loc['host']}:{loc['port']}"
-            try:
+
+    async def _one(loc: dict) -> list[tuple[int, int, str]]:
+        """Fetch one provider's episode list → [(season, episode, relay_url)]."""
+        base = f"http://{loc['host']}:{loc['port']}"
+        try:
+            async with _hx_ep.AsyncClient(timeout=18.0, follow_redirects=True) as hx:
                 r = await hx.get(f"{base}/player_api.php", params={
                     "username": loc["user"], "password": loc["pw"],
                     "action": "get_series_info", "series_id": loc["series_id"]},
                     headers={"User-Agent": "VLC/3.0"})
                 info = r.json()
-            except Exception:
+        except Exception:
+            return []
+        rows: list[tuple[int, int, str]] = []
+        for snum, eps in (info.get("episodes") or {}).items():
+            if not isinstance(eps, list):
                 continue
-            for snum, eps in (info.get("episodes") or {}).items():
-                if not isinstance(eps, list):
+            for ep in eps:
+                if not isinstance(ep, dict):
                     continue
-                for ep in eps:
-                    if not isinstance(ep, dict):
-                        continue
-                    try:
-                        s_i = int(snum)
-                        e_i = int(ep.get("episode_num") or ep.get("episode_number"))
-                    except (TypeError, ValueError):
-                        continue
-                    eid = ep.get("id")
-                    ext = (ep.get("container_extension") or "mp4").lower()
-                    if eid is None:
-                        continue
-                    # Browser-playable only (mp4/m3u8); mkv/avi "skip" in <video>.
-                    if ext not in ("mp4", "m3u8"):
-                        continue
-                    url = _relay_wrap_vod(f"{base}/series/{loc['user']}/{loc['pw']}/{eid}.{ext}")
-                    slot = out.setdefault((s_i, e_i), [])
-                    if url not in slot and len(slot) < 4:  # ≤4 direct + vidlink = 5
-                        slot.append(url)
+                try:
+                    s_i = int(snum)
+                    e_i = int(ep.get("episode_num") or ep.get("episode_number"))
+                except (TypeError, ValueError):
+                    continue
+                eid = ep.get("id")
+                ext = (ep.get("container_extension") or "mp4").lower()
+                if eid is None or ext not in ("mp4", "m3u8"):
+                    continue  # browser-playable only; mkv/avi "skip" in <video>
+                rows.append((s_i, e_i,
+                             _relay_wrap_vod(f"{base}/series/{loc['user']}/{loc['pw']}/{eid}.{ext}")))
+        return rows
+
+    # Probe up to 5 providers CONCURRENTLY (was 2 sequential) so each episode
+    # gets more source options. Provider order is preserved when merging so the
+    # most-reliable provider's link lands first.
+    per_provider = await asyncio.gather(*[_one(loc) for loc in locs[:5]],
+                                        return_exceptions=True)
+    out: dict[tuple[int, int], list[str]] = {}
+    for rows in per_provider:
+        if not isinstance(rows, list):
+            continue
+        for s_i, e_i, url in rows:
+            slot = out.setdefault((s_i, e_i), [])
+            if url not in slot and len(slot) < 4:  # ≤4 direct + vidlink = 5 max
+                slot.append(url)
     return out
 
 # Streaming services we expose on the Movies/Series picker. Order is the
