@@ -12967,6 +12967,40 @@ def _kick_series_loc_index_refresh() -> None:
         pass
 
 
+@app.get("/lounge/vod-series-debug")
+async def vod_series_debug(tmdb_id: str = "1396") -> dict:
+    """TEMP: report series loc-index state to diagnose 0 episode links."""
+    if _series_loc_index["data"] is None:
+        _kick_series_loc_index_refresh()
+    data = _series_loc_index["data"]
+    locs = (data or {}).get(str(tmdb_id), [])
+    # sample one provider's get_series_info episode containers
+    sample = []
+    if locs:
+        loc = locs[0]
+        base = f"http://{loc['host']}:{loc['port']}"
+        try:
+            async with _httpx_backup.AsyncClient(timeout=15.0, follow_redirects=True) as hx:
+                r = await hx.get(f"{base}/player_api.php", params={
+                    "username": loc["user"], "password": loc["pw"],
+                    "action": "get_series_info", "series_id": loc["series_id"]},
+                    headers={"User-Agent": "VLC/3.0"})
+                info = r.json()
+            for snum, eps in list((info.get("episodes") or {}).items())[:1]:
+                for ep in (eps if isinstance(eps, list) else [])[:3]:
+                    sample.append({"s": snum, "ext": ep.get("container_extension"),
+                                   "id": ep.get("id")})
+        except Exception as e:
+            sample = [f"err: {e}"]
+    return {
+        "loc_index_built": data is not None,
+        "loc_index_size": len(data or {}),
+        "locs_for_tmdb": len(locs),
+        "loc_hosts": [l.get("host") for l in locs],
+        "sample_episodes": sample,
+    }
+
+
 async def _episode_streams_for(tmdb_id: str) -> dict[tuple[int, int], list[str]]:
     """On-demand: {(season,episode): [relay /vod URLs]} for a series, built by
     calling get_series_info for the matched provider series_id(s). Bounded to a
