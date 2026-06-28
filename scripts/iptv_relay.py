@@ -216,6 +216,12 @@ DYNAMIC_HOSTS_FILE = Path(
 )
 _dyn_cache: tuple[float, frozenset[str], tuple[str, ...]] = (0.0, frozenset(), ())
 
+# Standard HTTP status codes Starlette/HTTPException will accept. Upstream IPTV
+# panels sometimes return non-standard codes (e.g. hottest.plus 456 = conn-limit)
+# that crash HTTPException; we map anything not in here to 502.
+from http import HTTPStatus as _HTTPStatus
+_VALID_HTTP = frozenset(s.value for s in _HTTPStatus)
+
 
 def _dynamic_hosts() -> tuple[frozenset[str], tuple[str, ...]]:
     """(hosts, suffixes) from the pipeline-written allowlist, cached by mtime."""
@@ -642,7 +648,11 @@ async def _proxy_vod_impl(u: str, request: Request) -> Response:
         code = upstream.status_code
         await upstream.aclose()
         await client.aclose()
-        raise HTTPException(status_code=code)
+        # Map non-standard upstream codes (e.g. hottest.plus returns 456 for
+        # connection-limit/geo-block) to 502 — Starlette rejects status codes
+        # outside the standard set, which was itself crashing into a 500.
+        safe = code if 400 <= code <= 599 and code in _VALID_HTTP else 502
+        raise HTTPException(status_code=safe, detail=f"upstream {code}")
 
     passthru = {**_CORS, "Accept-Ranges": "bytes"}
     for hh in ("content-type", "content-length", "content-range"):
