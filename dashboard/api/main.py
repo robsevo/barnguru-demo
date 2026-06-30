@@ -9990,17 +9990,22 @@ for _row in _load_dynamic_upstream_accounts():
 # residential address). Empty ⇒ direct-to-provider fallback.
 _upstream_HOSTS: frozenset[str] = frozenset(h for _, h, *_ in _upstream_ACCOUNTS)
 
-# VOD-index account pool (decoupled from live, 2026-06-29). The live channel
-# build (_src_upstream) and the EPG build run on the FULL _upstream_ACCOUNTS pool so
-# more accounts = deeper per-channel live failover. But the VOD-INDEX builders
-# (_build_vod_stream_index / _build_series_loc_index / the _fetch_upstream_vod
-# catalog) fetch get_vod_streams + get_series for EVERY account — the heavy
-# deploy step that emptied movies at ~20 accounts. Bound THOSE to a tested-safe
-# ceiling so the live pool can grow (the scraper keeping more accounts) without
-# re-bloating the VOD build. Preserves today's VOD coverage (current pool is
-# below this cap); raise cautiously and watch the deploy-time VOD warm.
+# Per-subsystem account caps (decoupled 2026-06-29/30). The scraper accumulates
+# up to 24 working accounts, but fanning the heavy builders across all of them is
+# too much for the 2GB box:
+#   • VOD-INDEX builders (_build_vod_stream_index / _build_series_loc_index / the
+#     _fetch_upstream_vod catalog) fetch get_vod_streams + get_series PER account —
+#     emptied movies at ~20.
+#   • The LIVE build (_src_upstream → per-channel match + liveness verify) got so
+#     slow at 31 panels (>20min cold) that the post-restart cold window pegged the
+#     box. Cap live too so the cold build finishes fast; 16 still keeps ~2.3× the
+#     7 hardcoded accounts, so most of the source-depth gain survives. Hardcoded
+#     accounts sort first in _upstream_ACCOUNTS, so the slice keeps the proven ones.
+# EPG keeps the full pool (its xmltv fetch is light + 1h-cached).
 _VOD_MAX_ACCOUNTS = 16
 _VOD_ACCOUNTS: list[tuple[str, str, int, str, str]] = _upstream_ACCOUNTS[:_VOD_MAX_ACCOUNTS]
+_LIVE_MAX_ACCOUNTS = 16
+_LIVE_ACCOUNTS: list[tuple[str, str, int, str, str]] = _upstream_ACCOUNTS[:_LIVE_MAX_ACCOUNTS]
 
 # ---------------------------------------------------------------------------
 # Per-team dedicated NHL feeds. bgdc.live carries a "US : NHL <CITY> <NICK>"
@@ -10411,19 +10416,34 @@ async def iptv_channels(force: bool = False):
             "stale": True,
         }
 
-    # First request after process start (or force=True): pay the cost.
-    channels = await _build_iptv_channels()
-    # Guard against poisoning the cache with an empty/degraded cold build when a
-    # transient upstream outage coincides with process start / TTL expiry. The
-    # background refresher already guards (`if fresh:` in _kick_iptv_refresh) —
-    # the cold path was the only unguarded writer, so a single bad fan-out here
-    # could blank the whole channel pool for the full TTL. Keep last-known-good
-    # instead, and serve it so BarnCentre/Lounge stay watchable.
-    if channels or not _IPTV_CACHE["data"]:
-        _IPTV_CACHE["data"] = channels
-        _IPTV_CACHE["ts"] = now
-    served = _IPTV_CACHE["data"]
-    return {"channels": served, "count": len(served), "cached": not channels and bool(served)}
+    # force=True: caller explicitly wants a fresh blocking rebuild.
+    if force:
+        channels = await _build_iptv_channels()
+        # Guard against poisoning the cache with an empty/degraded cold build when
+        # a transient upstream outage coincides with process start / TTL expiry.
+        # Keep last-known-good instead, and serve it so BarnCentre/Lounge stay
+        # watchable.
+        if channels or not _IPTV_CACHE["data"]:
+            _IPTV_CACHE["data"] = channels
+            _IPTV_CACHE["ts"] = now
+        served = _IPTV_CACHE["data"]
+        return {"channels": served, "count": len(served), "cached": not channels and bool(served)}
+
+    # First request after process start: SINGLE-FLIGHT the cold fan-out. Without
+    # this, concurrent cold callers (no cache yet) each ran their own
+    # _build_iptv_channels — after a restart that stacked >20min builds and pegged
+    # the 2GB box, so the cache never populated and every request re-entered here.
+    # Share ONE build via the same task the refresher uses; the `if fresh:` guard
+    # inside it avoids caching an empty degraded build.
+    _kick_iptv_refresh()
+    task = _IPTV_REFRESH_TASK
+    if task is not None:
+        try:
+            await task
+        except Exception:
+            pass
+    served = _IPTV_CACHE["data"] or []
+    return {"channels": served, "count": len(served), "cached": False, "warming": not served}
 
 
 async def _src_streams_json() -> list[dict]:
@@ -10525,11 +10545,16 @@ async def _src_m3u_playlists() -> list[dict]:
 
 
 async def _src_upstream() -> list[dict]:
-    """Source 4: upstream Codes accounts — fire all in parallel, merge results."""
+    """Source 4: upstream Codes accounts — fire all in parallel, merge results.
+
+    Uses the capped _LIVE_ACCOUNTS subset (not the full pool): each account adds
+    per-channel match + liveness-verify cost, and fanning across all 24+ panels
+    made the cold build >20min on the 2GB box. 16 keeps most of the depth.
+    """
     out: list[dict] = []
     try:
         results = await asyncio.gather(
-            *[_fetch_upstream_channels(lbl, h, p, u, pw) for lbl, h, p, u, pw in _upstream_ACCOUNTS],
+            *[_fetch_upstream_channels(lbl, h, p, u, pw) for lbl, h, p, u, pw in _LIVE_ACCOUNTS],
             return_exceptions=True,
         )
         for res in results:
@@ -12312,7 +12337,20 @@ async def lounge_live_channels() -> dict:
         _kick_lounge_refresh()
         return {"channels": _lounge_cache["data"], "cached": True, "stale": True}
 
-    return await _build_lounge_payload()
+    # Cold start (no cache yet): SINGLE-FLIGHT the build so concurrent callers
+    # share ONE _build_lounge_payload (full match + per-channel verify) instead of
+    # each running their own — that stacking pegged the box after a restart. Await
+    # the same task the stale-path refresher uses, then serve what it cached.
+    _kick_lounge_refresh()
+    task = _LOUNGE_REFRESH_TASK
+    if task is not None:
+        try:
+            await task
+        except Exception:
+            pass
+    if _lounge_cache["data"] is not None:
+        return {"channels": _lounge_cache["data"], "cached": False}
+    return {"channels": [], "cached": False, "warming": True}
 
 
 _epg_prewarm_inflight: bool = False
