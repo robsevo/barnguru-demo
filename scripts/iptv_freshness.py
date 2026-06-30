@@ -23,8 +23,10 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -204,20 +206,49 @@ def verify_account(acct: tuple[str, int, str, str], client: httpx.Client) -> dic
         return None
 
 
+# Concurrent verification — each probe is two blocking HTTP round-trips against a
+# slow upstream panel (12s + 20s timeouts), so a sequential walk of thousands of
+# decoded creds takes hours. A bounded thread pool turns the wall-clock into
+# roughly (candidates / VERIFY_WORKERS) × per-probe time. httpx.Client is
+# thread-safe (shared connection pool), so one client serves all workers.
+VERIFY_WORKERS = int(os.environ.get("VERIFY_WORKERS") or "24")
+
+
 def verify_accounts(accounts: list[tuple], max_keep: int, max_per_host: int = 3) -> list[dict]:
     """Keep up to max_keep working accounts, but no more than max_per_host on any
     single host — diversity across providers beats many creds on one box (which
     Origin's per-host backup cap would collapse anyway, and which all die together
-    if that one host goes down)."""
+    if that one host goes down).
+
+    Verification runs concurrently (VERIFY_WORKERS threads) and stops as soon as
+    max_keep good accounts are collected — pending probes are cancelled, in-flight
+    ones abandoned. To bound load on any one panel (a single host can decode to
+    hundreds of creds), only a generous slice per host is ever dispatched; we keep
+    just max_per_host, so trying a few extra covers dead creds without flooding."""
+    # Pre-bound dispatch per host so one popular panel can't dominate the pool or
+    # get hammered. ×5 headroom over the keep cap absorbs dead creds.
+    dispatch: list[tuple] = []
+    tries_per_host: dict[str, int] = {}
+    for acct in accounts:
+        host = acct[0]
+        if tries_per_host.get(host, 0) >= max_per_host * 5:
+            continue
+        tries_per_host[host] = tries_per_host.get(host, 0) + 1
+        dispatch.append(acct)
+
     good: list[dict] = []
     per_host: dict[str, int] = {}
-    with httpx.Client(follow_redirects=True) as client:
-        for acct in accounts:
-            host = acct[0]
-            if per_host.get(host, 0) >= max_per_host:
-                continue
-            res = verify_account(acct, client)
+    client = httpx.Client(follow_redirects=True)
+    pool = ThreadPoolExecutor(max_workers=VERIFY_WORKERS)
+    futures = {pool.submit(verify_account, acct, client): acct for acct in dispatch}
+    try:
+        for fut in as_completed(futures):
+            acct = futures[fut]
+            res = fut.result()
             if res:
+                host = res["host"]
+                if per_host.get(host, 0) >= max_per_host:
+                    continue  # host already full — drop this extra winner
                 good.append(res)
                 per_host[host] = per_host.get(host, 0) + 1
                 print(f"[verify] ✅ {res['host']}:{res['port']} ({res['live_streams']} live)", file=sys.stderr)
@@ -225,6 +256,10 @@ def verify_accounts(accounts: list[tuple], max_keep: int, max_per_host: int = 3)
                     break
             else:
                 print(f"[verify] ✗ {acct[0]}:{acct[1]}", file=sys.stderr)
+    finally:
+        # Got enough (or exhausted) — cancel the rest, don't wait on in-flight.
+        pool.shutdown(wait=False, cancel_futures=True)
+        client.close()
     return good
 
 
