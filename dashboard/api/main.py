@@ -12896,7 +12896,7 @@ async def _build_vod_stream_index() -> dict[str, list[str]]:
                 keys.append("name:" + nm)
             for k in keys:
                 lst = idx.setdefault(k, [])
-                if wrapped not in lst and len(lst) < 4:  # ≤4 direct + vidlink = 5 max
+                if wrapped not in lst and len(lst) < 5:  # 5 direct (vidlink embed removed)
                     lst.append(wrapped)
     return idx
 
@@ -13094,7 +13094,7 @@ async def _episode_streams_for(tmdb_id: str, name: str = "") -> dict[tuple[int, 
             continue
         for s_i, e_i, url in rows:
             slot = out.setdefault((s_i, e_i), [])
-            if url not in slot and len(slot) < 4:  # ≤4 direct + vidlink = 5 max
+            if url not in slot and len(slot) < 5:  # 5 direct (vidlink embed removed)
                 slot.append(url)
     # Cache only non-empty results (don't pin an empty map while the loc index
     # is still warming — let the next call retry).
@@ -13822,16 +13822,21 @@ async def lounge_vod_catalog(service: str = "") -> dict:
 # embed services need a server pick before their iframes load and tend
 # to be slower (~10s) but cover more obscure titles.
 
-# Embed fallback = vidlink ONLY (Bob, 2026-06-27). The other aggregators
-# (moviesapi, 2embed, multiembed, nontongo, pstream) served ads / broken players,
-# so they're dropped. vidlink is the single embed and the LAST source the client
-# tries — direct/resolved stream_urls play first, vidlink is the safety net.
+# Embeds REMOVED from VOD (2026-06-29). vidlink was the last remaining aggregator
+# (the others — moviesapi, 2embed, multiembed, nontongo, pstream — were already
+# dropped for ads/broken players); its in-iframe ad overlays survive sandboxing,
+# so it's pulled entirely. VOD now serves ONLY direct/resolved `stream_urls`
+# (IPTV-direct + the provider-a-via-Origin / play.provider-a.top resolver). These two builders
+# stay as no-ops returning [] so every call site keeps working with empty
+# embed_urls — no signatures change. NOTE: any title with no resolved stream_urls
+# is now unplayable on clients that have no resolver of their own; tvspot resolves
+# its own streams client-side (/api/vod-extract) and is unaffected.
 def _vidsrc_movie_embeds(tmdb_id: str) -> list[str]:
-    return [f"https://vidlink.pro/movie/{tmdb_id}"]
+    return []
 
 
 def _vidsrc_episode_embeds(tmdb_id: str, season: int, episode: int) -> list[str]:
-    return [f"https://vidlink.pro/tv/{tmdb_id}/{season}/{episode}"]
+    return []
 
 
 @app.get("/lounge/vod/details/{tmdb_id}")
@@ -13860,8 +13865,8 @@ async def lounge_vod_details(tmdb_id: str) -> dict:
     head: dict = instances[0] if instances else {}
 
     # Direct IPTV VOD streams (relay-wrapped) play FIRST; the embed-scraper
-    # resolver fills any remaining slots; vidlink (embed_urls) is the last
-    # fallback. Capped at 4 so the total with vidlink stays at the 5-source max.
+    # resolver fills any remaining slots. vidlink embed removed (2026-06-29), so
+    # all 5 slots are now direct/resolved streams instead of ≤4 + a vidlink iframe.
     # Pass the title so movies match providers that don't tmdb-tag their catalog.
     iptv_streams = _vod_streams_for(tmdb_id, head.get("english_name") or head.get("name") or "")
     resolved = await _resolve_stream_urls_movie(tmdb_id)
@@ -13869,7 +13874,7 @@ async def lounge_vod_details(tmdb_id: str) -> dict:
     for s in iptv_streams + resolved:
         if s and s not in stream_urls:
             stream_urls.append(s)
-        if len(stream_urls) >= 4:
+        if len(stream_urls) >= 5:
             break
 
     return {
@@ -13981,15 +13986,15 @@ async def lounge_vod_series(series_key: str) -> dict:
             # an empty stream_urls and falls back to embed_urls. Their
             # WebView capture populates the cache via a background task,
             # so the next viewer plays instantly.
-            # Direct IPTV streams FIRST, then resolver cache; vidlink (embed_urls)
-            # is the last fallback — same source order as movies. ≤4 here so the
-            # total with vidlink stays at the 5-source max.
+            # Direct IPTV streams FIRST, then resolver cache — same source order as
+            # movies. vidlink embed removed (2026-06-29), so all 5 slots are now
+            # direct/resolved streams instead of ≤4 + a vidlink iframe.
             resolved = _resolve_stream_urls_episode_cache_only(series_key, sn, ep_n)
             ep_stream_urls: list[str] = []
             for u in ep_direct.get((sn, ep_n), []) + resolved:
                 if u and u not in ep_stream_urls:
                     ep_stream_urls.append(u)
-                if len(ep_stream_urls) >= 4:
+                if len(ep_stream_urls) >= 5:
                     break
             episodes.append({
                 "episode_number": ep_n,
