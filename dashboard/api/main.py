@@ -13970,9 +13970,11 @@ async def lounge_vod_series(series_key: str) -> dict:
                 if isinstance(sm, dict) and isinstance(sm.get("season_number"), int)
                 and sm.get("season_number", 0) > 0  # skip Specials (season 0)
             ]
-            # Fetch each season's episode list. Cap at 12 seasons so a
-            # 20-season-long sitcom doesn't issue 20 TMDB calls per click.
-            season_meta = season_meta[:12]
+            # Fetch each season's episode list — the 12 NEWEST seasons. Capped so a
+            # 36-season show (Simpsons) doesn't fire 36 TMDB calls per click, but
+            # take the LATEST 12 (sorted by season number) so long-runners surface
+            # their CURRENT seasons instead of only the 20-year-old early ones.
+            season_meta = sorted(season_meta, key=lambda sm: sm.get("season_number", 0))[-12:]
 
             async def _fetch_season(sn: int) -> dict | None:
                 try:
