@@ -9996,16 +9996,17 @@ _upstream_HOSTS: frozenset[str] = frozenset(h for _, h, *_ in _upstream_ACCOUNTS
 #   • VOD-INDEX builders (_build_vod_stream_index / _build_series_loc_index / the
 #     _fetch_upstream_vod catalog) fetch get_vod_streams + get_series PER account —
 #     emptied movies at ~20.
-#   • The LIVE build (_src_upstream → per-channel match + liveness verify) got so
-#     slow at 31 panels (>20min cold) that the post-restart cold window pegged the
-#     box. Cap live too so the cold build finishes fast; 16 still keeps ~2.3× the
-#     7 hardcoded accounts, so most of the source-depth gain survives. Hardcoded
-#     accounts sort first in _upstream_ACCOUNTS, so the slice keeps the proven ones.
-# EPG keeps the full pool (its xmltv fetch is light + 1h-cached).
+#   • The LIVE build (_src_upstream → per-channel match + liveness verify) got slow
+#     at the full pool, but the COLD-BUILD STACKING (not the account count) was what
+#     pegged the box — and that's now fixed by single-flighting the cold path
+#     (iptv_channels / lounge_live_channels share one build). So live uses the FULL
+#     pool again: capping it to 16 dropped real per-channel backups (e.g. a 3rd
+#     TSN1 source from a scraped panel beyond index 16). SWR + the deploy warm step
+#     cover the one-time slow cold build.
+# EPG keeps the full pool too (its xmltv fetch is light + 1h-cached).
 _VOD_MAX_ACCOUNTS = 16
 _VOD_ACCOUNTS: list[tuple[str, str, int, str, str]] = _upstream_ACCOUNTS[:_VOD_MAX_ACCOUNTS]
-_LIVE_MAX_ACCOUNTS = 16
-_LIVE_ACCOUNTS: list[tuple[str, str, int, str, str]] = _upstream_ACCOUNTS[:_LIVE_MAX_ACCOUNTS]
+_LIVE_ACCOUNTS: list[tuple[str, str, int, str, str]] = _upstream_ACCOUNTS
 
 # ---------------------------------------------------------------------------
 # Per-team dedicated NHL feeds. bgdc.live carries a "US : NHL <CITY> <NICK>"
