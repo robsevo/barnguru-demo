@@ -9990,6 +9990,18 @@ for _row in _load_dynamic_upstream_accounts():
 # residential address). Empty ⇒ direct-to-provider fallback.
 _upstream_HOSTS: frozenset[str] = frozenset(h for _, h, *_ in _upstream_ACCOUNTS)
 
+# VOD-index account pool (decoupled from live, 2026-06-29). The live channel
+# build (_src_upstream) and the EPG build run on the FULL _upstream_ACCOUNTS pool so
+# more accounts = deeper per-channel live failover. But the VOD-INDEX builders
+# (_build_vod_stream_index / _build_series_loc_index / the _fetch_upstream_vod
+# catalog) fetch get_vod_streams + get_series for EVERY account — the heavy
+# deploy step that emptied movies at ~20 accounts. Bound THOSE to a tested-safe
+# ceiling so the live pool can grow (the scraper keeping more accounts) without
+# re-bloating the VOD build. Preserves today's VOD coverage (current pool is
+# below this cap); raise cautiously and watch the deploy-time VOD warm.
+_VOD_MAX_ACCOUNTS = 16
+_VOD_ACCOUNTS: list[tuple[str, str, int, str, str]] = _upstream_ACCOUNTS[:_VOD_MAX_ACCOUNTS]
+
 # ---------------------------------------------------------------------------
 # Per-team dedicated NHL feeds. bgdc.live carries a "US : NHL <CITY> <NICK>"
 # series for 28/32 teams. These get added as their own row in the broadcast
@@ -12851,7 +12863,7 @@ async def _build_vod_stream_index() -> dict[str, list[str]]:
     Sources from known-dead hosts (data/vod_dead_hosts.json) are excluded."""
     per = await asyncio.gather(
         *[_fetch_upstream_vod_legacy(label, host, port, user, pw)
-          for label, host, port, user, pw in _upstream_ACCOUNTS],
+          for label, host, port, user, pw in _VOD_ACCOUNTS],
         return_exceptions=True,
     )
     from urllib.parse import urlparse as _u
@@ -12951,7 +12963,7 @@ def _norm_series_name(name: str) -> str:
 async def _build_series_loc_index() -> dict[str, list[dict]]:
     per = await asyncio.gather(
         *[_fetch_upstream_vod_legacy(label, host, port, user, pw)
-          for label, host, port, user, pw in _upstream_ACCOUNTS],
+          for label, host, port, user, pw in _VOD_ACCOUNTS],
         return_exceptions=True,
     )
     dead = _vod_dead_hosts()
@@ -13670,7 +13682,7 @@ async def _build_vod_catalog_legacy_upstream() -> dict:
     per_account = await asyncio.gather(
         *[
             _fetch_upstream_vod(label, host, port, user, pw)
-            for label, host, port, user, pw in _upstream_ACCOUNTS
+            for label, host, port, user, pw in _VOD_ACCOUNTS
         ],
         return_exceptions=True,
     )

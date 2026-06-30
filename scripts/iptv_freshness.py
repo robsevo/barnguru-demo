@@ -270,11 +270,14 @@ def main() -> int:
     if not pool:
         print("No accounts to verify — nothing to do.", file=sys.stderr)
         return 0
-    # Keep more than a single run would (so accumulated good accounts survive),
-    # but bounded: the VOD index build fetches get_vod_streams+get_series for
-    # EVERY account, and 20 made that build too heavy to complete (movies went
-    # empty). 12 accumulates meaningfully while staying buildable.
-    keep = max(args.max_accounts, 12)
+    # Keep more than a single run would (so accumulated good accounts survive).
+    # The VOD-index build no longer bounds this: the API indexes VOD from a capped
+    # subset (_VOD_ACCOUNTS = _upstream_ACCOUNTS[:_VOD_MAX_ACCOUNTS], dashboard/api/
+    # main.py) while live + EPG use the FULL pool. So extra accounts deepen live
+    # per-channel failover without re-bloating the VOD warm that emptied movies at
+    # ~20 accounts. Bounded only to keep the file + relay allowlist sane. If you
+    # raise this, keep _VOD_MAX_ACCOUNTS under ~20.
+    keep = max(args.max_accounts, 24)
     good = verify_accounts(pool, keep)
     print(f"\n[result] {len(good)} working accounts of {len(pool)} (scraped+accumulated)", file=sys.stderr)
 
