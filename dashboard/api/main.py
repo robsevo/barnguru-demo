@@ -9961,6 +9961,14 @@ _upstream_ACCOUNTS: list[tuple[str, str, int, str, str]] = [
 # and cover channels the dead/maxed providers (kstv, ampztl, an upstream host) dropped.
 # Their hosts must also be in the relay allowlist (the same script writes
 # data/relay_allowed_hosts.json, which iptv_relay.py reads).
+# host → max_connections for scraped accounts (0 = unlimited). Populated by the
+# loader below from the optional 6th field. Used to prefer NEVER-BUSY (multi- or
+# unlimited-connection) accounts for a channel's active sources, so a 1-connection
+# account can't become the primary and strand the channel with 456s. Hardcoded /
+# unknown hosts aren't listed → treated as capacity-neutral (see _account_cap_rank).
+_upstream_CAPACITY: dict[str, int] = {}
+
+
 def _load_dynamic_upstream_accounts() -> list[tuple[str, str, int, str, str]]:
     f = Path(__file__).resolve().parents[2] / "data" / "dynamic_upstream_accounts.json"
     try:
@@ -9970,11 +9978,30 @@ def _load_dynamic_upstream_accounts() -> list[tuple[str, str, int, str, str]]:
     out: list[tuple[str, str, int, str, str]] = []
     for r in rows:
         try:
-            label, host, port, user, pw = r
+            # Back-compat: old files are 5-field; new files append max_conns (6th).
+            label, host, port, user, pw = r[0], r[1], r[2], r[3], r[4]
             out.append((str(label), str(host), int(port), str(user), str(pw)))
-        except (ValueError, TypeError):
+            if len(r) >= 6:
+                try:
+                    _upstream_CAPACITY[str(host)] = int(r[5])
+                except (ValueError, TypeError):
+                    pass
+        except (ValueError, TypeError, IndexError):
             continue
     return out
+
+
+def _account_cap_rank(host: str) -> int:
+    """Ranking weight for a host's connection capacity — HIGHER is better (never
+    busy). 0=unlimited → best; a known 1-connection account → worst; unknown /
+    hardcoded hosts → neutral so premium accounts aren't penalised below a known
+    multi-conn but DO outrank a known 1-conn."""
+    if host not in _upstream_CAPACITY:
+        return 3  # unknown/hardcoded — assume fine (neutral)
+    mx = _upstream_CAPACITY[host]
+    if mx <= 0:
+        return 9999  # unlimited
+    return mx        # 1 = worst, higher = better
 
 
 _seen_upstream = {(h, u) for _, h, _p, u, _pw in _upstream_ACCOUNTS}
@@ -12539,7 +12566,13 @@ async def _build_lounge_payload() -> dict:
                 chosen = an upstream host_cands[0]["url"]
         if not chosen:
             upstream_cands = [c for c in candidates if _is_upstream(c["url"])]
-            chosen = (upstream_cands[0] if upstream_cands else candidates[0])["url"]
+            pool = upstream_cands if upstream_cands else candidates
+            # Prefer a NEVER-BUSY (unlimited/multi-connection) account for the primary
+            # so a known 1-connection account can't become the default source and 456
+            # the channel. max() keeps priority order within equal capacity (stable).
+            chosen = max(
+                pool, key=lambda c: _account_cap_rank(_backup_upstream_host(c["url"]))
+            )["url"]
 
         # NO inline verification. Cold-build verification was the OOM root
         # cause: 50+ channels × _verify_stream_alive() against /hls?u=
@@ -12579,8 +12612,10 @@ async def _build_lounge_payload() -> dict:
         # — if the primary is busy/connection-limited, failover goes to an
         # independent account, not another stream on the same (full) one. Capture the
         # original order first (sorting can't reference the list it's reordering).
+        # Order: primary's host LAST, then higher CAPACITY first (never-busy accounts
+        # lead the failover chain), then original priority within equal capacity.
         _orig_idx = {h: i for i, h in enumerate(host_order)}
-        host_order.sort(key=lambda h: (h == chosen_host, _orig_idx[h]))
+        host_order.sort(key=lambda h: (h == chosen_host, -_account_cap_rank(h), _orig_idx[h]))
         backup_src: list[str] = []
         for rank in range(3):
             for h in host_order:

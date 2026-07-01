@@ -352,8 +352,12 @@ def main() -> int:
     print(f"\n[result] {len(good)} working accounts of {len(pool)} (scraped+accumulated), "
           f"kept best by capacity/breadth", file=sys.stderr)
 
-    # Account tuples for _upstream_ACCOUNTS: (label, host, port, username, password)
-    acct_rows = [[f"fresh-{g['host']}", g["host"], g["port"], g["username"], g["password"]]
+    # Account rows: [label, host, port, username, password, max_conns]. The 6th
+    # field (max_conns; 0 = unlimited) lets the API prefer never-busy multi-/
+    # unlimited-connection accounts for a channel's active sources. Back-compat:
+    # the loader reads it optionally, so old 5-field files still parse.
+    acct_rows = [[f"fresh-{g['host']}", g["host"], g["port"], g["username"], g["password"],
+                  int(g.get("max_conns") or 0)]
                  for g in good]
     hosts = sorted({g["host"] for g in good})
 
