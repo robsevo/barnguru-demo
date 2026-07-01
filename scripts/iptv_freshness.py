@@ -186,7 +186,8 @@ def verify_account(acct: tuple[str, int, str, str], client: httpx.Client) -> dic
         info = r.json().get("user_info", {})
         if info.get("auth") != 1 or str(info.get("status", "")).lower() != "active":
             return None
-        # has capacity?
+        # has capacity? (also captured as a QUALITY signal, see _quality_score)
+        act = mx = 0
         try:
             act, mx = int(info.get("active_cons") or 0), int(info.get("max_connections") or 0)
             if mx and act >= mx:
@@ -201,9 +202,24 @@ def verify_account(acct: tuple[str, int, str, str], client: httpx.Client) -> dic
         n = len(streams) if isinstance(streams, list) else 0
         if n == 0:
             return None
-        return {"host": host, "port": port, "username": user, "password": pw, "live_streams": n}
+        return {"host": host, "port": port, "username": user, "password": pw,
+                "live_streams": n, "max_conns": mx, "active_cons": act}
     except Exception:
         return None
+
+
+def _quality_score(acct: dict) -> tuple[int, int]:
+    """Rank key for keeping the BEST accounts (higher = better).
+
+    Primary axis is CONNECTION CAPACITY — the whole point of the pool is deep,
+    simultaneously-usable failover, and a 1-connection account (e.g. hottest.plus)
+    is what strands channels like DAZN 2-5. On upstream, max_connections == 0 means
+    UNLIMITED, so it's the best; 1 is the worst; higher is better. Ties break on
+    live-stream breadth (a bigger catalog is more likely to carry a given channel).
+    """
+    mx = int(acct.get("max_conns") or 0)
+    cap = 999 if mx == 0 else mx           # 0 = unlimited → best
+    return (cap, int(acct.get("live_streams") or 0))
 
 
 # Concurrent verification — each probe is two blocking HTTP round-trips against a
@@ -236,8 +252,15 @@ def verify_accounts(accounts: list[tuple], max_keep: int, max_per_host: int = 3)
         tries_per_host[host] = tries_per_host.get(host, 0) + 1
         dispatch.append(acct)
 
-    good: list[dict] = []
-    per_host: dict[str, int] = {}
+    # Gather a SURPLUS of working accounts (max_keep + headroom), then keep the
+    # BEST by quality — this is what lets the list self-clean: better accounts
+    # displace weaker ones over time instead of a working-but-mediocre account
+    # persisting forever just because it was seen first. Headroom bounds wall-clock
+    # (we still stop once we have enough to choose from), while giving the ranker a
+    # real choice set beyond exactly max_keep.
+    HEADROOM = 12
+    gather_target = max_keep + HEADROOM
+    winners: list[dict] = []
     client = httpx.Client(follow_redirects=True)
     pool = ThreadPoolExecutor(max_workers=VERIFY_WORKERS)
     futures = {pool.submit(verify_account, acct, client): acct for acct in dispatch}
@@ -246,13 +269,11 @@ def verify_accounts(accounts: list[tuple], max_keep: int, max_per_host: int = 3)
             acct = futures[fut]
             res = fut.result()
             if res:
-                host = res["host"]
-                if per_host.get(host, 0) >= max_per_host:
-                    continue  # host already full — drop this extra winner
-                good.append(res)
-                per_host[host] = per_host.get(host, 0) + 1
-                print(f"[verify] ✅ {res['host']}:{res['port']} ({res['live_streams']} live)", file=sys.stderr)
-                if len(good) >= max_keep:
+                winners.append(res)
+                cap = res.get("max_conns") or "∞?"
+                print(f"[verify] ✅ {res['host']}:{res['port']} "
+                      f"({res['live_streams']} live, {cap} conns)", file=sys.stderr)
+                if len(winners) >= gather_target:
                     break
             else:
                 print(f"[verify] ✗ {acct[0]}:{acct[1]}", file=sys.stderr)
@@ -260,6 +281,20 @@ def verify_accounts(accounts: list[tuple], max_keep: int, max_per_host: int = 3)
         # Got enough (or exhausted) — cancel the rest, don't wait on in-flight.
         pool.shutdown(wait=False, cancel_futures=True)
         client.close()
+
+    # Rank best-first, then keep up to max_keep with the per-host diversity cap so
+    # the strongest accounts survive and no single provider dominates the pool.
+    winners.sort(key=_quality_score, reverse=True)
+    good: list[dict] = []
+    per_host: dict[str, int] = {}
+    for res in winners:
+        host = res["host"]
+        if per_host.get(host, 0) >= max_per_host:
+            continue
+        good.append(res)
+        per_host[host] = per_host.get(host, 0) + 1
+        if len(good) >= max_keep:
+            break
     return good
 
 
@@ -312,9 +347,10 @@ def main() -> int:
     # per-channel failover without re-bloating the VOD warm that emptied movies at
     # ~20 accounts. Bounded only to keep the file + relay allowlist sane. If you
     # raise this, keep _VOD_MAX_ACCOUNTS under ~20.
-    keep = max(args.max_accounts, 24)
+    keep = max(args.max_accounts, 30)
     good = verify_accounts(pool, keep)
-    print(f"\n[result] {len(good)} working accounts of {len(pool)} (scraped+accumulated)", file=sys.stderr)
+    print(f"\n[result] {len(good)} working accounts of {len(pool)} (scraped+accumulated), "
+          f"kept best by capacity/breadth", file=sys.stderr)
 
     # Account tuples for _upstream_ACCOUNTS: (label, host, port, username, password)
     acct_rows = [[f"fresh-{g['host']}", g["host"], g["port"], g["username"], g["password"]]
