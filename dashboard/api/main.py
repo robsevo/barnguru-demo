@@ -12670,7 +12670,12 @@ async def _fetch_upstream_xmltv(label: str, host: str, port: int, user: str, pw:
         cid    = prog.get("channel") or ""
         start  = prog.get("start") or ""
         stop   = prog.get("stop") or ""
-        title  = prog.findtext("title") or ""
+        title_el = prog.find("title")
+        title  = (title_el.text if title_el is not None else "") or ""
+        # XMLTV tags the title language ("<title lang='pl'>…"). Captured so the
+        # re-keying can reject a foreign-language guide landing on a US/CA channel
+        # (e.g. a Polish "Teletoon+" guide on our Canadian Teletoon).
+        tlang  = (title_el.get("lang") if title_el is not None else "") or ""
         desc   = prog.findtext("desc")
         if not cid or not title:
             continue
@@ -12703,8 +12708,40 @@ async def _fetch_upstream_xmltv(label: str, host: str, port: int, user: str, pw:
                 "start_utc": _parse(start),
                 "stop_utc":  _parse(stop),
                 "desc":      desc,
+                "lang":      tlang.lower()[:2],
             })
     return out
+
+
+# Languages we serve: US/CA English + Quebec French. A guide whose titles are
+# dominantly tagged another language is a foreign feed's guide (e.g. a Polish
+# "Teletoon+" landing on our Canadian Teletoon) and must be rejected.
+_EPG_ALLOWED_LANGS = {"", "en", "fr"}
+# Polish/other-Latin foreign-language markers for the fallback when XMLTV carries
+# no lang tags — diacritics alone miss Latin words like "Harmidom"/"Siostry".
+_EPG_FOREIGN_HINT_RE = _re_bc.compile(
+    r"[ąćęłńóśźż]|\b(?:i|w|z|na|do|się|oraz|odcinek|siostry|rządzi|"
+    r"królestwie|und|der|die|das|el|la|los|las|und|película|novela)\b",
+    _re_bc.I,
+)
+
+
+def _guide_is_foreign(programmes: list[dict]) -> bool:
+    """True if a candidate guide is dominantly a language we don't serve.
+
+    Primary signal: the XMLTV title `lang` tags. If >40% of titles are tagged a
+    language outside en/fr, reject. Fallback (no lang tags): >40% of titles carry
+    a foreign-Latin marker (Polish etc.) that our US/CA English channels never do.
+    """
+    if not programmes:
+        return False
+    sample = programmes[:60]
+    tagged = [p.get("lang", "") for p in sample if p.get("lang")]
+    if tagged:
+        foreign = sum(1 for l in tagged if l not in _EPG_ALLOWED_LANGS)
+        return foreign / len(tagged) > 0.40
+    hits = sum(1 for p in sample if _EPG_FOREIGN_HINT_RE.search(p.get("title", "") or ""))
+    return hits / len(sample) > 0.40
 
 
 _lounge_epg_build_inflight: bool = False
@@ -12751,6 +12788,11 @@ async def _build_lounge_epg() -> dict:
         for k, v in r.items():
             our = _our_channel_for(k)
             if our is None:
+                continue
+            # Reject a foreign-language guide (e.g. Polish "Teletoon+") re-keyed onto
+            # a US/CA English channel — better to show no schedule than a wrong-
+            # language one. Quebec-French channels (RDS/TVA) still accept fr.
+            if _guide_is_foreign(v):
                 continue
             good = [p for p in v if not _junk_title.match(p.get("title", "") or "")]
             if good:
