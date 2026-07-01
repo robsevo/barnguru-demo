@@ -12255,10 +12255,15 @@ _LOUNGE_CHANNEL_NAMES: list[str] = [
     "TVA", "Noovo", "ICI Tele", "ICI RDI", "RDI", "LCN", "TVA Sports 2",
     "TV5", "Canal D", "Canal Vie",
     # ── More sports — US/CA ──
-    "DAZN 1", "DAZN 2", "DAZN 3", "DAZN 4", "DAZN 5",
+    # DAZN + beIN merged into ONE channel each: the numbered variants were mostly
+    # single-source (often a dead/1-conn account), so instead of 5 flaky channels we
+    # keep one "DAZN" / "beIN Sports" whose candidate pool is the UNION of every
+    # numbered feed (the matcher's startswith already collects "DAZN 1".."DAZN 5" /
+    # "beIN Sports 1".."beIN Sports 5"). Deeper pool → far better odds of a working,
+    # non-busy source. Per user request 2026-07-01.
+    "DAZN",
     "NFL Network", "NFL RedZone",
-    "beIN Sports", "beIN Sports 1", "beIN Sports 2", "beIN Sports 3",
-    "beIN Sports 4", "beIN Sports 5",
+    "beIN Sports",
     "TSN", "Sportsnet", "TVA Sports",
     # ── True crime (US/CA) ──
     "Court TV", "True Crime Network", "ID",
