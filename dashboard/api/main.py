@@ -12563,9 +12563,14 @@ async def _build_lounge_payload() -> dict:
                 continue
             host_used[h] = host_used.get(h, 0) + 1
             backup_src.append(c["url"])
-            # 5 sources max per channel (1 primary + 4 backups), per product
-            # requirement — same cap as the BarnCentre builder.
-            if len(backup_src) >= 4:
+            # Emit a DEEP candidate pool (1 primary + up to 9 backups = 10) across
+            # accounts, instead of the old hard 5. Still NO inline verification here
+            # (that OOM'd the 2GB box — see note above): the nightly freshness pipeline
+            # verifies this pool and keeps the 5 that actually work, and the client
+            # live-checks at play time. More candidates → deeper WORKING failover for
+            # channels that appear on several accounts. Per-host cap (3) still stops
+            # one provider from eating the whole chain.
+            if len(backup_src) >= 9:
                 break
 
         chosen_out  = _apply_recode(cast(str, chosen), ch_name)
