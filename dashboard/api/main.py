@@ -12553,23 +12553,41 @@ async def _build_lounge_payload() -> dict:
         # client do the live health check at play time.
         verified_primary: str | None = chosen
 
-        host_used: dict[str, int] = {}
-        backup_src: list[str] = []
+        # ACCOUNT-DIVERSE backup ordering. Group the remaining candidates by their
+        # upstream host (≈ account/provider), preserving priority order within each,
+        # then ROUND-ROBIN across hosts: take the best from each distinct host, then
+        # the 2nd from each, etc. (per-host cap 3). This front-loads the backup list
+        # with sources from as many DIFFERENT accounts as possible, so the first few
+        # failover options have INDEPENDENT capacity — the goal being ≥3 sources that
+        # can each play simultaneously (a busy/connection-limited account no longer
+        # occupies multiple of the top slots). Still NO inline verification here (that
+        # OOM'd the 2GB box): the nightly freshness pipeline verifies this pool and
+        # the client live-checks + cycles to a non-busy source at play time.
+        chosen_host = _backup_upstream_host(cast(str, chosen))
+        by_host: dict[str, list[str]] = {}
+        host_order: list[str] = []
         for c in candidates:
             if c["url"] == chosen:
                 continue
             h = _backup_upstream_host(c["url"])
-            if host_used.get(h, 0) >= 3:
-                continue
-            host_used[h] = host_used.get(h, 0) + 1
-            backup_src.append(c["url"])
-            # Emit a DEEP candidate pool (1 primary + up to 9 backups = 10) across
-            # accounts, instead of the old hard 5. Still NO inline verification here
-            # (that OOM'd the 2GB box — see note above): the nightly freshness pipeline
-            # verifies this pool and keeps the 5 that actually work, and the client
-            # live-checks at play time. More candidates → deeper WORKING failover for
-            # channels that appear on several accounts. Per-host cap (3) still stops
-            # one provider from eating the whole chain.
+            if h not in by_host:
+                by_host[h] = []
+                host_order.append(h)
+            if len(by_host[h]) < 3:  # per-host cap
+                by_host[h].append(c["url"])
+        # Put the PRIMARY's own host last so the first backups are DIFFERENT accounts
+        # — if the primary is busy/connection-limited, failover goes to an
+        # independent account, not another stream on the same (full) one. Capture the
+        # original order first (sorting can't reference the list it's reordering).
+        _orig_idx = {h: i for i, h in enumerate(host_order)}
+        host_order.sort(key=lambda h: (h == chosen_host, _orig_idx[h]))
+        backup_src: list[str] = []
+        for rank in range(3):
+            for h in host_order:
+                if rank < len(by_host[h]):
+                    backup_src.append(by_host[h][rank])
+                    if len(backup_src) >= 9:
+                        break
             if len(backup_src) >= 9:
                 break
 
