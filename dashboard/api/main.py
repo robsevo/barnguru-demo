@@ -13514,6 +13514,23 @@ _LOUNGE_VOD_PROVIDER_IDS_CA: dict[str, list[int]] = {
 _TMDB_DISCOVER_PAGES = 25
 
 
+def _tmdb_creds() -> tuple[dict, dict]:
+    """TMDB auth as (headers, params).
+
+    Prefers the v4 read-access token (TMDB_ACCESS_TOKEN, sent as a Bearer
+    header) and falls back to the v3 TMDB_API_KEY query param. Both work
+    against the /3 API; the v4 token is the one the tvspot client already
+    uses successfully. Returns ({}, {}) when neither is configured.
+    """
+    tok = os.environ.get("TMDB_ACCESS_TOKEN")
+    if tok:
+        return {"Authorization": f"Bearer {tok}"}, {}
+    key = os.environ.get("TMDB_API_KEY")
+    if key:
+        return {}, {"api_key": key}
+    return {}, {}
+
+
 async def _tmdb_discover_titles(
     hx: "httpx.AsyncClient",
     api_key: str,
@@ -13532,12 +13549,14 @@ async def _tmdb_discover_titles(
     path = "tv" if kind == "series" else "movie"
     out: list[dict] = []
     seen: set[int] = set()
+    auth_headers, auth_params = _tmdb_creds()
     for page in range(1, _TMDB_DISCOVER_PAGES + 1):
         try:
             r = await hx.get(
                 f"https://api.themoviedb.org/3/discover/{path}",
+                headers=auth_headers,
                 params={
-                    "api_key": api_key,
+                    **auth_params,
                     "language": "en-US",
                     "watch_region": region,
                     "with_watch_providers": "|".join(str(x) for x in provider_ids),
@@ -13607,10 +13626,11 @@ async def _build_vod_catalog_tmdb() -> dict:
     """
     import time as _t_vod
     api_key = os.environ.get("TMDB_API_KEY")
-    if not api_key:
-        # No TMDB key → empty catalog. Honest gap rather than silently
-        # serving stale upstream data. Operator notices via the Movies/Series
-        # tile being empty and the metadata_source field.
+    _auth_headers, _auth_params = _tmdb_creds()
+    if not _auth_headers and not _auth_params:
+        # No TMDB credential (neither TMDB_ACCESS_TOKEN nor TMDB_API_KEY) → empty
+        # catalog. Honest gap rather than silently serving stale upstream data.
+        # Operator notices via the Movies/Series tile being empty + metadata_source.
         return {
             "by_service":      {svc: {"movies": [], "series": []} for svc in _LOUNGE_VOD_SERVICES},
             "movies_by_id":    {},
@@ -13803,9 +13823,21 @@ async def lounge_vod_catalog(service: str = "") -> dict:
 
     if not fresh:
         try:
-            data = await _build_vod_catalog()
-            _lounge_vod_cache["data"] = data
-            _lounge_vod_cache["ts"]   = now_ts
+            built = await _build_vod_catalog()
+            built_has_titles = any(
+                (rails.get("movies") or rails.get("series"))
+                for rails in built.get("by_service", {}).values()
+            )
+            if not built_has_titles and have:
+                # An empty build (TMDB creds down / transient outage) must NOT
+                # overwrite a good cached catalog and pin it to "0 titles" for the
+                # full TTL. Keep serving the last good one and retry in ~10 min.
+                data = _lounge_vod_cache["data"]
+                _lounge_vod_cache["ts"] = now_ts - _LOUNGE_VOD_TTL + 600
+            else:
+                data = built
+                _lounge_vod_cache["data"] = data
+                _lounge_vod_cache["ts"]   = now_ts
         except Exception as e:
             if not have:
                 return {"error": f"vod build failed: {e}", "by_service": {}}
