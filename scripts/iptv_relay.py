@@ -713,17 +713,18 @@ _HLS_URL_BY_SID: "OrderedDict[str, tuple[str, str, str]]" = OrderedDict()
 _HLS_URL_MAP_MAX = 200
 
 
-def _remember_hls_url(sid: str, url: str, quality: str, mode: str = "live") -> None:
-    _HLS_URL_BY_SID[sid] = (url, quality, mode)
+def _remember_hls_url(sid: str, url: str, quality: str, mode: str = "live", start: float = 0.0) -> None:
+    _HLS_URL_BY_SID[sid] = (url, quality, mode, start)
     _HLS_URL_BY_SID.move_to_end(sid)
     while len(_HLS_URL_BY_SID) > _HLS_URL_MAP_MAX:
         _HLS_URL_BY_SID.popitem(last=False)
 
 
-def _hls_session_id(url: str, quality: str = "passthrough", mode: str = "live") -> str:
+def _hls_session_id(url: str, quality: str = "passthrough", mode: str = "live", start: float = 0.0) -> str:
     # Live sids keep the historical tag shape so in-flight sessions survive a
-    # relay restart/deploy without a key change; vod gets its own namespace.
-    tag = f"{quality}|{url}" if mode == "live" else f"{mode}|{quality}|{url}"
+    # relay restart/deploy without a key change; vod gets its own namespace
+    # (keyed by start offset too — different resume points are distinct sessions).
+    tag = f"{quality}|{url}" if mode == "live" else f"{mode}|{quality}|{start:g}|{url}"
     return hashlib.sha1(tag.encode()).hexdigest()[:16]
 
 
@@ -761,8 +762,8 @@ def _kill_session(sess: _HLSSession) -> None:
     shutil.rmtree(sess.workdir, ignore_errors=True)
 
 
-async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode: str = "live") -> _HLSSession:
-    sid = _hls_session_id(url, quality, mode)
+async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode: str = "live", start: float = 0.0) -> _HLSSession:
+    sid = _hls_session_id(url, quality, mode, start)
 
     async with _HLS_LOCK:
         existing = _HLS_SESSIONS.get(sid)
@@ -836,6 +837,9 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
             # start is dominated by `-re` pacing (~1 segment) anyway.
             args = [
                 "ffmpeg", "-hide_banner", "-loglevel", "warning",
+                # Input seek BEFORE -i: fast keyframe seek, so a resume/failover
+                # can pick up mid-file instead of always restarting at 0:00.
+                *(["-ss", f"{start:g}"] if start > 0 else []),
                 "-re",
                 "-user_agent", _BROWSER_UA,
                 "-reconnect", "1",
@@ -898,7 +902,7 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
     deadline = time.monotonic() + startup_s
     while time.monotonic() < deadline:
         if manifest.exists() and manifest.stat().st_size > 0:
-            _remember_hls_url(sid, url, quality, mode)
+            _remember_hls_url(sid, url, quality, mode, start)
             return sess
         if sess.proc is not None and sess.proc.poll() is not None:
             stderr_tail = b""
@@ -992,7 +996,7 @@ def _check_vod_url(url: str) -> None:
 
 
 @app.get("/remux.m3u8")
-async def remux_vod(u: str, request: Request) -> Response:
+async def remux_vod(u: str, request: Request, start: float = 0) -> Response:
     """Remux a VOD container browsers can't play (mkv/avi) into rolling HLS.
 
     Live-style output: no seeking, plays like a live channel. The tvspot VOD
@@ -1009,7 +1013,7 @@ async def remux_vod(u: str, request: Request) -> Response:
 
     await _ensure_hls_reaper()
 
-    sess = await _start_or_get_hls_session(url, "passthrough", "vod")
+    sess = await _start_or_get_hls_session(url, "passthrough", "vod", max(0.0, start))
     sess.last_access = time.monotonic()
     return _session_manifest_response(sess, request)
 
@@ -1032,9 +1036,9 @@ async def proxy_hls_segment(session_id: str, segment: str, request: Request) -> 
         info = _HLS_URL_BY_SID.get(session_id)
         if info is None:
             raise HTTPException(status_code=410, detail="session expired")
-        url, quality, mode = info
+        url, quality, mode, start = info
         try:
-            sess = await _start_or_get_hls_session(url, quality, mode)
+            sess = await _start_or_get_hls_session(url, quality, mode, start)
         except HTTPException:
             raise
         except Exception as e:
