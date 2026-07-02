@@ -12974,88 +12974,6 @@ async def lounge_epg(channels: str = "") -> dict:
 
 _lounge_vod_cache: dict = {"data": None, "ts": 0.0}
 _LOUNGE_VOD_TTL = 24 * 3600  # 24h — VOD catalog is slow-moving
-# Last-good catalog persisted across restarts (same decay class as the account
-# grace window: an API restart wipes the in-memory cache, and if the very next
-# TMDB rebuild is partial — rate-limited burst, transient httpx failures — the
-# THIN result gets cached for the full TTL with nothing to compare against.
-# Observed 2026-07-02: movie rails collapsed ~2000→860 for a night). The file
-# is written on every accepted build and loaded as the comparison baseline (and
-# stopgap serving copy) after a restart. Excluded from the deploy rsync's
-# --delete like the other runtime-generated data files.
-_LOUNGE_VOD_CACHE_FILE = Path(__file__).resolve().parents[2] / "data" / "vod_catalog_cache.json"
-# A rebuild must retain at least this fraction of the baseline's title count;
-# thinner builds are rejected and retried in ~10 min (short re-check, not TTL).
-_LOUNGE_VOD_THIN_FRACTION = 0.5
-
-
-def _lounge_vod_total(data: dict | None) -> int:
-    if not data:
-        return 0
-    return sum(
-        len(rails.get("movies") or []) + len(rails.get("series") or [])
-        for rails in (data.get("by_service") or {}).values()
-    )
-
-
-def _lounge_vod_load_disk() -> None:
-    """Seed the in-memory cache from the persisted last-good catalog (stale-
-    marked, so the first request still triggers a rebuild — but that rebuild
-    now has a baseline to be judged against, and a failed/thin rebuild keeps
-    serving this instead of nothing/thin)."""
-    if _lounge_vod_cache["data"] is not None:
-        return
-    try:
-        data = json.loads(_LOUNGE_VOD_CACHE_FILE.read_text())
-        if _lounge_vod_total(data) > 0:
-            _lounge_vod_cache["data"] = data
-            _lounge_vod_cache["ts"] = 0.0  # stale → rebuild on first request
-    except (OSError, ValueError):
-        pass
-
-
-def _lounge_vod_save_disk(data: dict) -> None:
-    """Best-effort write-through (atomic rename so a crash can't half-write)."""
-    try:
-        tmp = _LOUNGE_VOD_CACHE_FILE.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(data))
-        tmp.rename(_LOUNGE_VOD_CACHE_FILE)
-    except OSError:
-        pass
-
-
-_lounge_vod_rebuild_task: "asyncio.Task | None" = None
-
-
-def _lounge_vod_kick_rebuild() -> None:
-    """Start ONE background catalog rebuild (single-flight). Accept/reject
-    semantics match the old inline path: a build retaining <THIN_FRACTION of
-    the current catalog is rejected and retried in ~10 min; an accepted build
-    refreshes the TTL and persists to disk."""
-    global _lounge_vod_rebuild_task
-    if _lounge_vod_rebuild_task is not None and not _lounge_vod_rebuild_task.done():
-        return
-
-    async def _rebuild() -> None:
-        import time as _t_vr
-        try:
-            built = await _build_vod_catalog()
-            now = _t_vr.time()
-            new_total = _lounge_vod_total(built)
-            old_total = _lounge_vod_total(_lounge_vod_cache["data"])
-            if new_total < old_total * _LOUNGE_VOD_THIN_FRACTION:
-                # EMPTY/THIN build (TMDB creds down / rate-limited burst /
-                # transient outage) — keep serving the last good catalog,
-                # re-check in ~10 min.
-                _lounge_vod_cache["ts"] = now - _LOUNGE_VOD_TTL + 600
-            else:
-                _lounge_vod_cache["data"] = built
-                _lounge_vod_cache["ts"] = now
-                _lounge_vod_save_disk(built)
-        except Exception:
-            # Failed rebuild: keep serving stale, retry in ~10 min.
-            _lounge_vod_cache["ts"] = _t_vr.time() - _LOUNGE_VOD_TTL + 600
-
-    _lounge_vod_rebuild_task = asyncio.create_task(_rebuild())
 
 # tmdb_id -> [relay-wrapped direct VOD URLs]. Built from each upstream account's
 # get_vod_streams (tmdb-tagged, English-only) so movie pages can play a real
@@ -14004,34 +13922,31 @@ async def lounge_vod_catalog(service: str = "") -> dict:
     every service. Sort: newest first within each rail.
     """
     import time as _t_vc
-    _lounge_vod_load_disk()  # no-op when the in-memory cache is already seeded
     now_ts = _t_vc.time()
     have   = _lounge_vod_cache["data"] is not None
     fresh  = have and (now_ts - _lounge_vod_cache["ts"] < _LOUNGE_VOD_TTL)
 
-    if not fresh and have:
-        # STALE-WHILE-REVALIDATE: serve the (disk-seeded or expired) catalog NOW
-        # and rebuild in the background. Rebuilding inline blocked the first
-        # request after every API restart for the full TMDB build (~60s) — which
-        # made tvspot's 20s-boxed universe fetch fail whenever its refresh ran
-        # near a deploy, and its index build abort for the night.
-        _lounge_vod_kick_rebuild()
-        data = _lounge_vod_cache["data"]
-    elif not fresh:
-        # Nothing to serve (first run ever, no disk cache) — build inline.
+    if not fresh:
         try:
             built = await _build_vod_catalog()
-            data = built
-            _lounge_vod_cache["data"] = data
-            if _lounge_vod_total(built) == 0:
-                # Empty first build: serve it (honest gap) but retry in ~10 min
-                # instead of pinning empty for 24h.
+            built_has_titles = any(
+                (rails.get("movies") or rails.get("series"))
+                for rails in built.get("by_service", {}).values()
+            )
+            if not built_has_titles and have:
+                # An empty build (TMDB creds down / transient outage) must NOT
+                # overwrite a good cached catalog and pin it to "0 titles" for the
+                # full TTL. Keep serving the last good one and retry in ~10 min.
+                data = _lounge_vod_cache["data"]
                 _lounge_vod_cache["ts"] = now_ts - _LOUNGE_VOD_TTL + 600
             else:
-                _lounge_vod_cache["ts"] = now_ts
-                _lounge_vod_save_disk(data)
+                data = built
+                _lounge_vod_cache["data"] = data
+                _lounge_vod_cache["ts"]   = now_ts
         except Exception as e:
-            return {"error": f"vod build failed: {e}", "by_service": {}}
+            if not have:
+                return {"error": f"vod build failed: {e}", "by_service": {}}
+            data = _lounge_vod_cache["data"]
     else:
         data = _lounge_vod_cache["data"]
 
