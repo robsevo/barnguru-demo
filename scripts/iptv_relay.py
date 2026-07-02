@@ -869,7 +869,10 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
             if vod_vcodec == "h264":
                 enc_args = ["-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-ac", "2"]
             else:
-                enc_args = _encode_args("720p", _get_encoder())
+                # -pix_fmt yuv420p: x265 rips are commonly 10-bit (Main 10);
+                # H.264 main profile only takes 8-bit, so downconvert or the
+                # encoder refuses ("main profile doesn't support bit depth 10").
+                enc_args = _encode_args("720p", _get_encoder()) + ["-pix_fmt", "yuv420p"]
             args = [
                 "ffmpeg", "-hide_banner", "-loglevel", "warning",
                 # Input seek BEFORE -i: fast keyframe seek, so a resume/failover
