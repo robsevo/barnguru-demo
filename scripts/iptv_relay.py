@@ -681,9 +681,9 @@ async def _proxy_vod_impl(u: str, request: Request) -> Response:
 
 class _HLSSession:
     __slots__ = ("id", "url", "workdir", "proc", "last_access", "started_at",
-                 "has_served_segment")
+                 "has_served_segment", "mode")
 
-    def __init__(self, sid: str, url: str, workdir: Path) -> None:
+    def __init__(self, sid: str, url: str, workdir: Path, mode: str = "live") -> None:
         self.id          = sid
         self.url         = url
         self.workdir     = workdir
@@ -694,6 +694,10 @@ class _HLSSession:
         # Warmup-only sessions (hover spawn, never clicked) stay False and are
         # the first to be LRU-evicted under capacity pressure.
         self.has_served_segment = False
+        # "live" (channel transmux) or "vod" (remux fallback). LIVE ALWAYS WINS:
+        # vod sessions have their own low cap and are evicted first — a movie
+        # fallback must never starve or displace someone's live channel.
+        self.mode = mode
 
 
 _HLS_SESSIONS:  dict[str, _HLSSession] = {}
@@ -781,12 +785,13 @@ def _probe_video_codec(url: str) -> "str | None":
 async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode: str = "live", start: float = 0.0) -> _HLSSession:
     sid = _hls_session_id(url, quality, mode, start)
 
-    # VOD: pick copy-vs-transcode BEFORE taking the lock (ffprobe can take
-    # seconds and must not stall live session ops). H.264 files copy straight
-    # through; anything else (HEVC/VP9 — most high-quality mkv rips are x265,
-    # which NO browser plays inside HLS-TS) re-encodes at 720p. The 720p tier
-    # is the same one live uses; ~half a core on libx264 veryfast, and vod
-    # sessions are capped by HLS_MAX_SESSIONS like everything else.
+    # VOD: probe the codec BEFORE taking the lock (ffprobe can take seconds and
+    # must not stall live session ops). ONLY H.264 is remuxable: copy-mode
+    # ffmpeg costs ~nothing, like the live passthrough. TRANSCODE IS DISABLED —
+    # a libx264 encode eats a full core of this 2-core box and STARVED THE LIVE
+    # TRANSMUX SESSIONS (live channels visibly skipped, 2026-07-02). HEVC/VP9
+    # rips get a fast 415 so the player fails over immediately instead of
+    # spinning on a stream the box can't afford to produce.
     vod_vcodec: "str | None" = None
     if mode == "vod":
         async with _HLS_LOCK:
@@ -795,6 +800,8 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
                 existing.last_access = time.monotonic()
                 return existing
         vod_vcodec = await asyncio.to_thread(_probe_video_codec, url)
+        if vod_vcodec is not None and vod_vcodec != "h264":
+            raise HTTPException(status_code=415, detail=f"unsupported vod codec: {vod_vcodec} (transcode disabled)")
 
     async with _HLS_LOCK:
         existing = _HLS_SESSIONS.get(sid)
@@ -802,19 +809,31 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
             existing.last_access = time.monotonic()
             return existing
 
+        # VOD sub-cap: at most 3 remux sessions, evicting the oldest VOD
+        # session (never a live one) to make room. Keeps movie fallbacks from
+        # ever crowding the live budget.
+        if mode == "vod":
+            vod_sessions = [s for s in _HLS_SESSIONS.values() if s.mode == "vod"]
+            if len(vod_sessions) >= 3:
+                vod_sessions.sort(key=lambda s: (s.has_served_segment, s.last_access))
+                for victim in vod_sessions[: len(vod_sessions) - 3 + 1]:
+                    _HLS_SESSIONS.pop(victim.id, None)
+                    _kill_session(victim)
+
         # LRU eviction: enforce HLS_MAX_SESSIONS BEFORE starting a new
         # ffmpeg. Without this the session table can balloon during
         # channel-hop / verifier-probe bursts (we observed 35+ live
         # ffmpegs on a 2 GB VPS, OOM-killing the relay).
         #
-        # Sort key prefers warmup-only sessions (has_served_segment=False)
-        # before any session that has actually streamed a fragment — that
-        # protects the active viewer from being evicted by a flurry of chip
-        # hovers. Within each group, oldest last_access goes first.
+        # Sort key: VOD sessions go first (live always wins), then warmup-only
+        # sessions (has_served_segment=False) before any session that has
+        # actually streamed a fragment — that protects the active viewer from
+        # being evicted by a flurry of chip hovers. Within each group, oldest
+        # last_access goes first.
         if len(_HLS_SESSIONS) >= HLS_MAX_SESSIONS:
             victims = sorted(
                 _HLS_SESSIONS.values(),
-                key=lambda s: (s.has_served_segment, s.last_access),
+                key=lambda s: (s.mode != "vod", s.has_served_segment, s.last_access),
             )
             for victim in victims[: len(_HLS_SESSIONS) - HLS_MAX_SESSIONS + 1]:
                 _HLS_SESSIONS.pop(victim.id, None)
@@ -866,13 +885,9 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
             # was hevc Main10, undecodable in HLS-TS on every real player)
             # re-encode at 720p via the shared live tier. Audio always → AAC
             # (rips carry AC3/EAC3/DTS that browsers can't decode).
-            if vod_vcodec == "h264":
-                enc_args = ["-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-ac", "2"]
-            else:
-                # -pix_fmt yuv420p: x265 rips are commonly 10-bit (Main 10);
-                # H.264 main profile only takes 8-bit, so downconvert or the
-                # encoder refuses ("main profile doesn't support bit depth 10").
-                enc_args = _encode_args("720p", _get_encoder()) + ["-pix_fmt", "yuv420p"]
+            # h264 (or probe-inconclusive benefit-of-the-doubt): cheap copy.
+            # Non-h264 was already rejected with 415 before the lock.
+            enc_args = ["-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-ac", "2"]
             args = [
                 "ffmpeg", "-hide_banner", "-loglevel", "warning",
                 # Input seek BEFORE -i: fast keyframe seek, so a resume/failover
@@ -928,7 +943,7 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
         )
-        sess = _HLSSession(sid, url, workdir)
+        sess = _HLSSession(sid, url, workdir, mode)
         sess.proc = proc
         _HLS_SESSIONS[sid] = sess
 
