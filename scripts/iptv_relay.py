@@ -762,8 +762,39 @@ def _kill_session(sess: _HLSSession) -> None:
     shutil.rmtree(sess.workdir, ignore_errors=True)
 
 
+def _probe_video_codec(url: str) -> "str | None":
+    """codec_name of the first video stream (h264/hevc/…), None on failure.
+    Bounded: reads only the container header over HTTP."""
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=codec_name", "-of", "csv=p=0",
+             "-user_agent", _BROWSER_UA, url],
+            capture_output=True, timeout=10,
+        )
+        lines = r.stdout.decode(errors="replace").strip().splitlines()
+        return lines[0].strip() or None if lines else None
+    except Exception:
+        return None
+
+
 async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode: str = "live", start: float = 0.0) -> _HLSSession:
     sid = _hls_session_id(url, quality, mode, start)
+
+    # VOD: pick copy-vs-transcode BEFORE taking the lock (ffprobe can take
+    # seconds and must not stall live session ops). H.264 files copy straight
+    # through; anything else (HEVC/VP9 — most high-quality mkv rips are x265,
+    # which NO browser plays inside HLS-TS) re-encodes at 720p. The 720p tier
+    # is the same one live uses; ~half a core on libx264 veryfast, and vod
+    # sessions are capped by HLS_MAX_SESSIONS like everything else.
+    vod_vcodec: "str | None" = None
+    if mode == "vod":
+        async with _HLS_LOCK:
+            existing = _HLS_SESSIONS.get(sid)
+            if existing is not None and existing.proc is not None and existing.proc.poll() is None:
+                existing.last_access = time.monotonic()
+                return existing
+        vod_vcodec = await asyncio.to_thread(_probe_video_codec, url)
 
     async with _HLS_LOCK:
         existing = _HLS_SESSIONS.get(sid)
@@ -825,16 +856,20 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
         # marker arrives. Native players synthesize timestamps as a matter
         # of course; we should too.
         if mode == "vod":
-            # VOD container remux (mkv/avi movie files over HTTP) → the SAME
+            # VOD container remux (mkv/ts movie files over HTTP) → the SAME
             # rolling live-style HLS as the live path. `-re` paces input at
             # native speed so the rolling window tracks the viewer instead of
             # racing to EOF in minutes; the cost is NO seeking — it plays like
             # a live channel. This is the tvspot resolver's LAST-RESORT
             # fallback when a title has no browser-playable mp4 anywhere.
-            # Video is copied (panels are overwhelmingly H.264); audio → AAC
-            # because movie rips carry AC3/EAC3/DTS that browsers can't decode.
-            # No probesize caps here: mkv headers need a real probe, and cold
-            # start is dominated by `-re` pacing (~1 segment) anyway.
+            # H.264 video copies straight through; HEVC/VP9 (x265 rips — TLOU
+            # was hevc Main10, undecodable in HLS-TS on every real player)
+            # re-encode at 720p via the shared live tier. Audio always → AAC
+            # (rips carry AC3/EAC3/DTS that browsers can't decode).
+            if vod_vcodec == "h264":
+                enc_args = ["-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-ac", "2"]
+            else:
+                enc_args = _encode_args("720p", _get_encoder())
             args = [
                 "ffmpeg", "-hide_banner", "-loglevel", "warning",
                 # Input seek BEFORE -i: fast keyframe seek, so a resume/failover
@@ -846,8 +881,7 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
                 "-reconnect_streamed", "1",
                 "-reconnect_delay_max", "5",
                 "-i", url,
-                "-c:v", "copy",
-                "-c:a", "aac", "-b:a", "160k", "-ac", "2",
+                *enc_args,
                 "-max_muxing_queue_size", "4096",
                 "-f", "hls",
                 "-hls_time", str(HLS_SEGMENT_SECONDS),
