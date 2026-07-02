@@ -975,7 +975,7 @@ def _session_manifest_response(sess: _HLSSession, request: Request) -> Response:
 
 
 # upstream VOD file path: /movie|series/<user>/<pass>/<stream_id>.<container>
-_VOD_PATH_RE = re.compile(r"^/(movie|series)/[^/]+/[^/]+/[^/]+\.(mkv|avi|mp4)$", re.IGNORECASE)
+_VOD_PATH_RE = re.compile(r"^/(movie|series)/[^/]+/[^/]+/[^/]+\.(mkv|avi|mp4|ts)$", re.IGNORECASE)
 
 
 def _check_vod_url(url: str) -> None:
