@@ -703,25 +703,28 @@ _SEG_NAME_RE    = re.compile(r"^seg\d{4,}\.ts$")
 _BROWSER_UA     = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
 
-# sid → (url, quality). Outlives the _HLS_SESSIONS entry so that /hls-seg can
+# sid → (url, quality, mode). Outlives the _HLS_SESSIONS entry so that /hls-seg can
 # lazy-respawn a session that was LRU-evicted while the player still had its
 # segment URLs queued. Without this, an evicted session forces hls.js to wait
 # for the next manifest poll (3-6s) before recovering — the lazy respawn cuts
 # that to ~1-2s on next segment request. Bounded so a long-running relay
 # doesn't accumulate every URL it has ever seen.
-_HLS_URL_BY_SID: "OrderedDict[str, tuple[str, str]]" = OrderedDict()
+_HLS_URL_BY_SID: "OrderedDict[str, tuple[str, str, str]]" = OrderedDict()
 _HLS_URL_MAP_MAX = 200
 
 
-def _remember_hls_url(sid: str, url: str, quality: str) -> None:
-    _HLS_URL_BY_SID[sid] = (url, quality)
+def _remember_hls_url(sid: str, url: str, quality: str, mode: str = "live") -> None:
+    _HLS_URL_BY_SID[sid] = (url, quality, mode)
     _HLS_URL_BY_SID.move_to_end(sid)
     while len(_HLS_URL_BY_SID) > _HLS_URL_MAP_MAX:
         _HLS_URL_BY_SID.popitem(last=False)
 
 
-def _hls_session_id(url: str, quality: str = "passthrough") -> str:
-    return hashlib.sha1(f"{quality}|{url}".encode()).hexdigest()[:16]
+def _hls_session_id(url: str, quality: str = "passthrough", mode: str = "live") -> str:
+    # Live sids keep the historical tag shape so in-flight sessions survive a
+    # relay restart/deploy without a key change; vod gets its own namespace.
+    tag = f"{quality}|{url}" if mode == "live" else f"{mode}|{quality}|{url}"
+    return hashlib.sha1(tag.encode()).hexdigest()[:16]
 
 
 async def _ensure_hls_reaper() -> None:
@@ -758,8 +761,8 @@ def _kill_session(sess: _HLSSession) -> None:
     shutil.rmtree(sess.workdir, ignore_errors=True)
 
 
-async def _start_or_get_hls_session(url: str, quality: str = "passthrough") -> _HLSSession:
-    sid = _hls_session_id(url, quality)
+async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode: str = "live") -> _HLSSession:
+    sid = _hls_session_id(url, quality, mode)
 
     async with _HLS_LOCK:
         existing = _HLS_SESSIONS.get(sid)
@@ -820,35 +823,65 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough") -> _
         # ffmpeg to pause output (no segment produced) until the next clean
         # marker arrives. Native players synthesize timestamps as a matter
         # of course; we should too.
-        args = [
-            "ffmpeg", "-hide_banner", "-loglevel", "warning",
-            "-fflags", "+discardcorrupt+genpts",
-            "-rtbufsize", "32M",
-            "-thread_queue_size", "1024",
-            "-probesize", "1000000",
-            "-analyzeduration", "1000000",
-            "-err_detect", "ignore_err",
-            "-user_agent", _BROWSER_UA,
-            "-reconnect", "1",
-            "-reconnect_streamed", "1",
-            "-reconnect_delay_max", "5",
-            "-i", url,
-            *encode,
-            # Larger muxer queue tolerates 5-10s of upstream backpressure
-            # before ffmpeg drops packets — pairs with the deep player buffer.
-            "-max_muxing_queue_size", "4096",
-            "-f", "hls",
-            "-hls_time", str(HLS_SEGMENT_SECONDS),
-            "-hls_list_size", str(HLS_LIST_SIZE),
-            # discont_start: signals to hls.js that this session is fresh and
-            # any PTS continuity from a prior session is broken. Combined with
-            # the player's maxBufferHole=1.5s, hls.js flushes the MSE source
-            # buffer cleanly at the marker instead of stalling on PTS jumps
-            # after an LRU-evict + respawn for the same channel.
-            "-hls_flags", "delete_segments+omit_endlist+independent_segments+discont_start",
-            "-hls_segment_filename", str(workdir / "seg%04d.ts"),
-            str(workdir / "live.m3u8"),
-        ]
+        if mode == "vod":
+            # VOD container remux (mkv/avi movie files over HTTP) → the SAME
+            # rolling live-style HLS as the live path. `-re` paces input at
+            # native speed so the rolling window tracks the viewer instead of
+            # racing to EOF in minutes; the cost is NO seeking — it plays like
+            # a live channel. This is the tvspot resolver's LAST-RESORT
+            # fallback when a title has no browser-playable mp4 anywhere.
+            # Video is copied (panels are overwhelmingly H.264); audio → AAC
+            # because movie rips carry AC3/EAC3/DTS that browsers can't decode.
+            # No probesize caps here: mkv headers need a real probe, and cold
+            # start is dominated by `-re` pacing (~1 segment) anyway.
+            args = [
+                "ffmpeg", "-hide_banner", "-loglevel", "warning",
+                "-re",
+                "-user_agent", _BROWSER_UA,
+                "-reconnect", "1",
+                "-reconnect_streamed", "1",
+                "-reconnect_delay_max", "5",
+                "-i", url,
+                "-c:v", "copy",
+                "-c:a", "aac", "-b:a", "160k", "-ac", "2",
+                "-max_muxing_queue_size", "4096",
+                "-f", "hls",
+                "-hls_time", str(HLS_SEGMENT_SECONDS),
+                "-hls_list_size", str(HLS_LIST_SIZE),
+                "-hls_flags", "delete_segments+omit_endlist+independent_segments+discont_start",
+                "-hls_segment_filename", str(workdir / "seg%04d.ts"),
+                str(workdir / "live.m3u8"),
+            ]
+        else:
+            args = [
+                "ffmpeg", "-hide_banner", "-loglevel", "warning",
+                "-fflags", "+discardcorrupt+genpts",
+                "-rtbufsize", "32M",
+                "-thread_queue_size", "1024",
+                "-probesize", "1000000",
+                "-analyzeduration", "1000000",
+                "-err_detect", "ignore_err",
+                "-user_agent", _BROWSER_UA,
+                "-reconnect", "1",
+                "-reconnect_streamed", "1",
+                "-reconnect_delay_max", "5",
+                "-i", url,
+                *encode,
+                # Larger muxer queue tolerates 5-10s of upstream backpressure
+                # before ffmpeg drops packets — pairs with the deep player buffer.
+                "-max_muxing_queue_size", "4096",
+                "-f", "hls",
+                "-hls_time", str(HLS_SEGMENT_SECONDS),
+                "-hls_list_size", str(HLS_LIST_SIZE),
+                # discont_start: signals to hls.js that this session is fresh and
+                # any PTS continuity from a prior session is broken. Combined with
+                # the player's maxBufferHole=1.5s, hls.js flushes the MSE source
+                # buffer cleanly at the marker instead of stalling on PTS jumps
+                # after an LRU-evict + respawn for the same channel.
+                "-hls_flags", "delete_segments+omit_endlist+independent_segments+discont_start",
+                "-hls_segment_filename", str(workdir / "seg%04d.ts"),
+                str(workdir / "live.m3u8"),
+            ]
         proc = subprocess.Popen(
             args,
             stdout=subprocess.DEVNULL,
@@ -859,10 +892,13 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough") -> _
         _HLS_SESSIONS[sid] = sess
 
     manifest = sess.workdir / "live.m3u8"
-    deadline = time.monotonic() + HLS_STARTUP_TIMEOUT_S
+    # VOD gets a longer runway: `-re` paces the input, so the first segment
+    # can't exist before ~HLS_SEGMENT_SECONDS of wall time + container probe.
+    startup_s = HLS_STARTUP_TIMEOUT_S if mode == "live" else 25.0
+    deadline = time.monotonic() + startup_s
     while time.monotonic() < deadline:
         if manifest.exists() and manifest.stat().st_size > 0:
-            _remember_hls_url(sid, url, quality)
+            _remember_hls_url(sid, url, quality, mode)
             return sess
         if sess.proc is not None and sess.proc.poll() is not None:
             stderr_tail = b""
@@ -910,7 +946,11 @@ async def proxy_hls(u: str, request: Request, q: str = "passthrough") -> Respons
 
     sess = await _start_or_get_hls_session(url, q)
     sess.last_access = time.monotonic()
+    return _session_manifest_response(sess, request)
 
+
+def _session_manifest_response(sess: _HLSSession, request: Request) -> Response:
+    """Serve a session's live.m3u8 with segment lines rewritten to /hls-seg."""
     try:
         body = (sess.workdir / "live.m3u8").read_text()
     except FileNotFoundError:
@@ -934,6 +974,46 @@ async def proxy_hls(u: str, request: Request, q: str = "passthrough") -> Respons
     )
 
 
+# upstream VOD file path: /movie|series/<user>/<pass>/<stream_id>.<container>
+_VOD_PATH_RE = re.compile(r"^/(movie|series)/[^/]+/[^/]+/[^/]+\.(mkv|avi|mp4)$", re.IGNORECASE)
+
+
+def _check_vod_url(url: str) -> None:
+    """Remux inputs aren't limited to the live-host allowlist — VOD panels are
+    discovered nightly by the tvspot pipeline and rotate too often to sync into
+    data/relay_allowed_hosts.json. Instead the URL must LOOK like an upstream VOD
+    file path; that plus the relay token keeps this from being an open proxy
+    for arbitrary web content."""
+    p = urlparse(url)
+    if p.scheme not in ("http", "https") or not p.hostname:
+        raise HTTPException(status_code=400, detail="bad url")
+    if not _VOD_PATH_RE.match(p.path or ""):
+        raise HTTPException(status_code=400, detail="not an upstream VOD path")
+
+
+@app.get("/remux.m3u8")
+async def remux_vod(u: str, request: Request) -> Response:
+    """Remux a VOD container browsers can't play (mkv/avi) into rolling HLS.
+
+    Live-style output: no seeking, plays like a live channel. The tvspot VOD
+    resolver appends these as LAST-RESORT fallback sources when a title has no
+    browser-playable mp4 on any panel. Session lifecycle (idle reap, LRU cap,
+    lazy respawn via /hls-seg) is shared with the live /hls path — a movie
+    occupies one of the HLS_MAX_SESSIONS slots for its runtime. The ".m3u8"
+    route suffix is load-bearing: the tvspot player picks its HLS engine by
+    URL substring.
+    """
+    _check_token(request)
+    url = unquote(u)
+    _check_vod_url(url)
+
+    await _ensure_hls_reaper()
+
+    sess = await _start_or_get_hls_session(url, "passthrough", "vod")
+    sess.last_access = time.monotonic()
+    return _session_manifest_response(sess, request)
+
+
 @app.get("/hls-seg/{session_id}/{segment}")
 async def proxy_hls_segment(session_id: str, segment: str, request: Request) -> Response:
     _check_token(request)
@@ -952,9 +1032,9 @@ async def proxy_hls_segment(session_id: str, segment: str, request: Request) -> 
         info = _HLS_URL_BY_SID.get(session_id)
         if info is None:
             raise HTTPException(status_code=410, detail="session expired")
-        url, quality = info
+        url, quality, mode = info
         try:
-            sess = await _start_or_get_hls_session(url, quality)
+            sess = await _start_or_get_hls_session(url, quality, mode)
         except HTTPException:
             raise
         except Exception as e:
