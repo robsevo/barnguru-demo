@@ -9256,11 +9256,9 @@ async def _prewarm_lounge_epg() -> None:
     client. Pre-warming on startup eliminates the cold-cache window.
     """
     async def _runner() -> None:
-        import time as _t_pwe
         try:
             merged = await _build_lounge_epg()
-            _lounge_epg_cache["data"] = merged
-            _lounge_epg_cache["ts"]   = _t_pwe.time()
+            _set_lounge_epg(merged)
         except Exception:
             pass
     asyncio.create_task(_runner())
@@ -12393,10 +12391,7 @@ def _kick_epg_prewarm() -> None:
     """Fire-and-forget EPG cache build. No-op if cache is fresh or another
     prewarm is already running. Always safe to call repeatedly."""
     global _epg_prewarm_inflight
-    import time as _t_pw
-    have  = _lounge_epg_cache["data"] is not None
-    fresh = have and (_t_pw.time() - _lounge_epg_cache["ts"] < _LOUNGE_EPG_TTL)
-    if fresh or _epg_prewarm_inflight:
+    if _lounge_epg_is_fresh() or _epg_prewarm_inflight:
         return
     _epg_prewarm_inflight = True
 
@@ -12878,6 +12873,49 @@ async def _build_lounge_epg() -> dict:
     return merged
 
 
+def _epg_merge_carry(old: "dict | None", new: dict) -> dict:
+    """Carry forward channels a rebuild LOST (transient XMLTV failure, panel
+    hiccup): a channel present in the old cache with still-future programmes
+    but absent/empty in the new build keeps its old guide. Programmes are
+    timestamped, so carried entries age out naturally — this can't pin a
+    stale schedule, only prevent a hole where yesterday there was a guide."""
+    if not old:
+        return new
+    import time as _t_mc
+    now_iso = _t_mc.strftime("%Y-%m-%dT%H:%M:%SZ", _t_mc.gmtime())
+    for ch, progs in old.items():
+        if new.get(ch):
+            continue
+        future = [p for p in progs if (p.get("stop_utc") or p.get("start_utc") or "") >= now_iso]
+        if future:
+            new[ch] = future
+    return new
+
+
+def _set_lounge_epg(merged: dict) -> None:
+    """Single write path for the EPG cache: carry-forward merge + record
+    whether the sports-programs fold-in had channel data to draw from."""
+    import time as _t_se
+    _lounge_epg_cache["data"] = _epg_merge_carry(_lounge_epg_cache["data"], merged)
+    _lounge_epg_cache["ts"] = _t_se.time()
+    _lounge_epg_cache["with_sports"] = bool(_lounge_cache.get("data"))
+
+
+def _lounge_epg_is_fresh() -> bool:
+    import time as _t_fr
+    if _lounge_epg_cache["data"] is None:
+        return False
+    if _t_fr.time() - _lounge_epg_cache["ts"] >= _LOUNGE_EPG_TTL:
+        return False
+    # An EPG built BEFORE the channel list existed (startup prewarm races the
+    # channels build) lacks the sports-programs fold-in — TSN/Sportsnet/DAZN
+    # etc. show no guide. Once channels exist, treat that hollow build as
+    # stale so the next touch heals it instead of pinning the hole for 6h.
+    if not _lounge_epg_cache.get("with_sports") and _lounge_cache.get("data"):
+        return False
+    return True
+
+
 def _kick_lounge_epg_refresh() -> None:
     """Fire-and-forget rebuild of the EPG cache. No-op if a build is
     already inflight. Always safe to call repeatedly."""
@@ -12888,11 +12926,9 @@ def _kick_lounge_epg_refresh() -> None:
 
     async def _run() -> None:
         global _lounge_epg_build_inflight
-        import time as _t_kr
         try:
             merged = await _build_lounge_epg()
-            _lounge_epg_cache["data"] = merged
-            _lounge_epg_cache["ts"]   = _t_kr.time()
+            _set_lounge_epg(merged)
         except Exception:
             pass
         finally:
@@ -12905,35 +12941,34 @@ def _kick_lounge_epg_refresh() -> None:
 
 
 @app.get("/lounge/epg")
-async def lounge_epg(channels: str = "") -> dict:
+async def lounge_epg(channels: str = "", refresh: int = 0) -> dict:
     """Programme listings for the next ~48h on the requested channels.
 
     Returns `{channel_name: [programmes]}`. `channels` is a comma-separated
     list of names from /lounge/live-channels (e.g. "HBO,FX,AMC"). Empty
-    string returns all known programmes.
+    string returns all known programmes. `refresh=1` forces a background
+    rebuild even when the cache is fresh (serves current data meanwhile) —
+    the manual fix-it lever when a guide looks wrong/hollow.
 
     SWR semantics:
       - Fresh cache → return immediately.
-      - Stale cache → return stale data + kick a background refresh. The
-        client gets sub-second response and the next call sees fresh data.
+      - Stale cache (incl. a hollow no-sports build once channels exist) →
+        return stale data + kick a background refresh.
       - No cache (cold start) → block on the build (~8-15s). The Android
         client's 20s read timeout fits inside this; previous behaviour
         also blocked on cold cache, so cold-start UX is unchanged.
     """
-    import time as _t_epg
-    now_ts = _t_epg.time()
-    have   = _lounge_epg_cache["data"] is not None
-    fresh  = have and (now_ts - _lounge_epg_cache["ts"] < _LOUNGE_EPG_TTL)
+    have = _lounge_epg_cache["data"] is not None
 
     if not have:
         # Cold cache — must build inline.
         merged = await _build_lounge_epg()
-        _lounge_epg_cache["data"] = merged
-        _lounge_epg_cache["ts"]   = now_ts
-    elif not fresh:
-        # Have stale data — serve it, refresh in background.
+        _set_lounge_epg(merged)
+    elif refresh or not _lounge_epg_is_fresh():
+        # Have data — serve it now, rebuild in background.
         _kick_lounge_epg_refresh()
 
+    fresh = _lounge_epg_is_fresh()
     data: dict[str, list[dict]] = _lounge_epg_cache["data"] or {}
     if channels:
         wanted = {c.strip() for c in channels.split(",") if c.strip()}
