@@ -58,13 +58,18 @@ FETCH_TIMEOUT = 20.0
 # you can sanity-check which path is in use before relying on it for many
 # concurrent feeds.
 HLS_WORKDIR            = Path("/tmp/iptv_relay_hls")
-HLS_SEGMENT_SECONDS    = 3
-# 36 segments × 3s = 108s manifest window. Final plateau per user request —
-# matches player's liveSyncDuration=36 (36s behind live) with ~72s of look-back
-# room so a recovery seek can't fall off the back of the deleted-segments
-# cliff. Disk cost ~36 MB per session (passthrough TS), trivial against the
-# 300 MB cache budget.
-HLS_LIST_SIZE          = 36
+# 6s segments (was 3s): on a loaded shared box, longer segments give ffmpeg
+# HALF as many hard real-time deadlines to hit per minute and the player half
+# as many segment fetches + manifest refreshes — each of which is a place a
+# stall can start. Resilience-first (Apple's authoring-spec default is 6s
+# too); the cost is ~3s more channel-change latency since the first segment
+# takes longer to finalize. GOP=60 (≈2s) still divides 6s cleanly (3 GOPs).
+HLS_SEGMENT_SECONDS    = 6
+# 18 segments × 6s = 108s manifest window — unchanged window, so the player's
+# liveSyncDuration=36 (seconds-based, segment-size-agnostic) still sits 36s
+# behind live with ~72s of look-back room so a recovery seek can't fall off
+# the back of the deleted-segments cliff. Disk cost ~36 MB per session.
+HLS_LIST_SIZE          = 18
 # Tab-switch / ad-break tolerance: 30s was killing sessions when users
 # briefly looked away, forcing a full ffmpeg respawn on resume. 90s is still
 # tight enough that abandoned chips don't pile up but covers normal viewer
@@ -73,7 +78,12 @@ HLS_LIST_SIZE          = 36
 # 12 × ~80 MB resident keeps the relay under 1 GB regardless of how long
 # each session lives.
 HLS_IDLE_TIMEOUT_S     = 90.0
-HLS_STARTUP_TIMEOUT_S  = 15.0
+# 20s (was 15s): a 6s-segment session needs ~6-8s of wall time to finalize its
+# first segment before a manifest exists, so a 15s budget left little margin on
+# a busy box and risked a premature "ffmpeg did not produce manifest in time"
+# kill → respawn loop. 20s keeps abandoned-chip cleanup tight while giving the
+# longer first segment room to land.
+HLS_STARTUP_TIMEOUT_S  = 20.0
 # Hard cap on concurrent ffmpeg sessions. Each ffmpeg holds 60-80 MB
 # resident; on a 2 GB VPS even 25 sessions saturates RAM and the OOM
 # killer takes the relay (or worse, a sibling service) down. Capping
@@ -151,11 +161,11 @@ def _encode_args(quality: str, encoder: str) -> list[str]:
     common_audio = ["-c:a", "aac", "-b:a", abr, "-ac", "2"]
     common_rate  = ["-b:v", vbr, "-maxrate", vbr, "-bufsize", vbufsize]
     scale        = ["-vf", f"scale={width}:{height}"]
-    # GOP = 60 frames ≈ 2s at 30fps (2.4s at 25fps). With HLS_SEGMENT_SECONDS=3
-    # this guarantees a keyframe inside the first segment instead of forcing
-    # hls.js to wait an extra GOP on cold start. Was -g 96 (3.2s GOP) which
-    # frequently misaligned with the segment boundary and added 0.5-1.5s of
-    # first-paint latency.
+    # GOP = 60 frames ≈ 2s at 30fps (2.4s at 25fps). With HLS_SEGMENT_SECONDS=6
+    # this puts 3 keyframes inside every segment and divides evenly, so segment
+    # boundaries stay keyframe-aligned. Was -g 96 (3.2s GOP) which frequently
+    # misaligned with the segment boundary and added 0.5-1.5s of first-paint
+    # latency.
     gop          = ["-g", "60", "-keyint_min", "60"]
 
     if encoder == "h264_videotoolbox":
@@ -943,6 +953,21 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
         )
+        # Protect the stream from the API. The relay and the API share this one
+        # 2 GB box, so when the API is CPU-busy (EPG/catalog builds) ffmpeg can
+        # miss its `-re` real-time deadline and the segment pipeline stalls —
+        # the browser then buffers even though the upstream is fine. The relay
+        # runs as root, so nudge each ffmpeg to a higher scheduling priority
+        # (nice -5) than the API workers (nice 0): under contention ffmpeg is
+        # scheduled first and keeps producing segments. Pure scheduling bias —
+        # it never kills anything, and passthrough `-c copy` uses little CPU, so
+        # this can't starve the API; it just stops the API from starving streams.
+        # Best-effort: a platform without setpriority / lacking privilege is a
+        # no-op, not a failure.
+        try:
+            os.setpriority(os.PRIO_PROCESS, proc.pid, -5)
+        except (OSError, AttributeError, PermissionError):
+            pass
         sess = _HLSSession(sid, url, workdir, mode)
         sess.proc = proc
         _HLS_SESSIONS[sid] = sess
