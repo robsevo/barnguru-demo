@@ -9256,11 +9256,9 @@ async def _prewarm_lounge_epg() -> None:
     client. Pre-warming on startup eliminates the cold-cache window.
     """
     async def _runner() -> None:
-        import time as _t_pwe
         try:
             merged = await _build_lounge_epg()
-            _lounge_epg_cache["data"] = merged
-            _lounge_epg_cache["ts"]   = _t_pwe.time()
+            _stamp_lounge_epg_cache(merged)
         except Exception:
             pass
     asyncio.create_task(_runner())
@@ -12693,6 +12691,28 @@ async def _build_lounge_payload() -> dict:
 _lounge_epg_cache: dict = {"data": None, "ts": 0.0}
 _LOUNGE_EPG_TTL = 6 * 3600  # 6h
 
+# True when the last _build_lounge_epg produced a guide where most channels
+# have no upcoming programme — the future-rich panels missed the fetch (slow
+# box / panel outage) and only backwards-looking guides answered. Read by
+# _stamp_lounge_epg_cache to shorten how long that build is trusted.
+_lounge_epg_last_build_degraded: bool = False
+
+
+def _stamp_lounge_epg_cache(merged: dict) -> None:
+    """Install a finished EPG build into the cache.
+
+    A degraded build (see _lounge_epg_last_build_degraded) is stamped as if
+    it were already ~5.5h old, so the SWR path in /lounge/epg re-attempts a
+    build within 30 minutes instead of pinning "nothing upcoming" for the
+    full 6h TTL. The carry-forward guard in _build_lounge_epg means clients
+    still see the previous forward guide in the meantime."""
+    import time as _t_st
+    ts = _t_st.time()
+    if _lounge_epg_last_build_degraded:
+        ts -= (_LOUNGE_EPG_TTL - 1800)
+    _lounge_epg_cache["data"] = merged
+    _lounge_epg_cache["ts"]   = ts
+
 
 async def _fetch_upstream_xmltv(label: str, host: str, port: int, user: str, pw: str) -> dict[str, list[dict]]:
     """Hit one upstream account's xmltv.php and return {channel_id: [programmes]}.
@@ -12707,7 +12727,12 @@ async def _fetch_upstream_xmltv(label: str, host: str, port: int, user: str, pw:
     base = f"http://{host}:{port}"
     url  = f"{base}/xmltv.php?username={user}&password={pw}"
     try:
-        async with _hx_xmltv.AsyncClient(timeout=20.0, follow_redirects=True) as hx:
+        # 60s (was 20s): the guide files worth having are 18-41MB (kstv 22MB,
+        # an upstream host 27MB, limitless 41MB) and the box is often IO/CPU-busy.
+        # At 20s the future-rich panels missed the window while a small
+        # backwards-only catchup guide answered — producing a build where
+        # every programme already ended (the 2026-07-03 "EPG mostly empty").
+        async with _hx_xmltv.AsyncClient(timeout=60.0, follow_redirects=True) as hx:
             r = await hx.get(url, headers={"User-Agent": _BROWSER_HEADERS["User-Agent"]})
         if r.status_code != 200 or not r.content or not r.content.lstrip().startswith(b"<"):
             return {}
@@ -12875,6 +12900,56 @@ async def _build_lounge_epg() -> dict:
             unique.append(p)
         unique.sort(key=lambda p: p.get("start_utc", ""))
         merged[k] = unique
+
+    # ── Degraded-build guard (added 2026-07-03) ────────────────────────────
+    # When the future-rich panels miss the fetch window but a backwards-only
+    # catchup guide answers, the build looks plausible yet every programme
+    # already ended — cached for 6h that reads as "EPG empty / nothing
+    # upcoming" on 43 of 78 channels (the observed failure). Two defenses:
+    #   1. Per channel, if the PREVIOUS cache reaches further into the future
+    #      than this build, union the old guide in (deduped). The union only
+    #      happens on horizon regression, so on a healthy build schedule
+    #      corrections still replace the old data cleanly.
+    #   2. Flag the build degraded (raw future coverage <50% of channels that
+    #      have data) so _stamp_lounge_epg_cache shortens its trusted window.
+    # All timestamps here are "%Y-%m-%dT%H:%M:%SZ" strings (every producer:
+    # XMLTV _parse + sports schedules), so lexicographic compare is safe.
+    # Programmes that ended >24h ago are pruned to bound carry-forward growth
+    # (no guide UI scrolls back a day; this also caps the payload size).
+    global _lounge_epg_last_build_degraded
+    from datetime import datetime as _dt_dg, timezone as _tz_dg, timedelta as _td_dg
+    _now_dg   = _dt_dg.now(_tz_dg.utc)
+    now_iso   = _now_dg.strftime("%Y-%m-%dT%H:%M:%SZ")
+    prune_iso = (_now_dg - _td_dg(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with_data   = sum(1 for v in merged.values() if v)
+    with_future = sum(
+        1 for v in merged.values()
+        if v and max((p.get("stop_utc", "") for p in v), default="") > now_iso
+    )
+    _lounge_epg_last_build_degraded = with_data > 0 and (with_future / with_data) < 0.5
+    prev = _lounge_epg_cache.get("data") or {}
+    for k, old in prev.items():
+        if not old:
+            continue
+        old_max = max((p.get("stop_utc", "") for p in old), default="")
+        new_max = max((p.get("stop_utc", "") for p in merged.get(k, [])), default="")
+        if old_max <= new_max:
+            continue  # new build reaches at least as far — normal path
+        seen_np = {(p.get("title", ""), p.get("start_utc", "")) for p in merged.get(k, [])}
+        extra = [
+            p for p in old
+            if p.get("stop_utc", "") >= prune_iso
+            and (p.get("title", ""), p.get("start_utc", "")) not in seen_np
+        ]
+        if not extra:
+            continue
+        lst = merged.setdefault(k, [])
+        lst.extend(extra)
+        lst.sort(key=lambda p: p.get("start_utc", ""))
+    for k in list(merged.keys()):
+        merged[k] = [p for p in merged[k] if p.get("stop_utc", "") >= prune_iso]
+        if not merged[k]:
+            del merged[k]
     return merged
 
 
@@ -12888,11 +12963,9 @@ def _kick_lounge_epg_refresh() -> None:
 
     async def _run() -> None:
         global _lounge_epg_build_inflight
-        import time as _t_kr
         try:
             merged = await _build_lounge_epg()
-            _lounge_epg_cache["data"] = merged
-            _lounge_epg_cache["ts"]   = _t_kr.time()
+            _stamp_lounge_epg_cache(merged)
         except Exception:
             pass
         finally:
@@ -12928,8 +13001,7 @@ async def lounge_epg(channels: str = "") -> dict:
     if not have:
         # Cold cache — must build inline.
         merged = await _build_lounge_epg()
-        _lounge_epg_cache["data"] = merged
-        _lounge_epg_cache["ts"]   = now_ts
+        _stamp_lounge_epg_cache(merged)
     elif not fresh:
         # Have stale data — serve it, refresh in background.
         _kick_lounge_epg_refresh()
