@@ -9255,13 +9255,7 @@ async def _prewarm_lounge_epg() -> None:
     after a deploy was 504-ing through Vercel and timing out the lounge
     client. Pre-warming on startup eliminates the cold-cache window.
     """
-    async def _runner() -> None:
-        try:
-            merged = await _build_lounge_epg()
-            _stamp_lounge_epg_cache(merged)
-        except Exception:
-            pass
-    asyncio.create_task(_runner())
+    asyncio.create_task(_ensure_lounge_epg_built())
 
 
 @app.on_event("shutdown")
@@ -12384,33 +12378,18 @@ async def lounge_live_channels() -> dict:
     return {"channels": [], "cached": False, "warming": True}
 
 
-_epg_prewarm_inflight: bool = False
-
-
 def _kick_epg_prewarm() -> None:
-    """Fire-and-forget EPG cache build. No-op if cache is fresh or another
-    prewarm is already running. Always safe to call repeatedly."""
-    global _epg_prewarm_inflight
+    """Fire-and-forget EPG cache build. No-op if the cache is fresh; the
+    build itself is single-flighted. Always safe to call repeatedly."""
     import time as _t_pw
     have  = _lounge_epg_cache["data"] is not None
     fresh = have and (_t_pw.time() - _lounge_epg_cache["ts"] < _LOUNGE_EPG_TTL)
-    if fresh or _epg_prewarm_inflight:
+    if fresh:
         return
-    _epg_prewarm_inflight = True
-
-    async def _run() -> None:
-        global _epg_prewarm_inflight
-        try:
-            await lounge_epg("")  # builds + caches
-        except Exception:
-            pass
-        finally:
-            _epg_prewarm_inflight = False
-
     try:
-        asyncio.create_task(_run())
+        asyncio.create_task(_ensure_lounge_epg_built())
     except Exception:
-        _epg_prewarm_inflight = False
+        pass
 
 
 async def _build_lounge_payload() -> dict:
@@ -12721,6 +12700,7 @@ async def _fetch_upstream_xmltv(label: str, host: str, port: int, user: str, pw:
     each panel either supports XMLTV or it doesn't, and we don't retry the
     failures inline (the 6h cache absorbs them).
     """
+    import io as _io_xmltv
     import httpx as _hx_xmltv
     import xml.etree.ElementTree as ET
 
@@ -12736,63 +12716,81 @@ async def _fetch_upstream_xmltv(label: str, host: str, port: int, user: str, pw:
             r = await hx.get(url, headers={"User-Agent": _BROWSER_HEADERS["User-Agent"]})
         if r.status_code != 200 or not r.content or not r.content.lstrip().startswith(b"<"):
             return {}
-        root = ET.fromstring(r.content)
+        # Pathological-panel guard: a guide bigger than any real one we've seen
+        # (41MB) is a tarpit/HTML dump — don't try to parse it on a 2GB box.
+        if len(r.content) > 80 * 1024 * 1024:
+            return {}
     except Exception:
         return {}
 
-    # Map channel id → display-name (XMLTV uses tvg-id which we'll also
-    # match against). Programmes reference the channel id as `channel="…"`.
+    # Convert XMLTV start/stop ("20260504220000 +0000") to ISO 8601.
+    def _parse(ts: str) -> str:
+        try:
+            if not ts:
+                return ""
+            dt_part, _, tz_part = ts.partition(" ")
+            from datetime import datetime, timezone, timedelta
+            dt = datetime.strptime(dt_part, "%Y%m%d%H%M%S")
+            if tz_part and len(tz_part) == 5:
+                sign = 1 if tz_part[0] == "+" else -1
+                hh = int(tz_part[1:3])
+                mm = int(tz_part[3:5])
+                dt = dt.replace(tzinfo=timezone(sign * timedelta(hours=hh, minutes=mm)))
+            else:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except Exception:
+            return ts
+
+    # Stream-parse with iterparse + clear instead of ET.fromstring: a full DOM
+    # of a 20-40MB guide is hundreds of MB in CPython, and several guides being
+    # parsed concurrently OOM-looped the API worker (2026-07-03, 2GB box). The
+    # element husks are cleared as they complete so peak memory stays at the
+    # raw bytes + the extracted programme dicts. XMLTV lists <channel> elements
+    # before <programme>, so chan_names is complete by the time programmes use it.
     chan_names: dict[str, str] = {}
-    for ch in root.findall("channel"):
-        cid = ch.get("id") or ""
-        dn  = ch.findtext("display-name") or cid
-        chan_names[cid] = dn
-
     out: dict[str, list[dict]] = {}
-    for prog in root.findall("programme"):
-        cid    = prog.get("channel") or ""
-        start  = prog.get("start") or ""
-        stop   = prog.get("stop") or ""
-        title_el = prog.find("title")
-        title  = (title_el.text if title_el is not None else "") or ""
-        # XMLTV tags the title language ("<title lang='pl'>…"). Captured so the
-        # re-keying can reject a foreign-language guide landing on a US/CA channel
-        # (e.g. a Polish "Teletoon+" guide on our Canadian Teletoon).
-        tlang  = (title_el.get("lang") if title_el is not None else "") or ""
-        desc   = prog.findtext("desc")
-        if not cid or not title:
-            continue
-        # Convert XMLTV start/stop ("20260504220000 +0000") to ISO 8601.
-        def _parse(ts: str) -> str:
-            try:
-                if not ts:
-                    return ""
-                dt_part, _, tz_part = ts.partition(" ")
-                from datetime import datetime, timezone, timedelta
-                dt = datetime.strptime(dt_part, "%Y%m%d%H%M%S")
-                if tz_part and len(tz_part) == 5:
-                    sign = 1 if tz_part[0] == "+" else -1
-                    hh = int(tz_part[1:3])
-                    mm = int(tz_part[3:5])
-                    dt = dt.replace(tzinfo=timezone(sign * timedelta(hours=hh, minutes=mm)))
-                else:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            except Exception:
-                return ts
-
-        # Key the output by both id and display name so we can match either.
-        keys = {cid}
-        if cid in chan_names:
-            keys.add(chan_names[cid])
-        for k in keys:
-            out.setdefault(k, []).append({
-                "title":     title,
-                "start_utc": _parse(start),
-                "stop_utc":  _parse(stop),
-                "desc":      desc,
-                "lang":      tlang.lower()[:2],
-            })
+    try:
+        xml_root = None
+        for event, elem in ET.iterparse(_io_xmltv.BytesIO(r.content), events=("start", "end")):
+            if event == "start":
+                if xml_root is None:
+                    xml_root = elem
+                continue
+            if elem.tag == "channel":
+                cid = elem.get("id") or ""
+                chan_names[cid] = elem.findtext("display-name") or cid
+            elif elem.tag == "programme":
+                cid    = elem.get("channel") or ""
+                start  = elem.get("start") or ""
+                stop   = elem.get("stop") or ""
+                title_el = elem.find("title")
+                title  = (title_el.text if title_el is not None else "") or ""
+                # XMLTV tags the title language ("<title lang='pl'>…"). Captured so the
+                # re-keying can reject a foreign-language guide landing on a US/CA channel
+                # (e.g. a Polish "Teletoon+" guide on our Canadian Teletoon).
+                tlang  = (title_el.get("lang") if title_el is not None else "") or ""
+                desc   = elem.findtext("desc")
+                if cid and title:
+                    rec = {
+                        "title":     title,
+                        "start_utc": _parse(start),
+                        "stop_utc":  _parse(stop),
+                        "desc":      desc,
+                        "lang":      tlang.lower()[:2],
+                    }
+                    # Key the output by both id and display name so we can match either.
+                    out.setdefault(cid, []).append(rec)
+                    dn = chan_names.get(cid)
+                    if dn and dn != cid:
+                        out.setdefault(dn, []).append(rec)
+            else:
+                continue
+            elem.clear()
+            if xml_root is not None:
+                xml_root.clear()  # drop the accumulated child husks too
+    except Exception:
+        return {}
     return out
 
 
@@ -12827,16 +12825,24 @@ def _guide_is_foreign(programmes: list[dict]) -> bool:
     return hits / len(sample) > 0.40
 
 
-_lounge_epg_build_inflight: bool = False
-
-
 async def _build_lounge_epg() -> dict:
     """Build the EPG cache from XMLTV per upstream account + sports programs.
     Caller is responsible for mutating _lounge_epg_cache. Slow path —
     8-15s on cold cache; never call this on a request hot path."""
+    # Concurrency cap 3: each in-flight account holds its raw guide bytes
+    # (up to ~40MB) while parsing. Unbounded gather across ~30 accounts held
+    # them all at once and OOM-looped the 2GB box (2026-07-03). Typical fetch
+    # is 1-17s so the cap costs little wall-clock; only dead panels (60s
+    # timeout) occupy a slot for long.
+    _xmltv_sem = asyncio.Semaphore(3)
+
+    async def _one_account(label: str, host: str, port: int, user: str, pw: str) -> dict:
+        async with _xmltv_sem:
+            return await _fetch_upstream_xmltv(label, host, port, user, pw)
+
     per_account = await asyncio.gather(
         *[
-            _fetch_upstream_xmltv(label, host, port, user, pw)
+            _one_account(label, host, port, user, pw)
             for label, host, port, user, pw in _upstream_ACCOUNTS
         ],
         return_exceptions=True,
@@ -12953,28 +12959,37 @@ async def _build_lounge_epg() -> dict:
     return merged
 
 
+_lounge_epg_build_task: "asyncio.Task | None" = None
+
+
+async def _ensure_lounge_epg_built() -> None:
+    """Single-flight EPG build: every caller (cold-cache requests, the startup
+    prewarm, background refreshes) awaits the SAME build task. Before this,
+    each request that arrived on a cold cache started its OWN build — after a
+    restart, a handful of polling clients meant several concurrent 30-account
+    fetch+parse passes, which pinned the CPU and OOM-looped the 2GB box
+    (2026-07-03). Exceptions are swallowed inside the task: awaiters just see
+    an unchanged cache and serve what's there (possibly empty) — the next
+    caller starts a fresh attempt because the failed task is done()."""
+    global _lounge_epg_build_task
+    if _lounge_epg_build_task is None or _lounge_epg_build_task.done():
+        async def _do() -> None:
+            try:
+                merged = await _build_lounge_epg()
+                _stamp_lounge_epg_cache(merged)
+            except Exception:
+                pass
+        _lounge_epg_build_task = asyncio.create_task(_do())
+    await _lounge_epg_build_task
+
+
 def _kick_lounge_epg_refresh() -> None:
     """Fire-and-forget rebuild of the EPG cache. No-op if a build is
-    already inflight. Always safe to call repeatedly."""
-    global _lounge_epg_build_inflight
-    if _lounge_epg_build_inflight:
-        return
-    _lounge_epg_build_inflight = True
-
-    async def _run() -> None:
-        global _lounge_epg_build_inflight
-        try:
-            merged = await _build_lounge_epg()
-            _stamp_lounge_epg_cache(merged)
-        except Exception:
-            pass
-        finally:
-            _lounge_epg_build_inflight = False
-
+    already inflight (single-flighted). Always safe to call repeatedly."""
     try:
-        asyncio.create_task(_run())
+        asyncio.create_task(_ensure_lounge_epg_built())
     except Exception:
-        _lounge_epg_build_inflight = False
+        pass
 
 
 @app.get("/lounge/epg")
@@ -12999,9 +13014,8 @@ async def lounge_epg(channels: str = "") -> dict:
     fresh  = have and (now_ts - _lounge_epg_cache["ts"] < _LOUNGE_EPG_TTL)
 
     if not have:
-        # Cold cache — must build inline.
-        merged = await _build_lounge_epg()
-        _stamp_lounge_epg_cache(merged)
+        # Cold cache — block on the (single-flighted) build.
+        await _ensure_lounge_epg_built()
     elif not fresh:
         # Have stale data — serve it, refresh in background.
         _kick_lounge_epg_refresh()
