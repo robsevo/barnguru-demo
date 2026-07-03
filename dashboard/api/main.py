@@ -11406,6 +11406,22 @@ def _title_region(title: str) -> str:
     return ""
 
 
+# TEMPORARY demote list (2026-07-03): hosts whose panel ANSWERS (player_api +
+# xmltv fine, active_cons=0) but whose stream origin is hung — every /play
+# request times out. With inline verification removed (it OOM'd the box),
+# priority order kept handing an upstream host out as primary for most cable
+# channels ("some live sources don't work"). Candidates from these hosts sort
+# LAST everywhere so any working alternative wins; channels with no
+# alternative keep them (better than nothing) and they rejoin the top
+# automatically when removed from this set. EPG (xmltv) and VOD fetches from
+# the host are unaffected. Remove once its streams verify again.
+_LIVE_STREAM_DEMOTED_HOSTS: frozenset[str] = frozenset({"an upstream host.ddns.net"})
+
+
+def _live_demoted(url: str) -> bool:
+    return any(h in url for h in _LIVE_STREAM_DEMOTED_HOSTS)
+
+
 def _sort_by_url_priority(candidates: list[dict], ch_name: str | None = None) -> list[dict]:
     """Sort channel candidates for initial game-page playback.
 
@@ -11457,9 +11473,11 @@ def _sort_by_url_priority(candidates: list[dict], ch_name: str | None = None) ->
             return 1
         return 0 if r == expected else 2
 
-    def _key(m: dict) -> tuple[int, int, int, int]:
+    def _key(m: dict) -> tuple[int, int, int, int, int]:
         is_an upstream host = 0 if "an upstream host" in m["url"] else 1
-        return (is_an upstream host, _region_axis(m), _quality_score(m.get("title", ""), m["url"]), _host_prio(m))
+        # Stream-dead demoted hosts lose to everything, including an upstream host-first.
+        return (1 if _live_demoted(m["url"]) else 0,
+                is_an upstream host, _region_axis(m), _quality_score(m.get("title", ""), m["url"]), _host_prio(m))
 
     return sorted(candidates, key=_key)
 
@@ -12015,7 +12033,10 @@ async def _build_barncentre_payload() -> dict:
         if an upstream host_cands:
             chosen = an upstream host_cands[0]["url"]
         else:
-            upstream_cands = [c for c in candidates if _is_upstream(c["url"])]
+            # Stream-dead demoted hosts don't get the upstream bias — any working
+            # alternative (incl. non-upstream) must be able to win the primary.
+            upstream_cands = [c for c in candidates
+                            if _is_upstream(c["url"]) and not _live_demoted(c["url"])]
             chosen = (upstream_cands[0] if upstream_cands else candidates[0])["url"]
 
         # Run liveness check on the chosen primary. If it's alive, keep it.
@@ -12547,13 +12568,19 @@ async def _build_lounge_payload() -> dict:
             if an upstream host_cands:
                 chosen = an upstream host_cands[0]["url"]
         if not chosen:
-            upstream_cands = [c for c in candidates if _is_upstream(c["url"])]
+            # Stream-dead demoted hosts don't get the upstream bias — any working
+            # alternative (incl. non-upstream) must be able to win the primary.
+            upstream_cands = [c for c in candidates
+                            if _is_upstream(c["url"]) and not _live_demoted(c["url"])]
             pool = upstream_cands if upstream_cands else candidates
             # Prefer a NEVER-BUSY (unlimited/multi-connection) account for the primary
             # so a known 1-connection account can't become the default source and 456
-            # the channel. max() keeps priority order within equal capacity (stable).
+            # the channel. max() keeps priority order within equal capacity (stable);
+            # demoted hosts rank below everything so they only win when alone.
             chosen = max(
-                pool, key=lambda c: _account_cap_rank(_backup_upstream_host(c["url"]))
+                pool,
+                key=lambda c: (-1_000_000 if _live_demoted(c["url"]) else 0)
+                + _account_cap_rank(_backup_upstream_host(c["url"])),
             )["url"]
 
         # NO inline verification. Cold-build verification was the OOM root
@@ -12597,7 +12624,8 @@ async def _build_lounge_payload() -> dict:
         # Order: primary's host LAST, then higher CAPACITY first (never-busy accounts
         # lead the failover chain), then original priority within equal capacity.
         _orig_idx = {h: i for i, h in enumerate(host_order)}
-        host_order.sort(key=lambda h: (h == chosen_host, -_account_cap_rank(h), _orig_idx[h]))
+        host_order.sort(key=lambda h: (h == chosen_host, _live_demoted(h),
+                                       -_account_cap_rank(h), _orig_idx[h]))
         backup_src: list[str] = []
         for rank in range(3):
             for h in host_order:
