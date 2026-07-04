@@ -141,6 +141,10 @@ export default function FloatingPlayer() {
   // PiP and the main game-page player symmetric.
   const lowQualityRef  = useRef(false);
   const resolvedUrlRef = useRef<string | null>(null);
+  // One-shot guard: a native-HLS (iOS/Safari) failure gets a single automatic
+  // reattach before the error overlay shows. PiP has no URL chain to fail over
+  // to, so a lone reattach is the only honest recovery here.
+  const autoReattachRef = useRef(false);
   const [reattachToken,  setReattachToken]  = useState(0);
   const [downgradeNotice, setDowngradeNotice] = useState(false);
 
@@ -148,6 +152,7 @@ export default function FloatingPlayer() {
   useEffect(() => {
     lowQualityRef.current = false;
     resolvedUrlRef.current = null;
+    autoReattachRef.current = false;
     setDowngradeNotice(false);
   }, [stream?.url]);
 
@@ -161,6 +166,7 @@ export default function FloatingPlayer() {
 
     let hlsInstance: import("hls.js").default | null = null;
     let cancelled = false;
+    const cleanups: Array<() => void> = [];
 
     const attach = async () => {
       // Embed-only streams: skip server-side resolve (server IP is blocked by these sites).
@@ -202,6 +208,26 @@ export default function FloatingPlayer() {
             videoEl.src = src;
             setLoading(false);
             videoEl.play().catch(() => {});
+            // Native HLS (iOS/Safari): hls.js isn't driving playback, so the
+            // ERROR/recovery handlers below never fire. Give the PiP player one
+            // automatic reattach on a hard media error, or a startup that never
+            // reaches HAVE_CURRENT_DATA within 15s, before surfacing the error.
+            const onNativeErr = () => {
+              if (cancelled) return;
+              if (!autoReattachRef.current) {
+                autoReattachRef.current = true;
+                setReattachToken((n) => n + 1);
+              } else {
+                setError("stream unavailable");
+                setLoading(false);
+              }
+            };
+            videoEl.addEventListener("error", onNativeErr);
+            cleanups.push(() => videoEl.removeEventListener("error", onNativeErr));
+            const startupT = setTimeout(() => {
+              if (!cancelled && videoEl.readyState < 2) onNativeErr();
+            }, 15000);
+            cleanups.push(() => clearTimeout(startupT));
           } else {
             setError("format not supported");
             setLoading(false);
@@ -293,6 +319,7 @@ export default function FloatingPlayer() {
     attach();
     return () => {
       cancelled = true;
+      cleanups.forEach((fn) => { try { fn(); } catch { /* ignore */ } });
       hlsInstance?.destroy();
     };
   }, [stream?.url, videoEl, reattachToken]); // eslint-disable-line react-hooks/exhaustive-deps
