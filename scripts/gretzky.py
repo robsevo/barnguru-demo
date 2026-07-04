@@ -401,7 +401,26 @@ def _run_cmd(cmd: Cmd, passthrough: list[str]) -> int:
 # Main
 # ---------------------------------------------------------------------------
 
+def _deprioritize_for_oom() -> None:
+    """Make this training run the kernel's preferred OOM victim.
+
+    The nightly runs the heavy models (RAPM/xG/WAR/…) on the same ~2GB box that
+    serves the streaming API (Origin-guru-api). Under memory pressure the OOM
+    killer should sacrifice THIS process — a skipped nightly is recoverable —
+    rather than the API, which would cut live TV. Raising our own oom_score_adj
+    needs no privilege (only LOWERING below 0 does); commands run in-process here
+    and any forked workers (polars/rust) inherit the score. Best-effort: silently
+    skip where /proc isn't writable (local dev, some containers).
+    """
+    try:
+        with open("/proc/self/oom_score_adj", "w") as f:
+            f.write("700")
+    except Exception:
+        pass
+
+
 def main() -> None:
+    _deprioritize_for_oom()
     args = sys.argv[1:]
 
     # No args → print command list
