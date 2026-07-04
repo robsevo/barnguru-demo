@@ -10009,25 +10009,22 @@ for _row in _load_dynamic_upstream_accounts():
 # residential address). Empty ⇒ direct-to-provider fallback.
 _upstream_HOSTS: frozenset[str] = frozenset(h for _, h, *_ in _upstream_ACCOUNTS)
 
-# Account pools per subsystem. All three now span the FULL scraped+hardcoded pool;
-# the heavy builders are made memory-safe by BOUNDING concurrency, not by capping
-# the account count (a cap dropped real sources — a title/channel carried only by a
-# scraped panel past the cutoff simply had none).
-#   • VOD-INDEX builders (_build_vod_stream_index / _build_series_loc_index) fetch
-#     get_vod_streams + get_series PER account (5-50MB JSON each). An UNBOUNDED
-#     gather across the pool held them all at once and emptied movies around ~20
-#     accounts on the 2GB box — which is why VOD was capped at 16. Now bounded by
-#     Semaphore(3) in _gather_vod_accounts (the same guard EPG's build uses), so VOD
-#     spans the full pool: dead accounts among the first 16 no longer shadow working
-#     ones beyond index 16. Extra headroom for this came from offloading the EPG
-#     build off-box (data/lounge_epg.json). Raised 2026-07-04.
-#   • The LIVE build (_src_upstream → per-channel match + liveness verify) uses the
-#     full pool; the old cold-build STACKING that pegged the box is fixed by
-#     single-flighting the cold path. SWR + the deploy warm step cover the one-time
-#     slow cold build.
-# EPG spans the full pool too (bounded Semaphore(3); usually served from the
-# off-box shipped file now anyway).
-_VOD_ACCOUNTS: list[tuple[str, str, int, str, str]] = _upstream_ACCOUNTS
+# Per-subsystem account caps (decoupled 2026-06-29/30). The scraper accumulates
+# up to 24 working accounts, but fanning the heavy builders across all of them is
+# too much for the 2GB box:
+#   • VOD-INDEX builders (_build_vod_stream_index / _build_series_loc_index / the
+#     _fetch_upstream_vod catalog) fetch get_vod_streams + get_series PER account —
+#     emptied movies at ~20.
+#   • The LIVE build (_src_upstream → per-channel match + liveness verify) got slow
+#     at the full pool, but the COLD-BUILD STACKING (not the account count) was what
+#     pegged the box — and that's now fixed by single-flighting the cold path
+#     (iptv_channels / lounge_live_channels share one build). So live uses the FULL
+#     pool again: capping it to 16 dropped real per-channel backups (e.g. a 3rd
+#     TSN1 source from a scraped panel beyond index 16). SWR + the deploy warm step
+#     cover the one-time slow cold build.
+# EPG keeps the full pool too (its xmltv fetch is light + 1h-cached).
+_VOD_MAX_ACCOUNTS = 16
+_VOD_ACCOUNTS: list[tuple[str, str, int, str, str]] = _upstream_ACCOUNTS[:_VOD_MAX_ACCOUNTS]
 _LIVE_ACCOUNTS: list[tuple[str, str, int, str, str]] = _upstream_ACCOUNTS
 
 # ---------------------------------------------------------------------------
@@ -13206,34 +13203,15 @@ def _vod_dead_hosts() -> set[str]:
         return set()
 
 
-async def _gather_vod_accounts(
-    accounts: list[tuple[str, str, int, str, str]],
-) -> list:
-    """Bounded fan-out of _fetch_upstream_vod_legacy across `accounts`.
-
-    get_vod_streams/get_series payloads are 5-50MB JSON each; an unbounded gather
-    across the pool materialized them all at once and emptied the movies index
-    around ~20 accounts on the 2GB box (why VOD used to cap at 16). Semaphore(3)
-    keeps at most 3 accounts in flight — the same memory guard _build_lounge_epg
-    uses — so the VOD builders can span the full ~30-account pool safely."""
-    _sem = asyncio.Semaphore(3)
-
-    async def _one(label: str, host: str, port: int, user: str, pw: str) -> dict:
-        async with _sem:
-            return await _fetch_upstream_vod_legacy(label, host, port, user, pw)
-
-    return await asyncio.gather(
-        *[_one(label, host, port, user, pw)
-          for label, host, port, user, pw in accounts],
-        return_exceptions=True,
-    )
-
-
 async def _build_vod_stream_index() -> dict[str, list[str]]:
     """{tmdb_id: [relay /vod URLs]} from all accounts' get_vod_streams.
     _fetch_upstream_vod_legacy already builds direct URLs + drops Spanish entries.
     Sources from known-dead hosts (data/vod_dead_hosts.json) are excluded."""
-    per = await _gather_vod_accounts(_VOD_ACCOUNTS)
+    per = await asyncio.gather(
+        *[_fetch_upstream_vod_legacy(label, host, port, user, pw)
+          for label, host, port, user, pw in _VOD_ACCOUNTS],
+        return_exceptions=True,
+    )
     from urllib.parse import urlparse as _u
     dead = _vod_dead_hosts()
     idx: dict[str, list[str]] = {}
@@ -13329,7 +13307,11 @@ def _norm_series_name(name: str) -> str:
 
 
 async def _build_series_loc_index() -> dict[str, list[dict]]:
-    per = await _gather_vod_accounts(_VOD_ACCOUNTS)
+    per = await asyncio.gather(
+        *[_fetch_upstream_vod_legacy(label, host, port, user, pw)
+          for label, host, port, user, pw in _VOD_ACCOUNTS],
+        return_exceptions=True,
+    )
     dead = _vod_dead_hosts()
     idx: dict[str, list[dict]] = {}
     for r in per:
