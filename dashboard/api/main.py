@@ -13203,15 +13203,37 @@ def _vod_dead_hosts() -> set[str]:
         return set()
 
 
+async def _gather_vod_accounts(
+    accounts: list[tuple[str, str, int, str, str]],
+) -> list:
+    """Bounded fan-out of _fetch_upstream_vod_legacy across `accounts`.
+
+    Some accounts' get_vod_streams payloads are large (an upstream host is ~24MB / 76k
+    movies). An UNBOUNDED gather held every account's payload in memory at once
+    and, as those catalogs grew, the movie-index build stopped completing on the
+    2GB box (silent: the movie index just stayed empty → 0 direct sources, while
+    the lighter series build still succeeded). Semaphore(3) — the same guard the
+    EPG build uses — keeps at most 3 accounts materialized at once. Concurrency
+    only; the account set is unchanged, so build latency stays low (a title
+    verified present on an upstream host re-appears within one build)."""
+    _sem = asyncio.Semaphore(3)
+
+    async def _one(label: str, host: str, port: int, user: str, pw: str) -> dict:
+        async with _sem:
+            return await _fetch_upstream_vod_legacy(label, host, port, user, pw)
+
+    return await asyncio.gather(
+        *[_one(label, host, port, user, pw)
+          for label, host, port, user, pw in accounts],
+        return_exceptions=True,
+    )
+
+
 async def _build_vod_stream_index() -> dict[str, list[str]]:
     """{tmdb_id: [relay /vod URLs]} from all accounts' get_vod_streams.
     _fetch_upstream_vod_legacy already builds direct URLs + drops Spanish entries.
     Sources from known-dead hosts (data/vod_dead_hosts.json) are excluded."""
-    per = await asyncio.gather(
-        *[_fetch_upstream_vod_legacy(label, host, port, user, pw)
-          for label, host, port, user, pw in _VOD_ACCOUNTS],
-        return_exceptions=True,
-    )
+    per = await _gather_vod_accounts(_VOD_ACCOUNTS)
     from urllib.parse import urlparse as _u
     dead = _vod_dead_hosts()
     idx: dict[str, list[str]] = {}
@@ -13307,11 +13329,7 @@ def _norm_series_name(name: str) -> str:
 
 
 async def _build_series_loc_index() -> dict[str, list[dict]]:
-    per = await asyncio.gather(
-        *[_fetch_upstream_vod_legacy(label, host, port, user, pw)
-          for label, host, port, user, pw in _VOD_ACCOUNTS],
-        return_exceptions=True,
-    )
+    per = await _gather_vod_accounts(_VOD_ACCOUNTS)
     dead = _vod_dead_hosts()
     idx: dict[str, list[dict]] = {}
     for r in per:
