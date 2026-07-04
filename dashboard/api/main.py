@@ -13833,9 +13833,10 @@ _LOUNGE_VOD_PROVIDER_IDS_CA: dict[str, list[int]] = {
 
 # Pages per service per kind. TMDB returns 20 results per page.
 #   25 pages × 20 = 500 titles per service per kind.
-# With 9 services × 2 kinds = 18 catalog rails of 500 titles each.
-# Catalog build: ~360 TMDB calls in parallel, ~30-45s cold (httpx pooling
-# keeps it bounded). Cached 24h (_LOUNGE_VOD_TTL).
+# With 9 services × 2 kinds × 2 regions = 36 catalog rails of up to 500 titles.
+# Catalog build fans out ~900 TMDB calls, capped to 8 concurrent (Semaphore in
+# _build_vod_catalog_tmdb) with 429 backoff+retry so the throttle can't truncate
+# rails — ~40-90s cold, cached 24h (_LOUNGE_VOD_TTL).
 _TMDB_DISCOVER_PAGES = 25
 
 
@@ -13863,6 +13864,7 @@ async def _tmdb_discover_titles(
     service: str,
     provider_ids: list[int],
     region: str = "CA",
+    sem: "asyncio.Semaphore | None" = None,
 ) -> list[dict]:
     """Pull popular titles for one (service, kind) from TMDB /discover.
 
@@ -13875,29 +13877,53 @@ async def _tmdb_discover_titles(
     out: list[dict] = []
     seen: set[int] = set()
     auth_headers, auth_params = _tmdb_creds()
+    if sem is None:
+        sem = asyncio.Semaphore(8)
     for page in range(1, _TMDB_DISCOVER_PAGES + 1):
-        try:
-            r = await hx.get(
-                f"https://api.themoviedb.org/3/discover/{path}",
-                headers=auth_headers,
-                params={
-                    **auth_params,
-                    "language": "en-US",
-                    "watch_region": region,
-                    "with_watch_providers": "|".join(str(x) for x in provider_ids),
-                    "sort_by": "popularity.desc",
-                    "page": page,
-                    # Drop adult content and completely unrated items.
-                    "include_adult": "false",
-                },
-                timeout=12.0,
-            )
+        # Fetch one page, retrying on TMDB throttle. A 429 used to hit the plain
+        # `break` and truncate the WHOLE rail to page 1 — the cause of the
+        # "~20 titles per service after a cold rebuild" shrink. Back off (honoring
+        # Retry-After) and retry the SAME page instead; the shared `sem` keeps
+        # total concurrency low enough to rarely trip the throttle at all.
+        results = None
+        for attempt in range(5):
+            try:
+                async with sem:
+                    r = await hx.get(
+                        f"https://api.themoviedb.org/3/discover/{path}",
+                        headers=auth_headers,
+                        params={
+                            **auth_params,
+                            "language": "en-US",
+                            "watch_region": region,
+                            "with_watch_providers": "|".join(str(x) for x in provider_ids),
+                            "sort_by": "popularity.desc",
+                            "page": page,
+                            # Drop adult content and completely unrated items.
+                            "include_adult": "false",
+                        },
+                        timeout=12.0,
+                    )
+            except Exception:
+                await asyncio.sleep(0.5 * (attempt + 1))
+                continue
+            if r.status_code == 429:
+                try:
+                    wait = float(r.headers.get("retry-after", "1") or "1")
+                except ValueError:
+                    wait = 1.0
+                await asyncio.sleep(min(wait, 8.0) + 0.25 * attempt)
+                continue
             if r.status_code != 200:
+                results = []  # non-retryable (e.g. 404) — stop this rail
                 break
-            results = (r.json() or {}).get("results") or []
-        except Exception:
+            try:
+                results = (r.json() or {}).get("results") or []
+            except Exception:
+                results = []
             break
         if not results:
+            # empty page (natural end of rail), hard error, or retries exhausted
             break
         for it in results:
             tid = it.get("id")
@@ -13968,7 +13994,13 @@ async def _build_vod_catalog_tmdb() -> dict:
     movies: list[dict] = []
     series: list[dict] = []
 
-    async with _hx_tmdb_cat.AsyncClient(timeout=20.0, follow_redirects=True) as hx:
+    # Bound total concurrent TMDB requests so a full 25-page × 36-rail rebuild
+    # stays under TMDB's throttle. Unbounded (httpx's default pool is 100), a
+    # cold rebuild 429s partway and rails truncate to ~20 titles — the catalog
+    # shrink seen right after an API restart clears the cache.
+    _sem = asyncio.Semaphore(8)
+    _limits = _hx_tmdb_cat.Limits(max_connections=8, max_keepalive_connections=8)
+    async with _hx_tmdb_cat.AsyncClient(timeout=20.0, follow_redirects=True, limits=_limits) as hx:
         # Discovery in parallel across 2 regions (CA + US). Region matters
         # because TMDB watch-providers is region-specific: HBO Max/Hulu/
         # Peacock only return titles for region=US. Many titles dedupe
@@ -13977,8 +14009,8 @@ async def _build_vod_catalog_tmdb() -> dict:
         tasks = []
         for region in ("CA", "US"):
             for svc, ids in _LOUNGE_VOD_PROVIDER_IDS_CA.items():
-                tasks.append(_tmdb_discover_titles(hx, api_key, "movie",  svc, ids, region=region))
-                tasks.append(_tmdb_discover_titles(hx, api_key, "series", svc, ids, region=region))
+                tasks.append(_tmdb_discover_titles(hx, api_key, "movie",  svc, ids, region=region, sem=_sem))
+                tasks.append(_tmdb_discover_titles(hx, api_key, "series", svc, ids, region=region, sem=_sem))
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for r in results:
             if isinstance(r, BaseException) or not r:
