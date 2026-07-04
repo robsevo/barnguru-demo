@@ -12721,6 +12721,52 @@ def _stamp_lounge_epg_cache(merged: dict) -> None:
     _lounge_epg_cache["ts"]   = ts
 
 
+# ── Off-box EPG: read a laptop-built guide shipped to the box ───────────────
+# The XMLTV build (fetch ~30 panels × 18-41MB, then parse) is the heaviest thing
+# this box does and the historical OOM cause. A daily `make epg-ship` on a laptop
+# builds the SAME merged cable guide off-box and ships it here as
+# data/lounge_epg.json; _build_lounge_epg loads it as the cable base (then folds
+# in the on-box SPORTS programmes as usual) instead of doing the fetch itself.
+# Pure optimization — a missing/stale/corrupt file falls through to the on-box
+# self-build. Live streaming is a separate code path and never touches any of this.
+_LOUNGE_EPG_FILE = Path(os.environ.get(
+    "LOUNGE_EPG_FILE",
+    str(Path(__file__).resolve().parents[2] / "data" / "lounge_epg.json")))
+# Tolerate one missed daily run; past this the shipped guide is too old to trust
+# and the box self-builds.
+_LOUNGE_EPG_SHIP_MAX_AGE = 36 * 3600
+# (mtime, channels, built_utc) — re-parse the file only when its mtime changes,
+# so a freshly-rsynced file is picked up with no restart and an unchanged file
+# isn't re-parsed on every build. Mirrors _dynamic_hosts() in iptv_relay.py.
+_shipped_epg_cache: "tuple[float, dict, str]" = (0.0, {}, "")
+
+
+def _load_shipped_lounge_epg() -> "tuple[dict, str] | None":
+    """(channels, built_utc) from the laptop-built shipped guide, or None when the
+    file is missing / empty / unparseable. mtime-cached: unchanged file returns the
+    cached parse; a changed file is re-read once."""
+    global _shipped_epg_cache
+    try:
+        mtime = _LOUNGE_EPG_FILE.stat().st_mtime
+    except OSError:
+        return None
+    if mtime == _shipped_epg_cache[0]:
+        ch = _shipped_epg_cache[1]
+        return (ch, _shipped_epg_cache[2]) if ch else None
+    try:
+        doc = json.loads(_LOUNGE_EPG_FILE.read_text())
+        channels = doc.get("channels") or {}
+        built_utc = doc.get("built_utc") or ""
+        if not isinstance(channels, dict) or not channels:
+            _shipped_epg_cache = (mtime, {}, "")
+            return None
+    except (OSError, ValueError):
+        _shipped_epg_cache = (mtime, {}, "")
+        return None
+    _shipped_epg_cache = (mtime, channels, built_utc)
+    return (channels, built_utc)
+
+
 async def _fetch_upstream_xmltv(label: str, host: str, port: int, user: str, pw: str) -> dict[str, list[dict]]:
     """Hit one upstream account's xmltv.php and return {channel_id: [programmes]}.
 
@@ -12853,10 +12899,12 @@ def _guide_is_foreign(programmes: list[dict]) -> bool:
     return hits / len(sample) > 0.40
 
 
-async def _build_lounge_epg() -> dict:
-    """Build the EPG cache from XMLTV per upstream account + sports programs.
-    Caller is responsible for mutating _lounge_epg_cache. Slow path —
-    8-15s on cold cache; never call this on a request hot path."""
+async def _self_build_cable_epg() -> dict[str, list[dict]]:
+    """Fetch xmltv.php from every _upstream_ACCOUNTS and re-key it to our channel
+    names — the cable EPG base, WITHOUT the on-box sports fold-in. This is the
+    heavy path (fetch ~30 panels × 18-41MB); _build_lounge_epg only calls it when
+    no fresh laptop-shipped guide is available. Memory-safe: Semaphore(3),
+    iterparse+clear per account, 80MB body cutoff (all in _fetch_upstream_xmltv)."""
     # Concurrency cap 3: each in-flight account holds its raw guide bytes
     # (up to ~40MB) while parsing. Unbounded gather across ~30 accounts held
     # them all at once and OOM-looped the 2GB box (2026-07-03). Typical fetch
@@ -12914,6 +12962,35 @@ async def _build_lounge_epg() -> dict:
             good = [p for p in v if not _junk_title.match(p.get("title", "") or "")]
             if good:
                 merged.setdefault(our, []).extend(good)
+    return merged
+
+
+async def _build_lounge_epg() -> dict:
+    """Build the EPG cache: a cable base — a fresh laptop-shipped guide if present,
+    else an on-box self-build — with the on-box live SPORTS programmes folded in.
+    Caller mutates _lounge_epg_cache. Slow (8-15s) only on the self-build path; the
+    shipped-file path is a JSON parse + fold-in (sub-second)."""
+    # Off-box fast path: prefer a fresh laptop-built guide (data/lounge_epg.json,
+    # shipped daily by `make epg-ship`) as the cable base instead of fetching ~30
+    # panels here — the build that OOM-looped the 2GB box. A missing/stale/corrupt
+    # file falls through to the on-box self-build. Streaming is a separate code
+    # path and is unaffected either way.
+    merged: "dict[str, list[dict]] | None" = None
+    shipped = _load_shipped_lounge_epg()
+    if shipped is not None:
+        from datetime import datetime as _dt_sh, timezone as _tz_sh
+        try:
+            built = _dt_sh.fromisoformat((shipped[1] or "").replace("Z", "+00:00"))
+            age = (_dt_sh.now(_tz_sh.utc) - built).total_seconds()
+        except ValueError:
+            age = _LOUNGE_EPG_SHIP_MAX_AGE + 1.0  # unparseable stamp → treat as stale
+        if 0 <= age < _LOUNGE_EPG_SHIP_MAX_AGE:
+            # Mutable shallow copy: never mutate the mtime-cache's held dict, and
+            # never deepcopy a multi-MB structure on the 2GB box (the programme
+            # dicts downstream are only read + reordered, never mutated in place).
+            merged = {k: list(v) for k, v in shipped[0].items()}
+    if merged is None:
+        merged = await _self_build_cable_epg()
     # Fold in sports programs from the Lounge channel list (already
     # populated when /lounge/live-channels last ran).
     if isinstance(_lounge_cache.get("data"), list):
@@ -13021,12 +13098,16 @@ def _kick_lounge_epg_refresh() -> None:
 
 
 @app.get("/lounge/epg")
-async def lounge_epg(channels: str = "") -> dict:
+async def lounge_epg(channels: str = "", refresh: str = "") -> dict:
     """Programme listings for the next ~48h on the requested channels.
 
     Returns `{channel_name: [programmes]}`. `channels` is a comma-separated
     list of names from /lounge/live-channels (e.g. "HBO,FX,AMC"). Empty
     string returns all known programmes.
+
+    `refresh=1` forces a rebuild before serving — used by the ship-epg workflow
+    right after it rsyncs a new data/lounge_epg.json so the box picks the file up
+    with no restart (the build re-reads the shipped file, whose mtime changed).
 
     SWR semantics:
       - Fresh cache → return immediately.
@@ -13040,8 +13121,15 @@ async def lounge_epg(channels: str = "") -> dict:
     now_ts = _t_epg.time()
     have   = _lounge_epg_cache["data"] is not None
     fresh  = have and (now_ts - _lounge_epg_cache["ts"] < _LOUNGE_EPG_TTL)
+    force  = refresh.strip().lower() not in ("", "0", "false", "no")
 
-    if not have:
+    if force:
+        # Explicit refresh — force a rebuild (single-flighted) so a just-shipped
+        # data/lounge_epg.json is picked up now, then serve it. Blocking is fine:
+        # the shipped-file path is a sub-second JSON parse + sports fold-in.
+        await _ensure_lounge_epg_built()
+        fresh = True
+    elif not have:
         # Cold cache — block on the (single-flighted) build.
         await _ensure_lounge_epg_built()
     elif not fresh:

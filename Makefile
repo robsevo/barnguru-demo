@@ -1,4 +1,4 @@
-.PHONY: test test-rust test-python test-integration build-engine clean dev gretzky
+.PHONY: test test-rust test-python test-integration build-engine clean dev gretzky epg-ship
 
 ## Run all tests (Rust unit/integration + Python smoke + Python integration)
 test: test-rust build-engine test-python test-integration
@@ -27,6 +27,11 @@ dev: build-engine
 ## Run GRETZKY dispatcher (e.g. make gretzky CMD=sync  or  make gretzky CMD=all)
 gretzky:
 	uv run python scripts/gretzky.py $(CMD)
+
+## Build the merged cable EPG locally + ship it to the box (daily; offloads the
+## OOM-prone on-box XMLTV build). Pass flags via ARGS, e.g. make epg-ship ARGS=--dry-run
+epg-ship:
+	uv run python scripts/gretzky.py epg-ship -- $(ARGS)
 
 ## Clean build artifacts
 clean:

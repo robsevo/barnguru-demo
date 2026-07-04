@@ -71,6 +71,9 @@ COMMANDS: list[Cmd] = [
     Cmd("check-iptv", "phase1",
         "Test each saved IPTV channel URL and write iptv_status.json with working/broken status",
         "scripts.check_iptv"),
+    Cmd("epg-ship", "phase1",
+        "Build the merged cable EPG locally + publish it to the box (offloads the OOM-prone on-box XMLTV build)",
+        "scripts.epg_ship"),
 
     # ── Phase 2 — Player Rating Models ───────────────────────────────────
     Cmd("train-xg",   "phase2", "Train xG Finishing model (MoneyPuck shots)",

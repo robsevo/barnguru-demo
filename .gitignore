@@ -87,3 +87,6 @@ cv-static/
 # IPTV freshness runtime artifacts (regenerated on the self-hosted runner; contain creds)
 data/dynamic_upstream_accounts.json
 data/relay_allowed_hosts.json
+# Off-box EPG snapshot: built by `make epg-ship` on a laptop, shipped to the box as
+# a GitHub Release asset (not via git). Never committed. See scripts/epg_ship.py.
+data/lounge_epg.json
