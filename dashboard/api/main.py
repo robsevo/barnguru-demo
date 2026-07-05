@@ -12388,10 +12388,43 @@ _LOUNGE_FOREIGN_OK: set[str] = {"Sky Sport Bundesliga", "LaLiga TV"}
 # Bob populates as he discovers them.
 _LOUNGE_HOST_BLOCKLIST: dict[str, set[str]] = {}
 
-# Channel number = position in the curated list (1-indexed). Surfaced on
-# the API as `channel_number` so the client can sort the EPG by it.
+# Guide adjacency: keep sub-brand channels next to their parent in the guide.
+# The guide sorts by (type, channel_number); some siblings were appended to the
+# list far from their parent (ESPNU/ESPNews/ESPN+ ended up at the bottom of the
+# Sports block, away from ESPN/ESPN2 which come from the BarnCentre spread), so
+# they scattered. This map slots each follower immediately AFTER its anchor in
+# the number ordering only — it does NOT touch _LOUNGE_CHANNEL_NAMES (matching)
+# or the BarnCentre list (the other app). Followers keep their single source of
+# truth in _LOUNGE_CHANNEL_NAMES; here we only renumber. (channel_number is a
+# sort key, not shown to users.)
+_LOUNGE_ADJACENT_AFTER: dict[str, list[str]] = {
+    "ESPN2": ["ESPNU", "ESPNews", "ESPN+"],
+    "CBS Sports Network": ["CBS Sports Golazo"],
+    "beIN Sports": ["beIN Sports Xtra"],
+}
+
+
+def _ordered_lounge_names() -> list[str]:
+    """`_LOUNGE_CHANNEL_NAMES` reordered so each `_LOUNGE_ADJACENT_AFTER`
+    follower sits right after its anchor. Followers are pulled from their
+    original spot and re-inserted; every other name keeps its relative order."""
+    followers = {f for fs in _LOUNGE_ADJACENT_AFTER.values() for f in fs}
+    present = set(_LOUNGE_CHANNEL_NAMES)
+    out: list[str] = []
+    for name in _LOUNGE_CHANNEL_NAMES:
+        if name in followers:
+            continue  # placed after its anchor instead
+        out.append(name)
+        for f in _LOUNGE_ADJACENT_AFTER.get(name, []):
+            if f in present:
+                out.append(f)
+    return out
+
+
+# Channel number = position in the (adjacency-ordered) curated list, 1-indexed.
+# Surfaced on the API as `channel_number` so the client can sort the guide by it.
 _LOUNGE_CHANNEL_NUMBER: dict[str, int] = {
-    name: i + 1 for i, name in enumerate(_LOUNGE_CHANNEL_NAMES)
+    name: i + 1 for i, name in enumerate(_ordered_lounge_names())
 }
 
 _LOUNGE_TTL = _BARNCENTRE_TTL  # share the same staleness window
