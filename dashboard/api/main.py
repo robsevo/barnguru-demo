@@ -9893,6 +9893,15 @@ _LOUNGE_CABLE_KEYWORDS = [
     # ── Adult animation — 24/7 single-show channels ──
     "family guy", "american dad", "rick and morty", "south park",
     "futurama", "simpsons", "king of the hill", "bob's burgers", "bobs burgers",
+    # ── League channels (2026-07-05). This list gates ENUMERATION — a curated
+    # name in _LOUNGE_CHANNEL_NAMES with no keyword here never even enters the
+    # candidate pool (the first deploy of these channels shipped only
+    # beIN Sports LaLiga, whose "bein" keyword predated it). ──
+    "nba tv", "nbatv", "premier league", "premier sports", "serie a",
+    "laliga", "la liga", "bundesliga",
+    # ── Requested cable adds (2026-07-05). " bet" has the leading space on
+    # purpose: bare "bet" substring-matches better/alphabet/bet365 noise. ──
+    "animal planet", "bbc america", " bet", "lifetime", "travel channel",
 ]
 
 # Combined filter used at IPTV-channel enumeration time. Sources upstream of
