@@ -9888,7 +9888,8 @@ _LOUNGE_CABLE_KEYWORDS = [
     "noovo", "rdi", "lcn", "ici ", "tv5", "canal d", "canal vie",
     # ── More sports (US/CA) ──
     "dazn", "bein", "nfl", "redzone",
-    # ── True crime ──
+    # ── True crime ── ("true crime" kw kept: still enumerates Court TV-adjacent
+    # feeds; the curated True Crime Network name was dropped, not the genre.)
     "court tv", "true crime", "reelz",
     # ── Adult animation — 24/7 single-show channels ──
     "family guy", "american dad", "rick and morty", "south park",
@@ -9899,6 +9900,9 @@ _LOUNGE_CABLE_KEYWORDS = [
     # beIN Sports LaLiga, whose "bein" keyword predated it). ──
     "nba tv", "nbatv", "premier league", "premier sports", "serie a",
     "laliga", "la liga", "bundesliga",
+    # ── More US sports networks (2026-07-05). espn*/cbs/bein keywords already
+    # enumerate ESPNU/ESPNews/ESPN+/Golazo/beIN Xtra; only these two are new. ──
+    "mls", "champions league",
     # ── Requested cable adds (2026-07-05). " bet" has the leading space on
     # purpose: bare "bet" substring-matches better/alphabet/bet365 noise. ──
     "animal planet", "bbc america", " bet", "lifetime", "travel channel",
@@ -10908,6 +10912,11 @@ def _normalize_ch(title: str) -> str:
     - upstream label:   "RDS HD (tv14s)"            → "rds"
     """
     t = title.strip()
+    # Strip "=" decoration runs some panels wrap around a name
+    # ("=====USA | ESPN+=====" → "USA | ESPN+" → later strips → "espn+"). Done
+    # first so the region/tag strip below sees the real leading token. Keeps the
+    # inner "+" (only leading/trailing "=" runs are removed).
+    t = _re_bc.sub(r"^=+\s*|\s*=+$", "", t).strip()
     # Strip upstream source labels we append: "(tv14s)", "(an upstream host)", etc.
     t = _re_bc.sub(r"\s*\([a-z0-9._-]{3,30}\)\s*$", "", t, flags=_re_bc.I)
     # Strip playlist/thetvapp suffixes
@@ -10979,6 +10988,10 @@ def _normalize_ch(title: str) -> str:
     # Providers spell the Spanish league channel both "LaLiga" and "La Liga" —
     # collapse to one form so a single curated name pools both.
     t = _re_bc.sub(r"(?i)^(be\s?in\s*sports?)\s+la\s+liga$", r"\1 laliga", t)
+    # "ESPN U"/"ESPN News" (spaced, as most US providers emit them) → the
+    # concatenated curated names "ESPNU"/"ESPNews".
+    t = _re_bc.sub(r"(?i)^espn\s+u$", "espnu", t)
+    t = _re_bc.sub(r"(?i)^espn\s*news$", "espnews", t)
     return t.strip().lower()
 
 
@@ -12297,7 +12310,8 @@ _LOUNGE_CHANNEL_NAMES: list[str] = [
     "History", "Curiosity Stream",
     # ── Music (50-59) — heavy rotation ──
     "MTV", "MTV Live", "MuchMusic", "Vevo Hits", "CMT Music",
-    "Stingray Music", "Music Choice",
+    "Stingray Music",
+    # Music Choice dropped 2026-07-05 (user request — never surfaced a source).
     # ── Anime / Animation (60-69) ──
     "Cartoon Network", "Adult Swim", "Teletoon", "Boomerang",
     "Crunchyroll", "24/7 Pokemon", "24/7 Sailor Moon",
@@ -12312,7 +12326,10 @@ _LOUNGE_CHANNEL_NAMES: list[str] = [
     # ── Canadian basic networks ──
     "CBC", "CTV", "CTV 2", "Global", "Citytv",
     # ── Quebec French — TV / news / sports (CA; names match provider labels, no accents) ──
-    "TVA", "Noovo", "ICI Tele", "ICI RDI", "RDI", "LCN", "TVA Sports 2",
+    # TVA Sports 2 moved next to TVA Sports below (2026-07-05, user: keep them
+    # adjacent in the guide — channel_number = position here, and the guide sorts
+    # by type then number, so consecutive positions keep them side by side).
+    "TVA", "Noovo", "ICI Tele", "ICI RDI", "RDI", "LCN",
     "TV5", "Canal D", "Canal Vie",
     # ── More sports — US/CA ──
     # DAZN + beIN merged into ONE channel each: the numbered variants were mostly
@@ -12324,9 +12341,11 @@ _LOUNGE_CHANNEL_NAMES: list[str] = [
     "DAZN",
     "NFL Network", "NFL RedZone",
     "beIN Sports",
-    "TSN", "Sportsnet", "TVA Sports",
-    # ── True crime (US/CA) ──
-    "Court TV", "True Crime Network", "ID",
+    "TSN", "Sportsnet", "TVA Sports", "TVA Sports 2",
+    # ── True crime (US/CA) ── True Crime Network dropped 2026-07-05: the pool
+    # carried it on ONE scraped account whose single feed was dead (user: "never
+    # has any sources"). Court TV (10 src), Reelz, ID keep the genre covered.
+    "Court TV", "ID",
     # ── Adult animation — 24/7 single-show channels (common on IPTV, like 24/7 Pokemon) ──
     "24/7 Family Guy", "24/7 American Dad", "24/7 Rick and Morty",
     "24/7 South Park", "24/7 Bob's Burgers", "24/7 Futurama",
@@ -12342,6 +12361,17 @@ _LOUNGE_CHANNEL_NAMES: list[str] = [
     # _LOUNGE_FOREIGN_OK.
     "NBA TV", "Peacock Premier League", "Serie A", "LaLiga TV",
     "Sky Sport Bundesliga",
+    # ── More US sports networks (2026-07-05) — all confirmed in the pool with
+    # trusted-panel (an upstream host/an upstream host) coverage, so they land reliably:
+    #   ESPNU, ESPNews: strong. CBS Sports Golazo: an upstream host + scraped. beIN
+    #   Sports Xtra: the free US feed. ESPN+: main linear feed (the event
+    #   sub-channels are a separate service). Champions League: the "Champions
+    #   League Infinity n" event feeds (off-season → offline until matches).
+    #   MLS: "MLS Soccer"/"MLS YES Network" + numbered feeds.
+    # 'espn u'/'espn news' collapse to 'espnu'/'espnews' in _normalize_ch;
+    # 'mls'/'champions league' added to _LOUNGE_CABLE_KEYWORDS for enumeration.
+    "ESPNU", "ESPNews", "ESPN+", "CBS Sports Golazo", "beIN Sports Xtra",
+    "Champions League", "MLS",
     # ── Requested cable adds (2026-07-04) ──
     "Animal Planet", "BBC America", "BET", "Lifetime", "Travel Channel",
 ]
