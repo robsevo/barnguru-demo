@@ -13616,7 +13616,12 @@ async def _episode_streams_for(tmdb_id: str, name: str = "") -> dict[tuple[int, 
 # order the UI renders them.
 _LOUNGE_VOD_SERVICES: list[str] = [
     "Netflix", "Disney+", "Paramount+", "Apple TV+", "HBO Max",
-    "Prime Video", "Crave", "Hulu", "Peacock", "Other",
+    "Prime Video", "Crave", "Hulu", "Peacock", "Crunchyroll",
+    # "Other" dropped 2026-07-05: the TMDB-provider catalog assigns every title
+    # to a real service, so Other was always an empty card. Replaced with
+    # Crunchyroll (TMDB provider 283) — ~250 movies + ~1800 anime series in CA/US.
+    # Both catalog groupers use setdefault, so nothing breaks if a stray "Other"
+    # ever appears (e.g. the dormant legacy upstream path on revert).
 ]
 
 # Service-name fragments used to classify upstream category names + TMDB
@@ -13636,6 +13641,7 @@ _LOUNGE_VOD_CATEGORY_HINTS: dict[str, list[str]] = {
     "Crave":        ["crave", "crave tv", "cravetv"],
     "Hulu":         ["hulu"],
     "Peacock":      ["peacock"],
+    "Crunchyroll":  ["crunchyroll", "crunchy"],
 }
 
 # Title-prefix tags that some IPTV panels use on individual titles, e.g.
@@ -13975,6 +13981,7 @@ _LOUNGE_VOD_PROVIDER_IDS_CA: dict[str, list[int]] = {
     "Crave":        [230],
     "Hulu":         [15],           # mostly US-only; CA gets a thin slice
     "Peacock":      [386],
+    "Crunchyroll":  [283],          # anime — deep catalog in both CA and US
 }
 
 # Pages per service per kind. TMDB returns 20 results per page.
