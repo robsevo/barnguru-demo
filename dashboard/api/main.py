@@ -10425,25 +10425,42 @@ def _kick_iptv_refresh() -> None:
 
 
 @app.get("/iptv-channels")
-async def iptv_channels(force: bool = False):
+async def iptv_channels(force: bool = False, grep: str = ""):
     now = _time_iptv.time()
     have = bool(_IPTV_CACHE["data"])
     fresh = have and (now - _IPTV_CACHE["ts"] < _IPTV_TTL)
 
+    def _maybe_grep(payload: dict) -> dict:
+        # ?grep=<substr>: titles-only view of the pool, case-insensitive. The
+        # full pool is tens of MB and 502s through Cloudflare — this is the
+        # remote-debuggable slice ("is title X in the pool the box sees?").
+        if not grep:
+            return payload
+        g = grep.lower()
+        hits = [
+            {"title": c.get("title", ""), "source": c.get("source", ""),
+             "category": c.get("category", "")}
+            for c in (payload.get("channels") or [])
+            if g in (c.get("title") or "").lower()
+        ]
+        return {"grep": grep, "matches": hits[:200], "match_count": len(hits),
+                "pool_count": payload.get("count", 0),
+                "cached": payload.get("cached"), "stale": payload.get("stale")}
+
     if not force and have and fresh:
-        return {"channels": _IPTV_CACHE["data"], "count": len(_IPTV_CACHE["data"]), "cached": True}
+        return _maybe_grep({"channels": _IPTV_CACHE["data"], "count": len(_IPTV_CACHE["data"]), "cached": True})
 
     if not force and have:
         # Stale-while-revalidate: data is past TTL but exists. Return it
         # immediately and refresh in the background. Hides the 30-60s
         # cold-start fan-out cost from every cache turnover.
         _kick_iptv_refresh()
-        return {
+        return _maybe_grep({
             "channels": _IPTV_CACHE["data"],
             "count": len(_IPTV_CACHE["data"]),
             "cached": True,
             "stale": True,
-        }
+        })
 
     # force=True: caller explicitly wants a fresh blocking rebuild.
     if force:
@@ -10456,7 +10473,7 @@ async def iptv_channels(force: bool = False):
             _IPTV_CACHE["data"] = channels
             _IPTV_CACHE["ts"] = now
         served = _IPTV_CACHE["data"]
-        return {"channels": served, "count": len(served), "cached": not channels and bool(served)}
+        return _maybe_grep({"channels": served, "count": len(served), "cached": not channels and bool(served)})
 
     # First request after process start: SINGLE-FLIGHT the cold fan-out. Without
     # this, concurrent cold callers (no cache yet) each ran their own
@@ -10472,7 +10489,7 @@ async def iptv_channels(force: bool = False):
         except Exception:
             pass
     served = _IPTV_CACHE["data"] or []
-    return {"channels": served, "count": len(served), "cached": False, "warming": not served}
+    return _maybe_grep({"channels": served, "count": len(served), "cached": False, "warming": not served})
 
 
 async def _src_streams_json() -> list[dict]:
@@ -10915,9 +10932,11 @@ def _normalize_ch(title: str) -> str:
     # lookahead protecting real channels that START with a tag word
     # ("USA Network", "US Open"). Applied twice so stacked tags
     # ("USA: CA NBA TV") fully strip.
+    # ES added for the LaLiga TV feeds ("ES: LALIGA TV HYPERMOTION"); \b keeps
+    # ESPN intact (no boundary between "ES" and "PN").
     for _ in range(2):
         t = _re_bc.sub(
-            r"^(?:CA|CAN|US|USA|UK|DE)\b(?:[-_]+[A-Z]{2})?\s*(?:\([A-Z]{2}\))?\s*[\|:\-]?\s*"
+            r"^(?:CA|CAN|US|USA|UK|DE|ES)\b(?:[-_]+[A-Z]{2})?\s*(?:\([A-Z]{2}\))?\s*[\|:\-]?\s*"
             r"(?!network\b|today\b|open\b)(?=\S)",
             "", t, count=1, flags=_re_bc.I)
     # Strip a leading numeric sort prefix ("02. ", "01) ") and an UPPERCASE
@@ -12315,11 +12334,13 @@ _LOUNGE_CHANNEL_NAMES: list[str] = [
     # ── League channels — one dedicated channel per league (2026-07-04) ──
     # NBA TV: deep US/CA pool. Peacock Premier League: the US PL channel
     # ("USA: PEACOCK PREMIER LEAGUE"). Serie A: an upstream host "SERIE A n HD" +
-    # scraped "USA: SERIE A 0n". beIN Sports LaLiga: an upstream host US feeds
-    # (English commentary; the "la liga"/"laliga" spellings collapse in
-    # _normalize_ch). Sky Sport Bundesliga: German-language by nature —
-    # exempt from the English gate via _LOUNGE_FOREIGN_OK.
-    "NBA TV", "Peacock Premier League", "Serie A", "beIN Sports LaLiga",
+    # scraped "USA: SERIE A 0n". LaLiga TV: the league's own 24/7 channel
+    # ("ES: LALIGA TV HYPERMOTION"; Spanish audio — the an upstream host "beIN
+    # Sports LaLiga" US feeds turned out to be AUDIO-ONLY radio streams,
+    # probed 2026-07-05). Sky Sport Bundesliga: German-language. Both
+    # native-audio channels are exempt from the English gate via
+    # _LOUNGE_FOREIGN_OK.
+    "NBA TV", "Peacock Premier League", "Serie A", "LaLiga TV",
     "Sky Sport Bundesliga",
     # ── Requested cable adds (2026-07-04) ──
     "Animal Planet", "BBC America", "BET", "Lifetime", "Travel Channel",
@@ -12329,7 +12350,7 @@ _LOUNGE_CHANNEL_NAMES: list[str] = [
 # native commentary). For THESE names only, the lounge matcher skips the
 # English/US-CA allowlist gate — the gate exists to keep foreign audio off US
 # channels, which doesn't apply when the channel IS the foreign feed.
-_LOUNGE_FOREIGN_OK: set[str] = {"Sky Sport Bundesliga"}
+_LOUNGE_FOREIGN_OK: set[str] = {"Sky Sport Bundesliga", "LaLiga TV"}
 
 # Per-channel upstream-host blocklist. Same semantics as
 # _BARNCENTRE_HOST_BLOCKLIST — drop hosts that auth-pass + serve broken
