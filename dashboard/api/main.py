@@ -10894,7 +10894,23 @@ def _normalize_ch(title: str) -> str:
     # accidentally eat into "CA - SPORTSNET" (where the dash is just a
     # separator, not a language separator). Without this guard the regex was
     # munching "CA - SP" off "CA - SPORTSNET EAST" and breaking matches.
-    t = _re_bc.sub(r"^(?:CA|US|UK)(?:[-_]+[A-Z]{2})?\s*(?:\([A-Z]{2}\))?\s*[\|:\-]?\s*", "", t, flags=_re_bc.I)
+    #
+    # 2026-07-04 rework: the old alternation (CA|US|UK, no word boundary)
+    # under-stripped "USA:" (ate just "US", leaving "a: nba tv" — every
+    # "USA: X" pool title silently failed name matching) and over-stripped
+    # real words ("CANAL D" → "nal d"). Now: word-boundaried tags (\b protects
+    # CANAL/USHER/DEP) incl. the 3-letter forms + DE (needed for Sky Sport
+    # Bundesliga feeds; the English gate still rejects DE feeds for every
+    # non-exempt channel, so this only affects NAME matching). Separator stays
+    # optional — an upstream host labels with bare spaces ("CA NBA TV") — with a
+    # lookahead protecting real channels that START with a tag word
+    # ("USA Network", "US Open"). Applied twice so stacked tags
+    # ("USA: CA NBA TV") fully strip.
+    for _ in range(2):
+        t = _re_bc.sub(
+            r"^(?:CA|CAN|US|USA|UK|DE)\b(?:[-_]+[A-Z]{2})?\s*(?:\([A-Z]{2}\))?\s*[\|:\-]?\s*"
+            r"(?!network\b|today\b|open\b)(?=\S)",
+            "", t, count=1, flags=_re_bc.I)
     # Strip a leading numeric sort prefix ("02. ", "01) ") and an UPPERCASE
     # provider-category pipe tag ("DEP | ", "NOT | ", "PRIME| ", "2MB | "). The
     # category strip is uppercase-only so mixed-case real names ("Fox Sports |…")
@@ -10932,6 +10948,9 @@ def _normalize_ch(title: str) -> str:
     # they match "DAZN 1" / "beIN Sports 2". Anchored to the whole string.
     t = _re_bc.sub(r"(?i)^dazn\s*0?(\d+)$", r"dazn \1", t)
     t = _re_bc.sub(r"(?i)^be\s?in\s*sports?\s*0?(\d+)$", r"bein sports \1", t)
+    # Providers spell the Spanish league channel both "LaLiga" and "La Liga" —
+    # collapse to one form so a single curated name pools both.
+    t = _re_bc.sub(r"(?i)^(be\s?in\s*sports?)\s+la\s+liga$", r"\1 laliga", t)
     return t.strip().lower()
 
 
@@ -12284,7 +12303,24 @@ _LOUNGE_CHANNEL_NAMES: list[str] = [
     "24/7 Family Guy", "24/7 American Dad", "24/7 Rick and Morty",
     "24/7 South Park", "24/7 Bob's Burgers", "24/7 Futurama",
     "24/7 The Simpsons", "24/7 King of the Hill",
+    # ── League channels — one dedicated channel per league (2026-07-04) ──
+    # NBA TV: deep US/CA pool. Peacock Premier League: the US PL channel
+    # ("USA: PEACOCK PREMIER LEAGUE"). Serie A: an upstream host "SERIE A n HD" +
+    # scraped "USA: SERIE A 0n". beIN Sports LaLiga: an upstream host US feeds
+    # (English commentary; the "la liga"/"laliga" spellings collapse in
+    # _normalize_ch). Sky Sport Bundesliga: German-language by nature —
+    # exempt from the English gate via _LOUNGE_FOREIGN_OK.
+    "NBA TV", "Peacock Premier League", "Serie A", "beIN Sports LaLiga",
+    "Sky Sport Bundesliga",
+    # ── Requested cable adds (2026-07-04) ──
+    "Animal Planet", "BBC America", "BET", "Lifetime", "Travel Channel",
 ]
+
+# Curated channels whose content is inherently non-English (league feeds with
+# native commentary). For THESE names only, the lounge matcher skips the
+# English/US-CA allowlist gate — the gate exists to keep foreign audio off US
+# channels, which doesn't apply when the channel IS the foreign feed.
+_LOUNGE_FOREIGN_OK: set[str] = {"Sky Sport Bundesliga"}
 
 # Per-channel upstream-host blocklist. Same semantics as
 # _BARNCENTRE_HOST_BLOCKLIST — drop hosts that auth-pass + serve broken
@@ -12483,8 +12519,12 @@ async def _build_lounge_payload() -> dict:
             # English/US-CA allowlist gate (rigorous) — reject foreign-region or
             # foreign-language-category streams BEFORE name matching so a Danish
             # "DK| DISCOVERY" or a Latino "Discovery Channel HD" (cat=CULTURA)
-            # can never land on a US/CA channel.
-            if not _candidate_is_english(ch.get("title", ""), ch.get("category", ""), ch.get("english_default", True)):
+            # can never land on a US/CA channel. Channels in _LOUNGE_FOREIGN_OK
+            # (native-language league feeds) skip the gate — foreign audio IS
+            # the channel there.
+            if ch_name not in _LOUNGE_FOREIGN_OK and not _candidate_is_english(
+                ch.get("title", ""), ch.get("category", ""), ch.get("english_default", True)
+            ):
                 continue
             if _ch_matches(ch.get("title", ""), ch_name):
                 assigned[id(ch)] = ch_name
@@ -13135,6 +13175,19 @@ async def lounge_epg(channels: str = "", refresh: str = "") -> dict:
     elif not fresh:
         # Have stale data — serve it, refresh in background.
         _kick_lounge_epg_refresh()
+
+    if _lounge_epg_cache["data"] is None:
+        # Cold start whose build produced nothing (panels unreachable right after
+        # a restart, box under load, …). A 200 with {} used to be taken as truth
+        # by clients — tvspot rendered "No schedule data" on every row and never
+        # retried. 503 + Retry-After says "transient": clients keep their
+        # last-good guide and try again, and caching proxies won't store it.
+        from fastapi.responses import JSONResponse as _JR
+        return _JR(
+            status_code=503,
+            content={"error": "epg_warming", "detail": "EPG build in progress — retry shortly"},
+            headers={"Retry-After": "20"},
+        )
 
     data: dict[str, list[dict]] = _lounge_epg_cache["data"] or {}
     if channels:
