@@ -13323,6 +13323,118 @@ async def lounge_epg(channels: str = "", refresh: str = "") -> dict:
 _lounge_vod_cache: dict = {"data": None, "ts": 0.0}
 _LOUNGE_VOD_TTL = 24 * 3600  # 24h — VOD catalog is slow-moving
 
+# ── VOD catalog cold-start hardening (2026-07-09) ────────────────────────
+# The catalog used to be built INLINE on the request path with no lock and
+# no persistence. After every API restart the cache was cold, so each
+# concurrent /lounge/vod/catalog and /lounge/vod/details request kicked its
+# OWN full TMDB build — on the 2 GB box that stampede is what turned every
+# evening restart into minutes of 504s (and often the next OOM). Same class
+# of bug the EPG endpoint had; this ports the same three-part fix:
+#   1. Disk snapshot — the last good catalog is restored on startup, so a
+#      restart serves instantly instead of rebuilding from nothing.
+#   2. Single-flight build task — any number of stale/cold requests share
+#      one build.
+#   3. 503 vod_warming — a true cold start (no snapshot yet) answers fast
+#      with Retry-After instead of hanging until the proxy 504s; tvspot's
+#      detail pages already show a Retry state for non-200s.
+
+_VOD_CATALOG_SNAPSHOT = _GRETZKY_DATA_DIR / "lounge_vod_catalog.json"
+_vod_catalog_build_task = None  # asyncio.Task | None — the in-flight build
+
+
+def _load_vod_catalog_snapshot_sync():
+    """Best-effort read of the on-disk catalog snapshot.
+
+    Returns {"data": <catalog dict>, "ts": <unix ts>} or None. Payloads
+    without a non-empty by_service are treated as missing so a bad write
+    can't pin an empty catalog."""
+    try:
+        raw = json.loads(_VOD_CATALOG_SNAPSHOT.read_text())
+        data = raw.get("data") if isinstance(raw, dict) else None
+        if isinstance(data, dict) and data.get("by_service"):
+            return raw
+    except Exception:
+        pass
+    return None
+
+
+def _save_vod_catalog_snapshot_sync(data: dict, ts: float) -> None:
+    """Atomic write (tmp + replace) so a crash mid-write can't corrupt the
+    snapshot a future restart depends on."""
+    try:
+        tmp = _VOD_CATALOG_SNAPSHOT.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps({"data": data, "ts": ts}))
+        tmp.replace(_VOD_CATALOG_SNAPSHOT)
+    except Exception as e:
+        print(f"[vod-catalog] snapshot save failed: {e}", flush=True)
+
+
+async def _ensure_vod_catalog_restored() -> None:
+    """On a cold in-memory cache (fresh process), restore the last on-disk
+    catalog so requests are served instantly. The snapshot may be stale —
+    callers still kick a background refresh; stale beats a 504."""
+    if _lounge_vod_cache["data"] is not None:
+        return
+    snap = await asyncio.to_thread(_load_vod_catalog_snapshot_sync)
+    if snap and _lounge_vod_cache["data"] is None:
+        _lounge_vod_cache["data"] = snap["data"]
+        _lounge_vod_cache["ts"] = float(snap.get("ts") or 0.0)
+        print("[vod-catalog] restored snapshot from disk", flush=True)
+
+
+def _kick_vod_catalog_build():
+    """Single-flight VOD catalog build. Returns the shared asyncio.Task so
+    callers may bound-wait on it (always through asyncio.shield — a waiter
+    timing out must not cancel the build everyone else is waiting on).
+
+    The task itself never raises: failures are logged and the cache is left
+    untouched, matching the old inline error handling."""
+    global _vod_catalog_build_task
+    t = _vod_catalog_build_task
+    if t is not None and not t.done():
+        return t
+
+    async def _run() -> None:
+        try:
+            built = await _build_vod_catalog()
+            built_has_titles = any(
+                (rails.get("movies") or rails.get("series"))
+                for rails in built.get("by_service", {}).values()
+            )
+            now_ts = _time.time()
+            if built_has_titles:
+                _lounge_vod_cache["data"] = built
+                _lounge_vod_cache["ts"] = now_ts
+                await asyncio.to_thread(
+                    _save_vod_catalog_snapshot_sync, built, now_ts)
+            elif _lounge_vod_cache["data"] is not None:
+                # Empty build (TMDB creds down / transient outage) must NOT
+                # overwrite a good catalog and pin "0 titles" for the full
+                # TTL. Keep serving the last good one, retry in ~10 min.
+                _lounge_vod_cache["ts"] = now_ts - _LOUNGE_VOD_TTL + 600
+            # Empty build + nothing cached: leave the cache cold so the
+            # endpoints keep answering 503 vod_warming and the next request
+            # kicks another (single-flighted) attempt.
+        except Exception as e:
+            print(f"[vod-catalog] build failed: {e}", flush=True)
+
+    t = asyncio.create_task(_run())
+    _vod_catalog_build_task = t
+    return t
+
+
+def _vod_warming_response():
+    """503 + Retry-After for a truly cold catalog (fresh box, no snapshot).
+    Mirrors the EPG epg_warming response: clients keep last-good data and
+    retry, instead of parking on a connection until the proxy 504s."""
+    from fastapi.responses import JSONResponse as _JR
+    return _JR(
+        status_code=503,
+        content={"error": "vod_warming",
+                 "detail": "VOD catalog build in progress — retry shortly"},
+        headers={"Retry-After": "20"},
+    )
+
 # tmdb_id -> [relay-wrapped direct VOD URLs]. Built from each upstream account's
 # get_vod_streams (tmdb-tagged, English-only) so movie pages can play a real
 # direct stream through the relay's /vod endpoint, with vidlink as the last
@@ -14328,32 +14440,26 @@ async def lounge_vod_catalog(service: str = "") -> dict:
     """
     import time as _t_vc
     now_ts = _t_vc.time()
+    await _ensure_vod_catalog_restored()
     have   = _lounge_vod_cache["data"] is not None
     fresh  = have and (now_ts - _lounge_vod_cache["ts"] < _LOUNGE_VOD_TTL)
 
     if not fresh:
-        try:
-            built = await _build_vod_catalog()
-            built_has_titles = any(
-                (rails.get("movies") or rails.get("series"))
-                for rails in built.get("by_service", {}).values()
-            )
-            if not built_has_titles and have:
-                # An empty build (TMDB creds down / transient outage) must NOT
-                # overwrite a good cached catalog and pin it to "0 titles" for the
-                # full TTL. Keep serving the last good one and retry in ~10 min.
-                data = _lounge_vod_cache["data"]
-                _lounge_vod_cache["ts"] = now_ts - _LOUNGE_VOD_TTL + 600
-            else:
-                data = built
-                _lounge_vod_cache["data"] = data
-                _lounge_vod_cache["ts"]   = now_ts
-        except Exception as e:
-            if not have:
-                return {"error": f"vod build failed: {e}", "by_service": {}}
-            data = _lounge_vod_cache["data"]
-    else:
-        data = _lounge_vod_cache["data"]
+        # Stale-while-revalidate: with ANY catalog in hand (even a stale
+        # snapshot) serve it now and let the shared build refresh in the
+        # background. Only a true cold start — fresh process AND no snapshot
+        # — waits, and only briefly; past that we 503 vod_warming rather
+        # than hold the connection until the frontend proxy 504s.
+        task = _kick_vod_catalog_build()
+        if not have:
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=20.0)
+            except asyncio.TimeoutError:
+                pass
+
+    data = _lounge_vod_cache["data"]
+    if data is None:
+        return _vod_warming_response()
 
     by_service = data.get("by_service", {})
     if service:
@@ -14434,8 +14540,19 @@ async def lounge_vod_details(tmdb_id: str) -> dict:
     client should prefer `stream_urls` and fall back to `embed_urls` if
     they're empty or fail at play time.
     """
+    await _ensure_vod_catalog_restored()
     if _lounge_vod_cache["data"] is None:
-        await lounge_vod_catalog()  # forces a build
+        # Cold start with no snapshot: join the ONE shared build for a
+        # bounded wait, then tell the client to retry. The old code awaited
+        # a FULL catalog build per concurrent request here — the stampede
+        # behind the 504 meltdowns whenever the API restarted mid-evening.
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(_kick_vod_catalog_build()), timeout=20.0)
+        except asyncio.TimeoutError:
+            pass
+        if _lounge_vod_cache["data"] is None:
+            return _vod_warming_response()
     data = _lounge_vod_cache["data"] or {}
     instances = data.get("movies_by_id", {}).get(tmdb_id, [])
 
@@ -14488,8 +14605,17 @@ async def lounge_vod_series(series_key: str) -> dict:
     carries the `embed_urls` list so the client's WebView resolver can
     pick one and resolve to an m3u8 at play time.
     """
+    await _ensure_vod_catalog_restored()
     if _lounge_vod_cache["data"] is None:
-        await lounge_vod_catalog()
+        # Same cold-start guard as /lounge/vod/details — one shared build,
+        # bounded wait, 503 vod_warming past that.
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(_kick_vod_catalog_build()), timeout=20.0)
+        except asyncio.TimeoutError:
+            pass
+        if _lounge_vod_cache["data"] is None:
+            return _vod_warming_response()
     data = _lounge_vod_cache["data"] or {}
     s = data.get("series_by_id", {}).get(series_key) or {}
 
