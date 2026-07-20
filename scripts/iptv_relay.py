@@ -792,6 +792,43 @@ def _probe_video_codec(url: str) -> "str | None":
         return None
 
 
+_ENGLISH_LANG_TAGS = {"eng", "en", "english", "en-us", "en-gb"}
+
+
+def _probe_english_audio_index(url: str) -> "int | None":
+    """Audio-relative index of the first ENGLISH audio stream (what
+    `-map 0:a:<n>` wants), or None when the file doesn't say.
+
+    Why this exists: these panels serve a lot of multi-audio rips (their titles
+    are literally tagged "MULTI"), and ffmpeg's DEFAULT stream selection picks
+    the audio track with the MOST CHANNELS — which on those files is routinely a
+    French or Dutch 5.1 track sitting ahead of English stereo. The remux then
+    comes out in the wrong language even though the file has English in it. We
+    are not filtering sources here; we are choosing the right track inside one.
+
+    Bounded like _probe_video_codec: reads only the container header over HTTP.
+    None means "no opinion" and the caller leaves ffmpeg's default alone, so a
+    file without language tags behaves exactly as before.
+    """
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a",
+             "-show_entries", "stream=index:stream_tags=language,title",
+             "-of", "json", "-user_agent", _BROWSER_UA, url],
+            capture_output=True, timeout=12,
+        )
+        streams = (json.loads(r.stdout.decode(errors="replace") or "{}") or {}).get("streams") or []
+        for rel, st in enumerate(streams):
+            tags = {str(k).lower(): str(v).lower() for k, v in (st.get("tags") or {}).items()}
+            lang = tags.get("language", "").strip()
+            title = tags.get("title", "")
+            if lang in _ENGLISH_LANG_TAGS or "english" in title:
+                return rel
+        return None
+    except Exception:
+        return None
+
+
 async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode: str = "live", start: float = 0.0) -> _HLSSession:
     sid = _hls_session_id(url, quality, mode, start)
 
@@ -803,6 +840,7 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
     # rips get a fast 415 so the player fails over immediately instead of
     # spinning on a stream the box can't afford to produce.
     vod_vcodec: "str | None" = None
+    vod_eng_audio: "int | None" = None
     if mode == "vod":
         async with _HLS_LOCK:
             existing = _HLS_SESSIONS.get(sid)
@@ -812,6 +850,9 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
         vod_vcodec = await asyncio.to_thread(_probe_video_codec, url)
         if vod_vcodec is not None and vod_vcodec != "h264":
             raise HTTPException(status_code=415, detail=f"unsupported vod codec: {vod_vcodec} (transcode disabled)")
+        # Same pre-lock slot as the codec probe, for the same reason: ffprobe
+        # over HTTP can take seconds and must not stall live session ops.
+        vod_eng_audio = await asyncio.to_thread(_probe_english_audio_index, url)
 
     async with _HLS_LOCK:
         existing = _HLS_SESSIONS.get(sid)
@@ -898,6 +939,14 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
             # h264 (or probe-inconclusive benefit-of-the-doubt): cheap copy.
             # Non-h264 was already rejected with 415 before the lock.
             enc_args = ["-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-ac", "2"]
+            # Pin the English track when the file identifies one. Without an
+            # explicit -map, ffmpeg's default picks the highest-channel audio,
+            # which on MULTI rips is usually not English. No opinion → no -map,
+            # so untagged files keep exactly the old behaviour.
+            map_args = (
+                ["-map", "0:v:0", "-map", f"0:a:{vod_eng_audio}"]
+                if vod_eng_audio is not None else []
+            )
             args = [
                 "ffmpeg", "-hide_banner", "-loglevel", "warning",
                 # Input seek BEFORE -i: fast keyframe seek, so a resume/failover
@@ -909,6 +958,7 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
                 "-reconnect_streamed", "1",
                 "-reconnect_delay_max", "5",
                 "-i", url,
+                *map_args,
                 *enc_args,
                 "-max_muxing_queue_size", "4096",
                 "-f", "hls",
