@@ -37,7 +37,7 @@ import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 PORT          = int(os.environ.get("IPTV_RELAY_PORT", "9000"))
 TOKEN         = os.environ.get("IPTV_RELAY_TOKEN") or None
@@ -734,11 +734,12 @@ def _remember_hls_url(sid: str, url: str, quality: str, mode: str = "live", star
         _HLS_URL_BY_SID.popitem(last=False)
 
 
-def _hls_session_id(url: str, quality: str = "passthrough", mode: str = "live", start: float = 0.0) -> str:
+def _hls_session_id(url: str, quality: str = "passthrough", mode: str = "live", start: float = 0.0, aidx: "int | None" = None) -> str:
     # Live sids keep the historical tag shape so in-flight sessions survive a
     # relay restart/deploy without a key change; vod gets its own namespace
-    # (keyed by start offset too — different resume points are distinct sessions).
-    tag = f"{quality}|{url}" if mode == "live" else f"{mode}|{quality}|{start:g}|{url}"
+    # (keyed by start offset AND chosen audio track — different resume points or
+    # languages are distinct sessions, so switching audio spawns a fresh remux).
+    tag = f"{quality}|{url}" if mode == "live" else f"{mode}|{quality}|{start:g}|a{aidx if aidx is not None else 'auto'}|{url}"
     return hashlib.sha1(tag.encode()).hexdigest()[:16]
 
 
@@ -795,42 +796,53 @@ def _probe_video_codec(url: str) -> "str | None":
 _ENGLISH_LANG_TAGS = {"eng", "en", "english", "en-us", "en-gb"}
 
 
-def _probe_english_audio_index(url: str) -> "int | None":
-    """Audio-relative index of the first ENGLISH audio stream (what
-    `-map 0:a:<n>` wants), or None when the file doesn't say.
-
-    Why this exists: these panels serve a lot of multi-audio rips (their titles
-    are literally tagged "MULTI"), and ffmpeg's DEFAULT stream selection picks
-    the audio track with the MOST CHANNELS — which on those files is routinely a
-    French or Dutch 5.1 track sitting ahead of English stereo. The remux then
-    comes out in the wrong language even though the file has English in it. We
-    are not filtering sources here; we are choosing the right track inside one.
+def _probe_audio_tracks(url: str) -> list:
+    """Every audio stream, in the order ffmpeg sees them:
+        [{"rel": 0, "lang": "ger", "title": "German", "channels": 2}, ...]
+    `rel` is the AUDIO-RELATIVE index — exactly what `-map 0:a:<rel>` wants.
 
     Bounded like _probe_video_codec: reads only the container header over HTTP.
-    None means "no opinion" and the caller leaves ffmpeg's default alone, so a
-    file without language tags behaves exactly as before.
+    Returns [] on any failure, which every caller treats as "no info".
     """
     try:
         r = subprocess.run(
             ["ffprobe", "-v", "error", "-select_streams", "a",
-             "-show_entries", "stream=index:stream_tags=language,title",
+             "-show_entries", "stream=index,channels:stream_tags=language,title",
              "-of", "json", "-user_agent", _BROWSER_UA, url],
             capture_output=True, timeout=12,
         )
         streams = (json.loads(r.stdout.decode(errors="replace") or "{}") or {}).get("streams") or []
+        out = []
         for rel, st in enumerate(streams):
-            tags = {str(k).lower(): str(v).lower() for k, v in (st.get("tags") or {}).items()}
-            lang = tags.get("language", "").strip()
-            title = tags.get("title", "")
-            if lang in _ENGLISH_LANG_TAGS or "english" in title:
-                return rel
-        return None
+            tags = {str(k).lower(): str(v) for k, v in (st.get("tags") or {}).items()}
+            out.append({
+                "rel": rel,
+                "lang": (tags.get("language") or "").strip().lower(),
+                "title": (tags.get("title") or "").strip(),
+                "channels": st.get("channels") or 0,
+            })
+        return out
     except Exception:
-        return None
+        return []
 
 
-async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode: str = "live", start: float = 0.0) -> _HLSSession:
-    sid = _hls_session_id(url, quality, mode, start)
+def _probe_english_audio_index(url: str) -> "int | None":
+    """Audio-relative index of the first ENGLISH audio stream, or None.
+
+    The auto-default: these panels serve multi-audio rips (titles tagged
+    "MULTI"), and ffmpeg's default picks the highest-channel track — routinely a
+    French/German 5.1 sitting ahead of English stereo, so the remux comes out in
+    the wrong language. None means "no opinion" → ffmpeg's default is left alone.
+    A caller can override this entirely by passing an explicit aidx.
+    """
+    for t in _probe_audio_tracks(url):
+        if t["lang"] in _ENGLISH_LANG_TAGS or "english" in t["title"].lower():
+            return t["rel"]
+    return None
+
+
+async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode: str = "live", start: float = 0.0, aidx: "int | None" = None) -> _HLSSession:
+    sid = _hls_session_id(url, quality, mode, start, aidx)
 
     # VOD: probe the codec BEFORE taking the lock (ffprobe can take seconds and
     # must not stall live session ops). ONLY H.264 is remuxable: copy-mode
@@ -850,9 +862,12 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
         vod_vcodec = await asyncio.to_thread(_probe_video_codec, url)
         if vod_vcodec is not None and vod_vcodec != "h264":
             raise HTTPException(status_code=415, detail=f"unsupported vod codec: {vod_vcodec} (transcode disabled)")
-        # Same pre-lock slot as the codec probe, for the same reason: ffprobe
-        # over HTTP can take seconds and must not stall live session ops.
-        vod_eng_audio = await asyncio.to_thread(_probe_english_audio_index, url)
+        # An explicit aidx (user picked a language) wins outright. Otherwise fall
+        # back to auto-detecting English. Same pre-lock slot as the codec probe.
+        if aidx is not None:
+            vod_eng_audio = aidx
+        else:
+            vod_eng_audio = await asyncio.to_thread(_probe_english_audio_index, url)
 
     async with _HLS_LOCK:
         existing = _HLS_SESSIONS.get(sid)
@@ -1122,8 +1137,24 @@ def _check_vod_url(url: str) -> None:
         raise HTTPException(status_code=400, detail="not an upstream VOD path")
 
 
+@app.get("/audio-tracks")
+async def audio_tracks(u: str, request: Request) -> Response:
+    """List a VOD file's audio tracks so the player can offer a language menu.
+
+    Same token + upstream-path gate as the remux. The player fetches this once per
+    title, shows the languages, and re-requests remux.m3u8 with &aidx=<rel> for
+    the chosen one. Bounded (ffprobe reads only the header); [] on any failure,
+    which the player renders as "no choice available, English default stands".
+    """
+    _check_token(request)
+    url = unquote(u)
+    _check_vod_url(url)
+    tracks = await asyncio.to_thread(_probe_audio_tracks, url)
+    return JSONResponse({"tracks": tracks}, headers=_CORS)
+
+
 @app.get("/remux.m3u8")
-async def remux_vod(u: str, request: Request, start: float = 0) -> Response:
+async def remux_vod(u: str, request: Request, start: float = 0, aidx: "int | None" = None) -> Response:
     """Remux a VOD container browsers can't play (mkv/avi) into rolling HLS.
 
     Live-style output: no seeking, plays like a live channel. The tvspot VOD
@@ -1140,7 +1171,7 @@ async def remux_vod(u: str, request: Request, start: float = 0) -> Response:
 
     await _ensure_hls_reaper()
 
-    sess = await _start_or_get_hls_session(url, "passthrough", "vod", max(0.0, start))
+    sess = await _start_or_get_hls_session(url, "passthrough", "vod", max(0.0, start), aidx)
     sess.last_access = time.monotonic()
     return _session_manifest_response(sess, request)
 
