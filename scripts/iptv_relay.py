@@ -796,22 +796,50 @@ def _probe_video_codec(url: str) -> "str | None":
 _ENGLISH_LANG_TAGS = {"eng", "en", "english", "en-us", "en-gb"}
 
 
-def _probe_audio_tracks(url: str) -> list:
-    """Every audio stream, in the order ffmpeg sees them:
-        [{"rel": 0, "lang": "ger", "title": "German", "channels": 2}, ...]
+# Audio/duration probe results by URL. The player now asks for this on EVERY
+# remux play (duration is what enables seeking), and English auto-detect wants
+# the same data, so an uncached probe would mean two header reads against a slow
+# panel per play. A file's track layout and runtime don't change under us.
+_AUDIO_META_CACHE: "dict[str, tuple[float, dict]]" = {}
+_AUDIO_META_TTL = 3600.0
+_AUDIO_META_MAX = 200
+
+
+def _probe_audio_meta(url: str) -> dict:
+    hit = _AUDIO_META_CACHE.get(url)
+    if hit is not None and time.monotonic() - hit[0] <= _AUDIO_META_TTL:
+        return hit[1]
+    meta = _probe_audio_meta_uncached(url)
+    # Don't cache a total failure — a panel hiccup shouldn't pin "no tracks,
+    # no duration" (i.e. no seeking) for an hour.
+    if meta["tracks"] or meta["duration"] is not None:
+        if len(_AUDIO_META_CACHE) >= _AUDIO_META_MAX:
+            for k in sorted(_AUDIO_META_CACHE, key=lambda k: _AUDIO_META_CACHE[k][0])[: _AUDIO_META_MAX // 4]:
+                _AUDIO_META_CACHE.pop(k, None)
+        _AUDIO_META_CACHE[url] = (time.monotonic(), meta)
+    return meta
+
+
+def _probe_audio_meta_uncached(url: str) -> dict:
+    """Audio streams + container duration in ONE header read:
+        {"tracks": [{"rel": 0, "lang": "ger", ...}], "duration": 5423.2|None}
     `rel` is the AUDIO-RELATIVE index — exactly what `-map 0:a:<rel>` wants.
+    Duration is what lets the player treat the rolling remux as seekable
+    (seek = re-request with &start=), so it rides the same ffprobe rather
+    than costing a second one.
 
     Bounded like _probe_video_codec: reads only the container header over HTTP.
-    Returns [] on any failure, which every caller treats as "no info".
+    Returns empty/None fields on any failure, which callers treat as "no info".
     """
     try:
         r = subprocess.run(
             ["ffprobe", "-v", "error", "-select_streams", "a",
-             "-show_entries", "stream=index,channels:stream_tags=language,title",
+             "-show_entries", "stream=index,channels:stream_tags=language,title:format=duration",
              "-of", "json", "-user_agent", _BROWSER_UA, url],
             capture_output=True, timeout=12,
         )
-        streams = (json.loads(r.stdout.decode(errors="replace") or "{}") or {}).get("streams") or []
+        data = json.loads(r.stdout.decode(errors="replace") or "{}") or {}
+        streams = data.get("streams") or []
         out = []
         for rel, st in enumerate(streams):
             tags = {str(k).lower(): str(v) for k, v in (st.get("tags") or {}).items()}
@@ -821,9 +849,22 @@ def _probe_audio_tracks(url: str) -> list:
                 "title": (tags.get("title") or "").strip(),
                 "channels": st.get("channels") or 0,
             })
-        return out
+        duration: "float | None" = None
+        try:
+            raw = (data.get("format") or {}).get("duration")
+            if raw is not None:
+                duration = float(raw)
+                if not (duration > 0):
+                    duration = None
+        except (TypeError, ValueError):
+            duration = None
+        return {"tracks": out, "duration": duration}
     except Exception:
-        return []
+        return {"tracks": [], "duration": None}
+
+
+def _probe_audio_tracks(url: str) -> list:
+    return _probe_audio_meta(url)["tracks"]
 
 
 def _probe_english_audio_index(url: str) -> "int | None":
@@ -839,6 +880,32 @@ def _probe_english_audio_index(url: str) -> "int | None":
         if t["lang"] in _ENGLISH_LANG_TAGS or "english" in t["title"].lower():
             return t["rel"]
     return None
+
+
+# Per-URL probe results (video codec + English audio index). Seeking a remux
+# re-requests /remux.m3u8 with a new &start=, which is a NEW session id for the
+# SAME file — without this cache every seek pays the two ffprobe header reads
+# again (several seconds each against a slow panel) before ffmpeg even spawns.
+# Keyed by URL only: the file's codec/track layout can't change under us.
+_VOD_PROBE_CACHE: "dict[str, tuple[float, str | None, int | None]]" = {}
+_VOD_PROBE_TTL = 3600.0
+_VOD_PROBE_MAX = 200
+
+
+def _vod_probe_cached(url: str) -> "tuple[str | None, int | None] | None":
+    hit = _VOD_PROBE_CACHE.get(url)
+    if hit is None or time.monotonic() - hit[0] > _VOD_PROBE_TTL:
+        return None
+    return (hit[1], hit[2])
+
+
+def _vod_probe_store(url: str, vcodec: "str | None", eng_aidx: "int | None") -> None:
+    if len(_VOD_PROBE_CACHE) >= _VOD_PROBE_MAX:
+        # Drop the oldest entries; a fixed small cap, not an LRU — churn here is
+        # a few titles a night, the cap is a leak guard, not a tuning knob.
+        for k in sorted(_VOD_PROBE_CACHE, key=lambda k: _VOD_PROBE_CACHE[k][0])[: _VOD_PROBE_MAX // 4]:
+            _VOD_PROBE_CACHE.pop(k, None)
+    _VOD_PROBE_CACHE[url] = (time.monotonic(), vcodec, eng_aidx)
 
 
 async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode: str = "live", start: float = 0.0, aidx: "int | None" = None) -> _HLSSession:
@@ -859,15 +926,19 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
             if existing is not None and existing.proc is not None and existing.proc.poll() is None:
                 existing.last_access = time.monotonic()
                 return existing
-        vod_vcodec = await asyncio.to_thread(_probe_video_codec, url)
+        cached_probe = _vod_probe_cached(url)
+        if cached_probe is not None:
+            vod_vcodec, cached_eng = cached_probe
+        else:
+            vod_vcodec = await asyncio.to_thread(_probe_video_codec, url)
+            cached_eng = None if vod_vcodec is not None and vod_vcodec != "h264" \
+                else await asyncio.to_thread(_probe_english_audio_index, url)
+            _vod_probe_store(url, vod_vcodec, cached_eng)
         if vod_vcodec is not None and vod_vcodec != "h264":
             raise HTTPException(status_code=415, detail=f"unsupported vod codec: {vod_vcodec} (transcode disabled)")
         # An explicit aidx (user picked a language) wins outright. Otherwise fall
-        # back to auto-detecting English. Same pre-lock slot as the codec probe.
-        if aidx is not None:
-            vod_eng_audio = aidx
-        else:
-            vod_eng_audio = await asyncio.to_thread(_probe_english_audio_index, url)
+        # back to the (cached) auto-detected English index.
+        vod_eng_audio = aidx if aidx is not None else cached_eng
 
     async with _HLS_LOCK:
         existing = _HLS_SESSIONS.get(sid)
@@ -1149,8 +1220,11 @@ async def audio_tracks(u: str, request: Request) -> Response:
     _check_token(request)
     url = unquote(u)
     _check_vod_url(url)
-    tracks = await asyncio.to_thread(_probe_audio_tracks, url)
-    return JSONResponse({"tracks": tracks}, headers=_CORS)
+    meta = await asyncio.to_thread(_probe_audio_meta, url)
+    # `duration` (seconds, null when unknown) is what makes the rolling remux
+    # seekable client-side: the player clamps seek targets to it and re-requests
+    # remux.m3u8 with &start=<target>.
+    return JSONResponse(meta, headers=_CORS)
 
 
 @app.get("/remux.m3u8")

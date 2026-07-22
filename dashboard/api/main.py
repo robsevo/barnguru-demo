@@ -12465,6 +12465,76 @@ def _lounge_logo_url(name: str) -> str:
 _lounge_cache: dict = {"data": None, "ts": 0.0}
 _LOUNGE_REFRESH_TASK: asyncio.Task | None = None
 
+# Last good channel list, on disk. /lounge/live-channels was the ONE remaining
+# lounge endpoint that still BLOCKED on a cold build: with an empty in-memory
+# cache it awaited _build_lounge_payload (full match + per-channel verify across
+# ~50 channels), so every process restart opened a multi-minute window where the
+# request just hung — measured 90s and 120s+ from outside on 2026-07-22, against
+# 0.1s warm. That window is exactly when the TV shows no channels at all.
+# EPG (epg_warming) and the VOD catalog (vod_warming) already got the snapshot +
+# 503 treatment; this ports the same fix to the last one missing it.
+_LOUNGE_SNAPSHOT = _GRETZKY_DATA_DIR / "lounge_live_channels.json"
+
+# How long a genuinely-cold request will wait on the build before answering 503.
+# Long enough that a healthy build still returns 200 on the first request, short
+# enough that nobody watches a spinner: the full verify pass is what takes
+# minutes, and no client benefits from holding the socket for it.
+_LOUNGE_COLD_WAIT_S = 12.0
+
+
+def _load_lounge_snapshot_sync():
+    """Best-effort read of the on-disk channel snapshot. Returns
+    {"data": [...], "ts": <unix ts>} or None. A payload with no channels is
+    treated as missing so a bad write can't pin an empty lineup."""
+    try:
+        raw = json.loads(_LOUNGE_SNAPSHOT.read_text())
+        data = raw.get("data") if isinstance(raw, dict) else None
+        if isinstance(data, list) and data:
+            return raw
+    except Exception:
+        pass
+    return None
+
+
+def _save_lounge_snapshot_sync(data: list, ts: float) -> None:
+    """Atomic write (tmp + replace) so a crash mid-write can't corrupt the
+    snapshot the next restart depends on."""
+    try:
+        tmp = _LOUNGE_SNAPSHOT.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps({"data": data, "ts": ts}))
+        tmp.replace(_LOUNGE_SNAPSHOT)
+    except Exception as e:
+        print(f"[lounge-channels] snapshot save failed: {e}", flush=True)
+
+
+async def _ensure_lounge_restored() -> None:
+    """On a cold in-memory cache (fresh process), restore the last on-disk
+    lineup so requests are served instantly. It may be stale — the caller still
+    kicks a background refresh; stale channels beat no channels."""
+    if _lounge_cache["data"] is not None:
+        return
+    snap = await asyncio.to_thread(_load_lounge_snapshot_sync)
+    if snap and _lounge_cache["data"] is None:
+        _lounge_cache["data"] = snap["data"]
+        # Deliberately kept as the ORIGINAL build time, not now: the entry is
+        # stale by construction, so the first request serves it and immediately
+        # kicks a refresh rather than trusting it for a full TTL.
+        _lounge_cache["ts"] = float(snap.get("ts") or 0.0)
+        print("[lounge-channels] restored snapshot from disk", flush=True)
+
+
+def _lounge_warming_response():
+    """503 + Retry-After for a truly cold lineup (fresh box, no snapshot).
+    Mirrors epg_warming / vod_warming: the client keeps its last-good channel
+    list and retries shortly, instead of parking on a connection for minutes."""
+    from fastapi.responses import JSONResponse as _JR
+    return _JR(
+        status_code=503,
+        content={"error": "channels_warming",
+                 "detail": "Channel list build in progress — retry shortly"},
+        headers={"Retry-After": "15"},
+    )
+
 
 def _kick_lounge_refresh() -> None:
     global _LOUNGE_REFRESH_TASK
@@ -12485,16 +12555,28 @@ def _kick_lounge_refresh() -> None:
 
 
 @app.get("/lounge/live-channels")
-async def lounge_live_channels() -> dict:
+async def lounge_live_channels():
     """Curated cable + sports channel list for Origin Lounge.
 
-    Same SWR semantics as /barncentre-channels. Reuses the IPTV channel
-    candidate pool (filtered through `_IPTV_CHANNEL_KEYWORDS` which now
-    includes cable substrings on top of NHL ones), then matches to
-    `_LOUNGE_CHANNEL_NAMES` and ranks each chip via the quality-aware
-    `_sort_by_url_priority`.
+    Reuses the IPTV channel candidate pool (filtered through
+    `_IPTV_CHANNEL_KEYWORDS` which now includes cable substrings on top of NHL
+    ones), then matches to `_LOUNGE_CHANNEL_NAMES` and ranks each chip via the
+    quality-aware `_sort_by_url_priority`.
+
+    SWR semantics, and it NEVER blocks indefinitely:
+      - Fresh cache            → return immediately.
+      - Stale cache            → serve stale + refresh in the background.
+      - Cold process           → restore the disk snapshot, serve that.
+      - Truly cold (no snapshot) → wait `_LOUNGE_COLD_WAIT_S` on the shared
+        build, then 503 `channels_warming` with Retry-After. Clients keep their
+        last-good lineup and retry.
     """
     import time as _t_lc
+
+    # Cold process → serve the last good lineup off disk rather than blocking on
+    # a rebuild. This is what turns a post-restart request from "hangs for
+    # minutes" into "instant, slightly stale, refreshing behind you".
+    await _ensure_lounge_restored()
 
     now_ts = _t_lc.time()
     have   = _lounge_cache["data"] is not None
@@ -12512,20 +12594,25 @@ async def lounge_live_channels() -> dict:
         _kick_lounge_refresh()
         return {"channels": _lounge_cache["data"], "cached": True, "stale": True}
 
-    # Cold start (no cache yet): SINGLE-FLIGHT the build so concurrent callers
-    # share ONE _build_lounge_payload (full match + per-channel verify) instead of
-    # each running their own — that stacking pegged the box after a restart. Await
-    # the same task the stale-path refresher uses, then serve what it cached.
+    # Genuinely cold (fresh box, no snapshot yet). SINGLE-FLIGHT the build so
+    # concurrent callers share ONE _build_lounge_payload instead of each running
+    # their own — that stacking pegged the box after a restart. Then wait only
+    # BRIEFLY: a short build (warm panels) still answers 200 on this request,
+    # while a slow one hands back 503 channels_warming and keeps building in the
+    # background. Waiting unboundedly is what produced the 120s hangs; the client
+    # keeps its cached lineup and retries either way.
     _kick_lounge_refresh()
     task = _LOUNGE_REFRESH_TASK
     if task is not None:
         try:
-            await task
+            # shield: this waiter timing out must NOT cancel the build every
+            # other caller is also waiting on.
+            await asyncio.wait_for(asyncio.shield(task), timeout=_LOUNGE_COLD_WAIT_S)
         except Exception:
             pass
     if _lounge_cache["data"] is not None:
         return {"channels": _lounge_cache["data"], "cached": False}
-    return {"channels": [], "cached": False, "warming": True}
+    return _lounge_warming_response()
 
 
 def _kick_epg_prewarm() -> None:
@@ -12808,6 +12895,15 @@ async def _build_lounge_payload() -> dict:
     if any(ch.get("primary_url") for ch in result) or _lounge_cache["data"] is None:
         _lounge_cache["data"] = result
         _lounge_cache["ts"]   = now_ts
+        # Persist it so the NEXT process start serves instantly instead of
+        # blocking on a rebuild (see _ensure_lounge_restored). Only genuinely
+        # playable lineups get written — the branch above already guarantees
+        # that, except for the very first build on a fresh box.
+        if any(ch.get("primary_url") for ch in result):
+            try:
+                await asyncio.to_thread(_save_lounge_snapshot_sync, result, now_ts)
+            except Exception:
+                pass
         return {"channels": result, "cached": False}
     return {
         "channels": _lounge_cache["data"],
@@ -14960,6 +15056,11 @@ async def lounge_stream_resolver_health() -> dict:
             "last_failure_reason":       h.last_failure_reason,
             "current_base_url":          h.current_base_url,
             "pattern_version":           h.pattern_version,
+            # True → the resolver has stopped calling this provider (see the
+            # circuit breaker in stream_resolver/health.py). It still gets one
+            # half-open probe every 30 min, so this clears itself if the
+            # provider comes back.
+            "circuit_open":              r.health.is_dead(pid),
         }
     out["browser_started_at"] = r.browser.started_at
     out["browser_eviction_count"] = r.browser.eviction_count
