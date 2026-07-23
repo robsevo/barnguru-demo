@@ -8404,6 +8404,12 @@ def _ytdlp_extract_m3u8(embed_url: str) -> str | None:
 # ---------------------------------------------------------------------------
 _pw_browser = None
 _pw_lock = None
+# Bounds CONCURRENT Playwright extractions. Each holds a full browser context
+# (a real memory cost on the 2GB box); unbounded concurrency let a burst of
+# /stream-proxy embed hits spawn N contexts at once and OOM the whole box
+# (2026-07-22). 1 = strictly serialize — slower under load, but never the box.
+_PW_MAX_CONCURRENT = 1
+_pw_extract_sem = None
 
 
 async def _get_pw_browser():
@@ -8428,6 +8434,16 @@ async def _get_pw_browser():
 
 async def _playwright_extract_m3u8(embed_url: str) -> str | None:
     import asyncio as _aio
+    global _pw_extract_sem
+    if _pw_extract_sem is None:
+        _pw_extract_sem = _aio.Semaphore(_PW_MAX_CONCURRENT)
+    # Serialize extractions and ALWAYS tear the context down in finally — the old
+    # code closed page/ctx only on the success path, so every exception (a slow
+    # embed, a nav timeout) leaked a browser context and the process crept toward
+    # the OOM ceiling. Both together are the 2026-07-22 box-OOM fix.
+    await _pw_extract_sem.acquire()
+    ctx = None
+    page = None
     try:
         browser = await _get_pw_browser()
         ctx = await browser.new_context(
@@ -8530,11 +8546,21 @@ async def _playwright_extract_m3u8(embed_url: str) -> str | None:
             except _aio.TimeoutError:
                 pass
 
-        await page.close()
-        await ctx.close()
         return found[0] if found else None
     except Exception:
         return None
+    finally:
+        try:
+            if page is not None:
+                await page.close()
+        except Exception:
+            pass
+        try:
+            if ctx is not None:
+                await ctx.close()
+        except Exception:
+            pass
+        _pw_extract_sem.release()
 
 
 # ---------------------------------------------------------------------------
