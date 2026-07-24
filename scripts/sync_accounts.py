@@ -14,8 +14,10 @@ Usage:  make sync-accounts
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -50,15 +52,19 @@ def main() -> None:
         sys.exit(f"sync-accounts: run {rid} ended {concl or 'incomplete'!r} — box unreachable?")
 
     _OUT.parent.mkdir(parents=True, exist_ok=True)
-    r = _gh("run", "download", rid, "--name", "accounts", "--dir", str(_OUT.parent))
-    if r.returncode != 0:
-        sys.exit(f"sync-accounts: artifact download failed: {r.stderr.strip()}")
-
-    try:
-        data = json.loads(_OUT.read_text())
-        assert isinstance(data, list) and data
-    except Exception as e:  # noqa: BLE001
-        sys.exit(f"sync-accounts: downloaded file invalid ({e}) — leaving prior copy.")
+    # Download to a temp dir (gh run download won't overwrite an existing file),
+    # validate, then atomically replace the local copy.
+    with tempfile.TemporaryDirectory() as td:
+        r = _gh("run", "download", rid, "--name", "accounts", "--dir", td)
+        if r.returncode != 0:
+            sys.exit(f"sync-accounts: artifact download failed: {r.stderr.strip()}")
+        src = Path(td) / "dynamic_upstream_accounts.json"
+        try:
+            data = json.loads(src.read_text())
+            assert isinstance(data, list) and data
+        except Exception as e:  # noqa: BLE001
+            sys.exit(f"sync-accounts: downloaded file invalid ({e}) — leaving prior copy.")
+        shutil.move(str(src), str(_OUT))  # shutil handles the /tmp→repo cross-device case
     print(f"sync-accounts: wrote {_OUT} ({len(data)} fresh accounts).")
 
 
