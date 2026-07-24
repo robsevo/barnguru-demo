@@ -10132,6 +10132,22 @@ for _row in _load_dynamic_upstream_accounts():
         _upstream_ACCOUNTS.append(_row)
         _seen_upstream.add((_row[1], _row[3]))
 
+# Hard cap the TOTAL account pool — the 2GB box can't hold the full ~26-account
+# workload. 2026-07-24 outage: worker hit ~1.35GB (m3u_plus parses + VOD/EPG/pool
+# scaling with account count) and, with ~400-500MB of Chromium, swap-thrashed and
+# 502'd live-channels. aad6a14 bounds the build's CONCURRENCY (the transient spike);
+# this bounds the COUNT (the persistent baseline). Hardcoded accounts are added
+# first (trusted / English-default) so they're always kept; the scraped tail is
+# trimmed to fit. Empirical: 7 accounts ≈ 840MB used, 26 ≈ 1.35GB. Raise
+# upstream_MAX_ACCOUNTS once the box has more RAM. This supersedes the per-subsystem
+# _VOD/_LIVE slices below (they now slice an already-bounded pool).
+_upstream_MAX_ACCOUNTS = int(os.environ.get("upstream_MAX_ACCOUNTS", "12"))
+if len(_upstream_ACCOUNTS) > _upstream_MAX_ACCOUNTS:
+    _dropped_n = len(_upstream_ACCOUNTS) - _upstream_MAX_ACCOUNTS
+    _upstream_ACCOUNTS = _upstream_ACCOUNTS[:_upstream_MAX_ACCOUNTS]
+    print(f"[upstream] capped account pool to {_upstream_MAX_ACCOUNTS} "
+          f"(dropped {_dropped_n} scraped) — 2GB memory guard", flush=True)
+
 # Residential relay — scripts/iptv_relay.py run on a laptop/Pi and exposed
 # via Cloudflare Tunnel (localhost:8000). When IPTV_LOCAL_PROXY_URL is set,
 # every stream URL we hand to the browser is rewritten to go through that
