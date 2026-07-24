@@ -1,4 +1,4 @@
-.PHONY: test test-rust test-python test-integration build-engine clean dev gretzky epg-ship vod-ship pool-ship
+.PHONY: test test-rust test-python test-integration build-engine clean dev gretzky epg-ship vod-ship pool-ship sync-accounts refresh-all
 
 ## Run all tests (Rust unit/integration + Python smoke + Python integration)
 test: test-rust build-engine test-python test-integration
@@ -44,6 +44,15 @@ vod-ship:
 ## Ships RAW urls; the box relay-wraps on load. e.g. make pool-ship ARGS=--dry-run
 pool-ship:
 	uv run python scripts/pool_ship.py $(ARGS)
+
+## Pull the box's CURRENT upstream accounts onto this PC so the *-ship builds run from
+## fresh accounts (the local copy goes stale). Dispatches push-accounts.yml.
+sync-accounts:
+	uv run python scripts/sync_accounts.py
+
+## One command to refresh everything the box serves: sync fresh accounts, then build
+## + ship the EPG, VOD index, and live pool. Run periodically (or wire to a timer).
+refresh-all: sync-accounts epg-ship vod-ship pool-ship
 
 ## Clean build artifacts
 clean:
