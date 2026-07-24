@@ -8403,7 +8403,10 @@ def _ytdlp_extract_m3u8(embed_url: str) -> str | None:
 # Playwright extraction: intercepts the real m3u8 network request
 # ---------------------------------------------------------------------------
 _pw_browser = None
+_pw_playwright = None          # kept so the idle reaper can stop the driver, not just close the browser
 _pw_lock = None
+_pw_last_use = 0.0             # time.monotonic() of the last extraction — drives idle teardown
+_pw_reaper_task = None
 # Bounds CONCURRENT Playwright extractions. Each holds a full browser context
 # (a real memory cost on the 2GB box); unbounded concurrency let a burst of
 # /stream-proxy embed hits spawn N contexts at once and OOM the whole box
@@ -8411,25 +8414,104 @@ _pw_lock = None
 _PW_MAX_CONCURRENT = 1
 _pw_extract_sem = None
 
+# Don't LAUNCH a cold Chromium when the box is already low on memory. The 2GB VPS
+# runs a ~1GB API worker; a cold Chromium adds ~300-400MB, and stacking that on a
+# nearly-full box tips the whole process into swap-thrash — which wedges the single
+# uvicorn worker and 502s every endpoint, live-channels included (the 2026-07-24
+# outage: MemAvailable was 198MB when Chromium spawned). Below this floor we skip
+# the browser and let the caller fall back to the embed proxy, trading one embed
+# source for keeping the API alive. An already-resident browser is always reused
+# (no new allocation), so this gates only cold launches — never mid-stream work.
+_PW_MIN_AVAIL_MB = float(os.environ.get("PLAYWRIGHT_MIN_AVAIL_MB", "400"))
+# Close the resident browser after this long with no extraction, releasing its
+# ~300-400MB instead of pinning it forever (the old behaviour — _pw_browser was a
+# module global that never came down). The resolver's browser already does this;
+# this ports it to the embed extractor. NOTE: this is Chromium only — VOD seek /
+# audio-tracks / remux live in the relay (ffmpeg) and are untouched.
+_PW_IDLE_CLOSE_S = float(os.environ.get("PLAYWRIGHT_IDLE_S", "240"))
+
+
+def _available_mem_mb() -> float:
+    """MemAvailable in MB from /proc/meminfo. Fails OPEN (returns inf) where
+    /proc isn't present (dev/macOS) so the guard never blocks off-box."""
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) / 1024.0
+    except Exception:
+        pass
+    return float("inf")
+
 
 async def _get_pw_browser():
-    global _pw_browser, _pw_lock
+    """Return the shared Chromium, launching it on first use. Returns None when
+    the box is too low on memory to safely launch a COLD browser — callers must
+    treat None as 'extraction unavailable' and fall back (they already do)."""
+    global _pw_browser, _pw_playwright, _pw_lock, _pw_reaper_task
     import asyncio as _aio
     if _pw_lock is None:
         _pw_lock = _aio.Lock()
     async with _pw_lock:
-        if _pw_browser is None or not _pw_browser.is_connected():
-            from playwright.async_api import async_playwright
-            _pw = await async_playwright().start()
-            _pw_browser = await _pw.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox", "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage", "--disable-gpu",
-                    "--disable-blink-features=AutomationControlled",
-                ],
-            )
+        if _pw_browser is not None and _pw_browser.is_connected():
+            return _pw_browser
+        avail = _available_mem_mb()
+        if avail < _PW_MIN_AVAIL_MB:
+            print(f"[pw-extract] skipping Chromium launch — MemAvailable "
+                  f"{avail:.0f}MB < {_PW_MIN_AVAIL_MB:.0f}MB floor", flush=True)
+            return None
+        from playwright.async_api import async_playwright
+        _pw_playwright = await async_playwright().start()
+        _pw_browser = await _pw_playwright.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox", "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage", "--disable-gpu",
+                "--disable-blink-features=AutomationControlled",
+            ],
+        )
+        if _pw_reaper_task is None or _pw_reaper_task.done():
+            _pw_reaper_task = _aio.create_task(_pw_idle_reaper())
     return _pw_browser
+
+
+async def _close_pw_browser() -> None:
+    """Tear down the resident browser + its driver. Safe when already down."""
+    global _pw_browser, _pw_playwright
+    async with _pw_lock:
+        if _pw_browser is not None:
+            try:
+                await _pw_browser.close()
+            except Exception:
+                pass
+            _pw_browser = None
+        if _pw_playwright is not None:
+            try:
+                await _pw_playwright.stop()
+            except Exception:
+                pass
+            _pw_playwright = None
+
+
+async def _pw_idle_reaper() -> None:
+    """Close the embed-extractor Chromium after _PW_IDLE_CLOSE_S of no use, so a
+    single sports click doesn't pin ~400MB on the 2GB box indefinitely."""
+    import asyncio as _aio
+    import time as _t
+    while True:
+        try:
+            await _aio.sleep(60)
+            if _pw_browser is None:
+                return
+            if _t.monotonic() - _pw_last_use > _PW_IDLE_CLOSE_S:
+                print(f"[pw-extract] idle {_t.monotonic() - _pw_last_use:.0f}s — "
+                      f"closing Chromium", flush=True)
+                await _close_pw_browser()
+                return
+        except _aio.CancelledError:
+            return
+        except Exception as e:
+            print(f"[pw-extract] idle reaper error: {e}", flush=True)
 
 
 async def _playwright_extract_m3u8(embed_url: str) -> str | None:
@@ -8442,10 +8524,17 @@ async def _playwright_extract_m3u8(embed_url: str) -> str | None:
     # embed, a nav timeout) leaked a browser context and the process crept toward
     # the OOM ceiling. Both together are the 2026-07-22 box-OOM fix.
     await _pw_extract_sem.acquire()
+    global _pw_last_use
+    import time as _t_pwuse
     ctx = None
     page = None
     try:
         browser = await _get_pw_browser()
+        if browser is None:
+            # Box is low on memory — skip the browser and let the caller fall
+            # back to the embed proxy. Keeping the API alive beats one source.
+            return None
+        _pw_last_use = _t_pwuse.monotonic()
         ctx = await browser.new_context(
             extra_http_headers={"Referer": "https://onhockey.tv/"},
             # Spoof a real desktop viewport so players don't hide behind mobile layouts
@@ -8560,6 +8649,8 @@ async def _playwright_extract_m3u8(embed_url: str) -> str | None:
                 await ctx.close()
         except Exception:
             pass
+        # Stamp end-of-use so the idle reaper counts down from completion.
+        _pw_last_use = _t_pwuse.monotonic()
         _pw_extract_sem.release()
 
 
