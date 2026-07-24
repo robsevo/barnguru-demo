@@ -10141,7 +10141,7 @@ for _row in _load_dynamic_upstream_accounts():
 # trimmed to fit. Empirical: 7 accounts ≈ 840MB used, 26 ≈ 1.35GB. Raise
 # upstream_MAX_ACCOUNTS once the box has more RAM. This supersedes the per-subsystem
 # _VOD/_LIVE slices below (they now slice an already-bounded pool).
-_upstream_MAX_ACCOUNTS = int(os.environ.get("upstream_MAX_ACCOUNTS", "16"))
+_upstream_MAX_ACCOUNTS = int(os.environ.get("upstream_MAX_ACCOUNTS", "14"))
 if len(_upstream_ACCOUNTS) > _upstream_MAX_ACCOUNTS:
     _dropped_n = len(_upstream_ACCOUNTS) - _upstream_MAX_ACCOUNTS
     _upstream_ACCOUNTS = _upstream_ACCOUNTS[:_upstream_MAX_ACCOUNTS]
