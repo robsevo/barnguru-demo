@@ -10389,6 +10389,9 @@ async def _fetch_upstream_channels(
 
         out: list[dict] = []
         lines = text.splitlines()
+        # Drop the raw body now — for a mega-panel `text` is 150-200MB and is
+        # unused once split; holding it alongside `lines` doubled the peak.
+        del text
         i = 0
         while i < len(lines) - 1:
             line = lines[i].strip()
@@ -10711,17 +10714,35 @@ async def _src_m3u_playlists() -> list[dict]:
     return out
 
 
-async def _src_upstream() -> list[dict]:
-    """Source 4: upstream Codes accounts — fire all in parallel, merge results.
+_upstream_FETCH_CONCURRENCY = int(os.environ.get("upstream_FETCH_CONCURRENCY", "3"))
+_upstream_fetch_sem: "asyncio.Semaphore | None" = None
 
-    Uses the capped _LIVE_ACCOUNTS subset (not the full pool): each account adds
-    per-channel match + liveness-verify cost, and fanning across all 24+ panels
-    made the cold build >20min on the 2GB box. 16 keeps most of the depth.
+
+async def _src_upstream() -> list[dict]:
+    """Source 4: upstream Codes accounts — merge live channels from each panel.
+
+    Concurrency is BOUNDED (default 3, upstream_FETCH_CONCURRENCY). Each panel's
+    get.php?type=m3u_plus body is downloaded whole and split into lines before
+    filtering; a mega-panel like an upstream host emits ~550k channels (~150-200MB of
+    text, plus a ~150MB lines list), so ~350-500MB is live PER account while it
+    parses. The old unbounded gather held all ~26 of those at once — a multi-GB
+    spike that CPython keeps as RSS, which swap-thrashed the 2GB box and 502'd
+    live-channels (the 2026-07-24 outage). The semaphore caps the peak to N
+    concurrent parses; _fetch_via_m3u drops the body string the moment it's
+    split. Mirrors the Semaphore(3) the XMLTV/EPG builder already uses.
     """
+    global _upstream_fetch_sem
+    if _upstream_fetch_sem is None:
+        _upstream_fetch_sem = asyncio.Semaphore(_upstream_FETCH_CONCURRENCY)
+
+    async def _guarded(lbl: str, h: str, p: int, u: str, pw: str) -> list[dict]:
+        async with _upstream_fetch_sem:
+            return await _fetch_upstream_channels(lbl, h, p, u, pw)
+
     out: list[dict] = []
     try:
         results = await asyncio.gather(
-            *[_fetch_upstream_channels(lbl, h, p, u, pw) for lbl, h, p, u, pw in _LIVE_ACCOUNTS],
+            *[_guarded(lbl, h, p, u, pw) for lbl, h, p, u, pw in _LIVE_ACCOUNTS],
             return_exceptions=True,
         )
         for res in results:
