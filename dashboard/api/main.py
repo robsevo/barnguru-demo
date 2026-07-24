@@ -10267,6 +10267,13 @@ _TEAM_CITY_FOR_CBC: dict[str, str] = {
 }
 
 
+# Hosts from a shipped off-box pool (scripts/pool_ship.py) whose accounts this box
+# doesn't itself hold — registered by _load_shipped_iptv_pool so their upstream URLs
+# still route through the relay (with THIS box's token). Empty until a pool is
+# loaded, so the default behaviour is unchanged.
+_shipped_pool_hosts: "set[str]" = set()
+
+
 def _rewrite_iptv_url(url: str) -> str:
     """Route an upstream stream URL through the local residential relay, if configured.
 
@@ -10282,7 +10289,7 @@ def _rewrite_iptv_url(url: str) -> str:
         host = urlparse(url).hostname or ""
     except Exception:
         return url
-    if host.lower() not in _upstream_HOSTS:
+    if host.lower() not in _upstream_HOSTS and host.lower() not in _shipped_pool_hosts:
         return url
     # an upstream host hard-codes `/play/<token>/m3u8` in its M3U, but that path
     # returns 404 — only the `/ts` variant serves raw MPEG-TS. Rewrite to /ts.
@@ -10564,11 +10571,81 @@ def _kick_iptv_refresh() -> None:
         pass
 
 
+# Shipped live pool (built off-box by scripts/pool_ship.py). Preferring it skips
+# the box's own m3u_plus parse across every account — the account-scaling spike
+# (an upstream host ~554k lines × N) that OOM'd the 2GB box. URLs arrive RAW; each is
+# relay-wrapped HERE on load (the relay token stays on the box). Pure optimization:
+# a missing / stale / corrupt file falls through to the on-box self-build. mtime-cached.
+_IPTV_POOL_SHIP_FILE = Path(os.environ.get(
+    "IPTV_POOL_SHIP_FILE",
+    str(Path(__file__).resolve().parents[2] / "data" / "iptv_pool.json")))
+_IPTV_POOL_SHIP_MAX_AGE = 36 * 3600
+_shipped_iptv_pool_cache: "tuple[float, list]" = (0.0, [])
+
+
+def _load_shipped_iptv_pool() -> "list | None":
+    """The off-box live pool with each URL relay-wrapped for THIS box, or None when
+    missing / empty / too old. mtime-cached. Registers the pool's upstream hosts in
+    _shipped_pool_hosts first so _rewrite_iptv_url routes hosts from accounts this
+    box doesn't itself hold."""
+    global _shipped_iptv_pool_cache, _shipped_pool_hosts
+    try:
+        mtime = _IPTV_POOL_SHIP_FILE.stat().st_mtime
+    except OSError:
+        return None
+    if _time_iptv.time() - mtime > _IPTV_POOL_SHIP_MAX_AGE:
+        return None  # stale ship — self-build fresh
+    if mtime == _shipped_iptv_pool_cache[0]:
+        return _shipped_iptv_pool_cache[1] or None
+    try:
+        doc = json.loads(_IPTV_POOL_SHIP_FILE.read_text())
+        raw = doc.get("channels")
+        if not isinstance(raw, list) or not raw:
+            _shipped_iptv_pool_cache = (mtime, [])
+            return None
+        # Pass 1: register upstream-source hosts so their URLs route through the relay
+        # (tvpass / m3u sources are served direct, exactly like a self-build).
+        hosts: set[str] = set()
+        for ch in raw:
+            if ch.get("source") == "upstream":
+                u = ch.get("url") or ""
+                if u.startswith("http") and "/m3u8?u=" not in u and "/hls?u=" not in u:
+                    h = (urlparse(u).hostname or "").lower()
+                    if h:
+                        hosts.add(h)
+        _shipped_pool_hosts = hosts
+        # Pass 2: relay-wrap each URL (idempotent — already-wrapped URLs untouched).
+        out = []
+        for ch in raw:
+            u = ch.get("url") or ""
+            if u and "/m3u8?u=" not in u and "/hls?u=" not in u:
+                ch = {**ch, "url": _rewrite_iptv_url(u)}
+            out.append(ch)
+    except (OSError, ValueError):
+        _shipped_iptv_pool_cache = (mtime, [])
+        return None
+    _shipped_iptv_pool_cache = (mtime, out)
+    print(f"[iptv-pool] using shipped pool ({len(out)} channels, "
+          f"built {doc.get('built_utc', '')})", flush=True)
+    return out
+
+
 @app.get("/iptv-channels")
 async def iptv_channels(force: bool = False, grep: str = ""):
     now = _time_iptv.time()
     have = bool(_IPTV_CACHE["data"])
     fresh = have and (now - _IPTV_CACHE["ts"] < _IPTV_TTL)
+
+    # Prefer the off-box-built pool over self-building the m3u-parse spike. A
+    # missing / stale file leaves have/fresh untouched and we fall through to the
+    # existing self-build path below — nothing breaks when the PC hasn't shipped.
+    if not force and (not have or not fresh):
+        shipped = _load_shipped_iptv_pool()
+        if shipped is not None:
+            _IPTV_CACHE["data"] = shipped
+            _IPTV_CACHE["ts"] = now
+            have = True
+            fresh = True
 
     def _maybe_grep(payload: dict) -> dict:
         # ?grep=<substr>: titles-only view of the pool, case-insensitive. The

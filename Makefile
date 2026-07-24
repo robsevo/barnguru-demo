@@ -1,4 +1,4 @@
-.PHONY: test test-rust test-python test-integration build-engine clean dev gretzky epg-ship vod-ship
+.PHONY: test test-rust test-python test-integration build-engine clean dev gretzky epg-ship vod-ship pool-ship
 
 ## Run all tests (Rust unit/integration + Python smoke + Python integration)
 test: test-rust build-engine test-python test-integration
@@ -38,6 +38,12 @@ epg-ship:
 ## the box relay-wraps on load. e.g. make vod-ship ARGS=--dry-run
 vod-ship:
 	uv run python scripts/vod_ship.py $(ARGS)
+
+## Build the live IPTV channel pool locally + ship it to the box (offloads the
+## account-scaling m3u_plus parse — an upstream host ~554k lines — that OOM'd the 2GB box).
+## Ships RAW urls; the box relay-wraps on load. e.g. make pool-ship ARGS=--dry-run
+pool-ship:
+	uv run python scripts/pool_ship.py $(ARGS)
 
 ## Clean build artifacts
 clean:
