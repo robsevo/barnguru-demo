@@ -13800,14 +13800,71 @@ def _kick_vod_stream_index_refresh() -> None:
         pass
 
 
+# Shipped VOD stream index (built off-box by scripts/vod_ship.py), same laptop→box
+# pattern as the EPG. Preferring it skips the box's own get_vod_streams fan-out —
+# the account-scaling memory spike (an upstream host ~24MB × N accounts) that OOM'd the
+# 2GB box. URLs arrive RAW and are relay-wrapped HERE on load, so the result is
+# byte-identical to a self-build. Pure optimization: a missing / stale / corrupt
+# file falls straight through to the on-box self-build below. Live streaming is a
+# separate path and never touches this.
+_VOD_INDEX_SHIP_FILE = Path(os.environ.get(
+    "VOD_INDEX_SHIP_FILE",
+    str(Path(__file__).resolve().parents[2] / "data" / "vod_stream_index.json")))
+_VOD_INDEX_SHIP_MAX_AGE = 36 * 3600   # older than this ⇒ too stale to trust; self-build
+_shipped_vod_index_cache: "tuple[float, dict]" = (0.0, {})
+
+
+def _load_shipped_vod_stream_index() -> "tuple[dict, str] | None":
+    """(index, built_utc) from the shipped file, each URL relay-wrapped for THIS
+    box, or None when missing / empty / too old. mtime-cached like
+    _load_shipped_lounge_epg: an unchanged file returns the cached (already-wrapped)
+    parse; a re-shipped file is re-read once — so ship-vod.yml needs no restart."""
+    global _shipped_vod_index_cache
+    try:
+        mtime = _VOD_INDEX_SHIP_FILE.stat().st_mtime
+    except OSError:
+        return None
+    if _time.time() - mtime > _VOD_INDEX_SHIP_MAX_AGE:
+        return None  # stale ship — let the box self-build fresh
+    if mtime == _shipped_vod_index_cache[0]:
+        cached = _shipped_vod_index_cache[1]
+        return (cached["index"], cached["built_utc"]) if cached else None
+    try:
+        doc = json.loads(_VOD_INDEX_SHIP_FILE.read_text())
+        raw = doc.get("index")
+        if not isinstance(raw, dict) or not raw:
+            _shipped_vod_index_cache = (mtime, {})
+            return None
+        built_utc = doc.get("built_utc") or ""
+        # Wrap each raw URL with this box's relay. Idempotent: a URL that is
+        # already a /vod?u= relay URL (a ship that had the tunnel set) is left
+        # alone, so we can never double-wrap.
+        wrapped: dict[str, list[str]] = {}
+        for k, urls in raw.items():
+            wrapped[k] = [u if "/vod?u=" in u else _relay_wrap_vod(u) for u in urls]
+    except (OSError, ValueError):
+        _shipped_vod_index_cache = (mtime, {})
+        return None
+    _shipped_vod_index_cache = (mtime, {"index": wrapped, "built_utc": built_utc})
+    print(f"[vod-index] using shipped index ({len(wrapped)} keys, built {built_utc})", flush=True)
+    return (wrapped, built_utc)
+
+
 def _vod_streams_for(tmdb_id: str, name: str = "") -> list[str]:
     """Cached lookup of relay VOD URLs for a tmdb_id. Tries the tmdb key first,
     then the normalized TMDB title (providers often don't tmdb-tag movies, so the
-    name key is what actually matches). Kicks a background build on cold cache."""
+    name key is what actually matches). Prefers the shipped index (off-box build);
+    on a cold/stale cache with no fresh ship, kicks the on-box background build."""
     data = _vod_stream_index["data"]
     age = _time.time() - _vod_stream_index["ts"]
     if data is None or age > _VOD_STREAM_INDEX_TTL:
-        _kick_vod_stream_index_refresh()
+        shipped = _load_shipped_vod_stream_index()
+        if shipped is not None:
+            _vod_stream_index["data"] = shipped[0]
+            _vod_stream_index["ts"] = _time.time()
+            data = shipped[0]
+        else:
+            _kick_vod_stream_index_refresh()
     data = data or {}
     hits = data.get(str(tmdb_id), [])
     if not hits and name:

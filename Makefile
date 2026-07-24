@@ -1,4 +1,4 @@
-.PHONY: test test-rust test-python test-integration build-engine clean dev gretzky epg-ship
+.PHONY: test test-rust test-python test-integration build-engine clean dev gretzky epg-ship vod-ship
 
 ## Run all tests (Rust unit/integration + Python smoke + Python integration)
 test: test-rust build-engine test-python test-integration
@@ -32,6 +32,12 @@ gretzky:
 ## OOM-prone on-box XMLTV build). Pass flags via ARGS, e.g. make epg-ship ARGS=--dry-run
 epg-ship:
 	uv run python scripts/gretzky.py epg-ship -- $(ARGS)
+
+## Build the VOD stream index locally + ship it to the box (offloads the
+## account-scaling get_vod_streams fan-out that OOM'd the 2GB box). Ships RAW urls;
+## the box relay-wraps on load. e.g. make vod-ship ARGS=--dry-run
+vod-ship:
+	uv run python scripts/vod_ship.py $(ARGS)
 
 ## Clean build artifacts
 clean:
