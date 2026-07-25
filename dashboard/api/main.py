@@ -12648,7 +12648,30 @@ _LOUNGE_CHANNEL_NAMES: list[str] = [
 # native commentary). For THESE names only, the lounge matcher skips the
 # English/US-CA allowlist gate — the gate exists to keep foreign audio off US
 # channels, which doesn't apply when the channel IS the foreign feed.
-_LOUNGE_FOREIGN_OK: set[str] = {"Sky Sport Bundesliga", "LaLiga TV"}
+_LOUNGE_FOREIGN_OK: set[str] = {"Sky Sport Bundesliga", "LaLiga TV", "Serie A"}
+
+# …and an AUTOMATIC exemption so European/native-audio channels don't need a second
+# edit here every time one is added to _LOUNGE_CHANNEL_NAMES. If the curated channel
+# NAME is a European league or broadcaster, native commentary IS the channel, so the
+# English gate must not filter its candidates. Adding e.g. "Ligue 1 TV",
+# "Sky Sport Serie A" or "Eredivisie TV" to the lineup now Just Works.
+#
+# Deliberately NOT matched: plain "Premier League" / "Champions League" — the curated
+# entries for those are the US English feeds ("Peacock Premier League"), and exempting
+# them would let an Arabic/Spanish commentary feed win the slot. Name a channel after
+# its foreign broadcaster (e.g. "beIN Sports Arabia") when you DO want that.
+_FOREIGN_LEAGUE_NAME_RE = _re_bc.compile(
+    r"\b(?:la\s?liga|bundesliga|serie\s?a|ligue\s?1|eredivisie|primeira|"
+    r"s[uü]per\s?lig|liga\s?mx|sky\s?spor?t|dazn|movistar|canal\+|rmc\s?sport|"
+    r"sport\s?tv|bein\s?sports?\s?(?:arabia|mena)|astro\s?supersport)\b",
+    _re_bc.I,
+)
+
+
+def _lounge_foreign_ok(ch_name: str) -> bool:
+    """True when the English/US-CA gate should be skipped for this curated channel."""
+    return (ch_name in _LOUNGE_FOREIGN_OK
+            or bool(_FOREIGN_LEAGUE_NAME_RE.search(ch_name or "")))
 
 # Per-channel upstream-host blocklist. Same semantics as
 # _BARNCENTRE_HOST_BLOCKLIST — drop hosts that auth-pass + serve broken
@@ -12980,7 +13003,7 @@ async def _build_lounge_payload() -> dict:
             # can never land on a US/CA channel. Channels in _LOUNGE_FOREIGN_OK
             # (native-language league feeds) skip the gate — foreign audio IS
             # the channel there.
-            if ch_name not in _LOUNGE_FOREIGN_OK and not _candidate_is_english(
+            if not _lounge_foreign_ok(ch_name) and not _candidate_is_english(
                 ch.get("title", ""), ch.get("category", ""), ch.get("english_default", True)
             ):
                 continue
