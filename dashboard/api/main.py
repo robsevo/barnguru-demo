@@ -10023,6 +10023,15 @@ _LOUNGE_CABLE_KEYWORDS = [
     # ── Requested cable adds (2026-07-05). " bet" has the leading space on
     # purpose: bare "bet" substring-matches better/alphabet/bet365 noise. ──
     "animal planet", "bbc america", " bet", "lifetime", "travel channel",
+    # ── Requested adds (2026-07-25) — each verified present in the live pool with
+    # >=4 distinct panels carrying it, so they survive a panel going down. "msg"
+    # and " tbs" carry a leading/space guard: bare "msg" substring-matches
+    # "message"/"msgtv" noise and "tbs" matches "tbstv"/random tokens. ──
+    "cnbc", " tbs", "tbs hd", "tbs east", "msg", "nbc sports", "sportsnet pittsburgh",
+    "bally sports", "nat geo wild", "game show network",
+    # UK/African English-commentary league feeds (see _FOREIGN_LEAGUE_NAME_RE /
+    # _LOUNGE_FOREIGN_OK — these are English, just region-tagged).
+    "sky sports premier",
 ]
 
 # Combined filter used at IPTV-channel enumeration time. Sources upstream of
@@ -12659,6 +12668,24 @@ _LOUNGE_CHANNEL_NAMES: list[str] = [
     "Champions League", "MLS",
     # ── Requested cable adds (2026-07-04) ──
     "Animal Planet", "BBC America", "BET", "Lifetime", "Travel Channel",
+    # ── Requested adds (2026-07-25). Every one was confirmed in the live pool
+    # with >=4 distinct panels before being added (CNBC 11, Game Show Network 9,
+    # TBS 8, MSG 8, Paramount Network 8, NBC Sports Boston/Chicago 7, Nat Geo
+    # Wild 5, Bally Sports North/Detroit 5-6, AT&T SportsNet Pittsburgh 6), so
+    # none of these lands as an empty slot. Logos come from the DuckDuckGo
+    # brand-domain fallback in tvspot's lib/logos.ts — no files to host. ──
+    "CNBC", "TBS", "Paramount Network", "Game Show Network", "Nat Geo Wild",
+    # Regional sports networks — local NHL/NBA coverage this lineup had no way to
+    # reach (Rangers/Knicks, Bruins, Blackhawks, Penguins, Wild, Red Wings).
+    "MSG", "MSG Plus", "NBC Sports Boston", "NBC Sports Chicago",
+    "AT&T SportsNet Pittsburgh", "Bally Sports North", "Bally Sports Detroit",
+    # Premier League with ENGLISH commentary. The pool's only English PL feeds are
+    # the UK Sky and African SuperSport ones; they're exempt from the US/CA gate
+    # via _FOREIGN_LEAGUE_NAME_RE ("sky sport"/"supersport" match) exactly like
+    # Sky Sport Bundesliga.
+    # SuperSport's titles carry a "^AF:" prefix that survives _normalize_ch, so
+    # _ch_matches can never hit them — left out rather than shipped as an empty slot.
+    "Sky Sports Premier League",
 ]
 
 # Curated channels whose content is inherently non-English (league feeds with
@@ -12722,14 +12749,80 @@ _LOUNGE_ADJACENT_AFTER: dict[str, list[str]] = {
 }
 
 
+# Guide layout, cable-style. _LOUNGE_CHANNEL_NAMES is ordered for MATCHING (longest
+# names claim candidates first) and happens to start with the whole sports block, so
+# the guide opened on 20+ sports channels before a single network or news channel —
+# not how a real lineup reads. These blocks reorder the GUIDE only; matching and
+# _LOUNGE_ADJACENT_AFTER adjacency are untouched. Anything not listed keeps its
+# relative order and lands in the "everything else" block before the 24/7 filler.
+_LOUNGE_GUIDE_BLOCKS: list[tuple[str, list[str]]] = [
+    # 1. Local + national networks — what a cable guide puts on channel 1.
+    ("networks", ["CBC", "CTV", "CTV 2", "Global", "Citytv", "TVA", "Noovo", "ICI Tele"]),
+    # 2. News.
+    ("news", ["CBC News Network", "CTV News", "CTV News Network", "CP24", "Global News",
+              "CNN", "CNN International", "HLN", "MSNBC", "Fox News", "ABC News Live",
+              "CNBC", "Bloomberg", "BNN Bloomberg", "RDI", "ICI RDI", "LCN"]),
+    # 3. Sports — still prominent, just no longer the entire first page.
+    ("sports", ["TSN1", "TSN2", "TSN3", "TSN4", "TSN5",
+                "Sportsnet", "Sportsnet East", "Sportsnet Ontario", "Sportsnet West",
+                "Sportsnet Pacific", "Sportsnet 360", "Sportsnet One",
+                "ESPN", "ESPN2", "ESPNU", "ESPNews", "ESPN+",
+                "NHL Network", "NBA TV", "NFL Network", "NFL RedZone",
+                "FS1", "FS2", "NESN", "FanDuel", "CBS Sports", "CBS Sports Network",
+                "CBS Sports Golazo", "beIN Sports", "beIN Sports Xtra", "DAZN",
+                "MSG", "MSG Plus", "NBC Sports Boston", "NBC Sports Chicago",
+                "AT&T SportsNet Pittsburgh", "Bally Sports North", "Bally Sports Detroit",
+                "Sky Sports Premier League", "Peacock Premier League", "MLS",
+                "Serie A", "LaLiga TV", "Sky Sport Bundesliga",
+                "RDS", "RDS 2", "RDS INFO", "TVA Sports", "TVA Sports 2"]),
+    # 4. Premium movie networks.
+    ("movies", ["HBO", "HBO Max", "Cinemax", "Showtime", "Starz", "Paramount+", "AMC"]),
+    # 5. General entertainment.
+    ("entertainment", ["TNT", "TBS", "FX", "FXX", "Paramount Network", "A&E",
+                       "Comedy Central", "Catchy Comedy", "BBC America", "BET",
+                       "Lifetime", "MTV", "MTV Live", "Game Show Network",
+                       "Court TV", "Reelz", "Showcase", "W Network", "Slice"]),
+    # 6. Factual / lifestyle.
+    ("factual", ["Discovery", "Discovery Science", "TLC", "History", "National Geographic",
+                 "Nat Geo Wild", "Animal Planet", "Investigation Discovery", "ID",
+                 "Oxygen", "Travel Channel", "Food Network", "HGTV", "Canal D",
+                 "Canal Vie", "TV5"]),
+    # 7. Kids / animation (adult-animation 24/7 channels stay in filler, below).
+    ("kids", ["Cartoon Network", "Adult Swim", "Teletoon", "Boomerang"]),
+]
+
+# 24/7 single-show channels go LAST: they're filler, and a guide that opens on
+# "24/7 Family Guy" reads like a pirate list rather than a lineup.
+_LOUNGE_GUIDE_FILLER_PREFIX = "24/7 "
+
+
 def _ordered_lounge_names() -> list[str]:
-    """`_LOUNGE_CHANNEL_NAMES` reordered so each `_LOUNGE_ADJACENT_AFTER`
-    follower sits right after its anchor. Followers are pulled from their
-    original spot and re-inserted; every other name keeps its relative order."""
-    followers = {f for fs in _LOUNGE_ADJACENT_AFTER.values() for f in fs}
+    """Guide order: cable-style genre blocks (`_LOUNGE_GUIDE_BLOCKS`), then anything
+    uncategorised, then 24/7 filler — with each `_LOUNGE_ADJACENT_AFTER` follower
+    pulled to sit right beside its anchor. Only affects channel_number/guide order;
+    `_LOUNGE_CHANNEL_NAMES` remains the matching source of truth."""
     present = set(_LOUNGE_CHANNEL_NAMES)
+    followers = {f for fs in _LOUNGE_ADJACENT_AFTER.values() for f in fs}
+
+    # Blocks first (only names we actually carry), then the leftovers in their
+    # original relative order, then filler.
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for _label, names in _LOUNGE_GUIDE_BLOCKS:
+        for n in names:
+            if n in present and n not in seen:
+                ordered.append(n)
+                seen.add(n)
+    rest = [n for n in _LOUNGE_CHANNEL_NAMES
+            if n not in seen and not n.startswith(_LOUNGE_GUIDE_FILLER_PREFIX)]
+    filler = [n for n in _LOUNGE_CHANNEL_NAMES
+              if n not in seen and n.startswith(_LOUNGE_GUIDE_FILLER_PREFIX)]
+    ordered.extend(rest)
+    ordered.extend(filler)
+
+    # Apply adjacency last so a follower can never be stranded by the blocks.
     out: list[str] = []
-    for name in _LOUNGE_CHANNEL_NAMES:
+    for name in ordered:
         if name in followers:
             continue  # placed after its anchor instead
         out.append(name)
