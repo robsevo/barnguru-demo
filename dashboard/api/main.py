@@ -10620,6 +10620,12 @@ def _load_shipped_iptv_pool() -> "list | None":
         # the primary — 1-connection panels (an upstream host measured 1/1) otherwise become
         # the default source and 456 the second viewer. Only ADDS knowledge: hosts the
         # ship didn't measure keep whatever the accounts file already said.
+        dh = doc.get("demoted_hosts")
+        if isinstance(dh, list):
+            global _shipped_demoted_hosts
+            _shipped_demoted_hosts = {str(h).lower() for h in dh}
+            print(f"[iptv-pool] stream-demote list from probe: "
+                  f"{sorted(_shipped_demoted_hosts) or '(none — all healthy)'}", flush=True)
         cap = doc.get("capacity")
         if isinstance(cap, dict):
             for _h, _mx in cap.items():
@@ -11746,8 +11752,19 @@ def _title_region(title: str) -> str:
 _LIVE_STREAM_DEMOTED_HOSTS: frozenset[str] = frozenset({"an upstream host.ddns.net"})
 
 
+# Overridden by the nightly off-box stream probe (scripts/pool_ship.py ships
+# `demoted_hosts` in the pool after probing real streams THROUGH the relay). None
+# until a pool carrying that key is loaded, so the hardcoded set above stays the
+# default — and the probe omits the key entirely when it can't trust its own result
+# (e.g. relay down), rather than shipping an empty list that would un-demote
+# everything. This is what lets a recovered host rejoin automatically.
+_shipped_demoted_hosts: "set[str] | None" = None
+
+
 def _live_demoted(url: str) -> bool:
-    return any(h in url for h in _LIVE_STREAM_DEMOTED_HOSTS)
+    hosts = (_shipped_demoted_hosts if _shipped_demoted_hosts is not None
+             else _LIVE_STREAM_DEMOTED_HOSTS)
+    return any(h in url for h in hosts)
 
 
 def _sort_by_url_priority(candidates: list[dict], ch_name: str | None = None) -> list[dict]:

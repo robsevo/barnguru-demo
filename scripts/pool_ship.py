@@ -52,6 +52,7 @@ _SEED = [
     "_upstream_ACCOUNTS",
     "_load_dynamic_upstream_accounts",
     "_verify_stream_alive",    # liveness probe (the check the box can't afford)
+    "_LIVE_STREAM_DEMOTED_HOSTS",  # the box's current stream-demote list
 ]
 
 # Sources die at the PANEL (host) level — a down panel returns nothing for ALL its
@@ -318,6 +319,87 @@ async def _verify_accounts_via_relay(accounts: list, relay: str, token: str) -> 
             "capacity": capacity}
 
 
+# Real-stream health, probed THROUGH the relay — the only way to tell "panel
+# authenticates fine but its stream origin is hung", which is what the box's
+# _LIVE_STREAM_DEMOTED_HOSTS exists for. Scoped to the hosts that decide primaries
+# (curated panels + whoever is currently demoted) because /hls spawns an ffmpeg
+# session on the relay per probe; a full sweep would hammer the box that serves TV.
+_STREAM_PROBES_PER_HOST = int(os.environ.get("STREAM_PROBES_PER_HOST", "5"))
+_STREAM_PROBE_CONCURRENCY = int(os.environ.get("STREAM_PROBE_CONCURRENCY", "4"))
+# A host must serve a real manifest on at least this share of probes to be trusted.
+_RECOVER_RATE = float(os.environ.get("DEMOTE_RECOVER_RATE", "0.5"))
+
+
+def _relay_stream_url(u: str, relay: str, token: str) -> str:
+    """Mirror the box's _rewrite_iptv_url so we probe exactly what it serves."""
+    from urllib.parse import quote
+    inner = u
+    if (urlparse(u).hostname or "").lower() == "an upstream host.ddns.net":
+        pre, sep, rest = inner.partition("?")
+        if pre.endswith("/m3u8"):
+            inner = pre[: -len("/m3u8")] + "/ts" + (sep + rest if sep else "")
+    ep = "m3u8" if ".m3u8" in inner.lower().split("?", 1)[0] else "hls"
+    return f"{relay}/{ep}?u={quote(inner, safe='')}&t={quote(token, safe='')}"
+
+
+async def _verify_stream_health(channels: list, hosts: set, relay: str, token: str) -> dict:
+    """{host: (ok, tried)} from probing real streams through the relay."""
+    import httpx
+    by_host: dict[str, list] = {}
+    for ch in channels:
+        h = _host_of(ch.get("url", ""))
+        if h in hosts:
+            by_host.setdefault(h, []).append(ch.get("url", ""))
+
+    sem = asyncio.Semaphore(_STREAM_PROBE_CONCURRENCY)
+
+    async def _probe(u: str) -> bool:
+        async with sem:
+            try:
+                async with httpx.AsyncClient(timeout=22.0, follow_redirects=True,
+                                             headers={"Range": "bytes=0-2047"}) as cl:
+                    r = await asyncio.wait_for(
+                        cl.get(_relay_stream_url(u, relay, token)), timeout=25.0)
+            except Exception:  # noqa: BLE001
+                return False
+            if r.status_code not in (200, 206) or not r.text:
+                return False
+            return "#EXTINF" in r.text or "#EXT-X-MEDIA-SEQUENCE" in r.text
+
+    out: dict[str, tuple] = {}
+    for h, urls in by_host.items():
+        step = max(1, len(urls) // _STREAM_PROBES_PER_HOST)
+        sample = urls[::step][:_STREAM_PROBES_PER_HOST]
+        res = await asyncio.gather(*[_probe(u) for u in sample])
+        out[h] = (sum(res), len(res))
+        print(f"pool-ship:   streams {h:26} {sum(res)}/{len(res)} served a manifest")
+    return out
+
+
+def _demote_decision(health: dict, currently: set) -> "list[str] | None":
+    """New demote list from measured stream health, or None when the measurement
+    itself is untrustworthy (nothing worked anywhere ⇒ blame the relay, not the
+    panels) so the box keeps its own hardcoded list."""
+    if not health:
+        return None
+    if sum(ok for ok, _ in health.values()) == 0:
+        print("pool-ship: NO host served a stream — treating the probe as unreliable "
+              "(relay down?); shipping no demote override.", file=sys.stderr)
+        return None
+    out = set(currently)
+    for h, (ok, tried) in health.items():
+        if not tried:
+            continue
+        rate = ok / tried
+        if h in out and rate >= _RECOVER_RATE:
+            out.discard(h)
+            print(f"pool-ship: UN-DEMOTING {h} — streams recovered ({ok}/{tried})")
+        elif h not in out and tried >= 3 and ok == 0:
+            out.add(h)
+            print(f"pool-ship: DEMOTING {h} — authenticates but no stream served (0/{tried})")
+    return sorted(out)
+
+
 def _prune_by_dead_accounts(channels: list, verdict: dict, protected: set) -> list:
     """Drop sources belonging to accounts the relay says are dead. A source whose
     username isn't in its URL is dropped only when EVERY probed account on its host
@@ -420,7 +502,7 @@ def main() -> None:
         chans = await ns["_build_iptv_channels"]()
         print(f"pool-ship: built {len(chans)} channels.")
         if len(chans) < _MIN_CHANNELS:
-            return chans, {}  # let main() abort below
+            return chans, {}, None  # let main() abort below
         creds = _relay_creds()
         if creds:
             # Authoritative path: per-account verdicts from the relay's residential
@@ -432,13 +514,21 @@ def main() -> None:
             before = len(chans)
             chans = _prune_by_dead_accounts(chans, verdict, set())
             print(f"pool-ship: dropped {before - len(chans)} sources from dead accounts.")
-            return chans, verdict.get("capacity") or {}
+            # Stream-level health for the hosts that decide primaries: the curated
+            # panels plus anyone currently demoted. This is what lets a recovered
+            # an upstream host (capacity 15, carries the channels an upstream host bottlenecks)
+            # come back automatically instead of waiting on a human to notice.
+            demoted_now = {str(h).lower() for h in ns.get("_LIVE_STREAM_DEMOTED_HOSTS") or ()}
+            probe_hosts = (ns.get("_HARDCODED_HOSTS") or set()) | demoted_now
+            health = await _verify_stream_health(chans, probe_hosts, relay, token)
+            demote = _demote_decision(health, demoted_now)
+            return chans, verdict.get("capacity") or {}, demote
         print("pool-ship: no relay creds at ~/.config/grtzky/relay.env "
               "(run `make sync-relay-token`) — falling back to direct host-sampling.",
               file=sys.stderr)
-        return await _verify_and_prune(ns, chans), {}
+        return await _verify_and_prune(ns, chans), {}, None
 
-    channels, capacity = asyncio.run(_run())
+    channels, capacity, demoted = asyncio.run(_run())
     if len(channels) < _MIN_CHANNELS:
         sys.exit(f"pool-ship: only {len(channels)} channels (< {_MIN_CHANNELS}) — panels "
                  f"likely unreachable; NOT shipping (box keeps its own pool).")
@@ -450,6 +540,11 @@ def main() -> None:
     doc = {"built_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
            "capacity": capacity,
            "channels": channels}
+    # Measured stream-demote list. Omitted (not empty!) when the probe was
+    # inconclusive, so the box falls back to its own hardcoded set.
+    if demoted is not None:
+        doc["demoted_hosts"] = demoted
+        print(f"pool-ship: shipping demoted_hosts={demoted}")
     _OUT.parent.mkdir(parents=True, exist_ok=True)
     tmp = _OUT.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(doc, ensure_ascii=False))
