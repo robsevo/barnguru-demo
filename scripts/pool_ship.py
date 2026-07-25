@@ -276,6 +276,7 @@ async def _verify_accounts_via_relay(accounts: list, relay: str, token: str) -> 
 
     dead, alive_hosts, probed_hosts, busy, unknown = set(), set(), set(), [], 0
     capacity: dict[str, int] = {}
+    contradictory: list[str] = []
     for label, host, user, alive, cons in results:
         h = str(host).lower()
         if alive is None:
@@ -285,21 +286,31 @@ async def _verify_accounts_via_relay(accounts: list, relay: str, token: str) -> 
         if alive:
             alive_hosts.add(h)
             if cons:
-                # Keep the most permissive capacity seen for a host (0 = unlimited
-                # wins). This is shipped so the box can rank never-busy accounts
-                # first — the actual cause of "source is busy".
-                mx = cons[1]
-                prev = capacity.get(h)
-                if prev is None or mx == 0 or (prev != 0 and mx > prev):
-                    capacity[h] = mx
-                if mx > 0 and cons[0] >= mx:
-                    busy.append(f"{label}({cons[0]}/{mx})")
+                act, mx = cons
+                # TRUST max_connections only when the panel's own numbers are
+                # self-consistent. an upstream host reported active=25 against max=1 — a
+                # 1-connection account cannot serve 25, so that field is misreported
+                # and must NOT be shipped as "worst capacity" (it would demote a
+                # source that demonstrably serves many viewers). Contradictory hosts
+                # are simply omitted, leaving the box's neutral ranking in place.
+                if mx > 0 and act > mx:
+                    contradictory.append(f"{label}({act}/{mx})")
+                else:
+                    # Keep the most permissive capacity seen for a host (0 = unlimited).
+                    prev = capacity.get(h)
+                    if prev is None or mx == 0 or (prev != 0 and mx > prev):
+                        capacity[h] = mx
+                    if mx > 0 and act >= mx:
+                        busy.append(f"{label}({act}/{mx})")
         else:
             dead.add((h, str(user)))
     print(f"pool-ship: accounts — {len(alive_hosts)} hosts with a live account, "
           f"{len(dead)} dead accounts, {unknown} inconclusive (kept).")
     if busy:
-        print(f"pool-ship: at connection limit right now: {', '.join(busy)}")
+        print(f"pool-ship: genuinely at connection limit: {', '.join(busy)}")
+    if contradictory:
+        print(f"pool-ship: misreported max_connections (active > max ⇒ field ignored): "
+              f"{', '.join(contradictory)}")
     single = sorted(h for h, mx in capacity.items() if mx == 1)
     if single:
         print(f"pool-ship: 1-connection hosts (one viewer at a time): {single}")
