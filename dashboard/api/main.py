@@ -10126,6 +10126,12 @@ def _account_cap_rank(host: str) -> int:
     return mx        # 1 = worst, higher = better
 
 
+# Hosts from the HARDCODED panels only (captured before the scraped merge). These
+# are the curated/trusted sources; used to pin channels whose scraped copies are
+# mislabeled (e.g. French-Quebec "RDS" vs the Italian music station of the same name)
+# to known-good panels — see _CURATED_ONLY_CHANNELS.
+_HARDCODED_upstream_HOSTS: frozenset[str] = frozenset(str(h).lower() for _, h, *_ in _upstream_ACCOUNTS)
+
 _seen_upstream = {(h, u) for _, h, _p, u, _pw in _upstream_ACCOUNTS}
 for _row in _load_dynamic_upstream_accounts():
     if (_row[1], _row[3]) not in _seen_upstream:
@@ -12619,6 +12625,16 @@ _LOUNGE_FOREIGN_OK: set[str] = {"Sky Sport Bundesliga", "LaLiga TV"}
 # Bob populates as he discovers them.
 _LOUNGE_HOST_BLOCKLIST: dict[str, set[str]] = {}
 
+# Channels whose SCRAPED copies are unreliable — the panels label something "RDS"
+# that isn't the French-Quebec sports channel (it's usually the Italian music
+# station "Radio Dimensione Suono"). Serve these ONLY from the hardcoded/curated
+# panels (an upstream host/an upstream host/…), never a scraped mislabel. If every curated source
+# is down the channel goes offline for a bit — honest, and far better than playing
+# the wrong feed. Names must match _LOUNGE_CHANNEL_NAMES exactly.
+_CURATED_ONLY_CHANNELS: frozenset[str] = frozenset({
+    "RDS", "RDS 2", "RDS INFO", "TVA Sports",
+})
+
 # Guide adjacency: keep sub-brand channels next to their parent in the guide.
 # The guide sorts by (type, channel_number); some siblings were appended to the
 # list far from their parent (ESPNU/ESPNews/ESPN+ ended up at the bottom of the
@@ -12987,6 +13003,11 @@ async def _build_lounge_payload() -> dict:
         blocked = _LOUNGE_HOST_BLOCKLIST.get(name) or _active_blocklist(name)
         if blocked:
             unique = [c for c in unique if _candidate_upstream_host(c["url"]) not in blocked]
+        # Mislabel-prone channels (French RDS/TVA): keep ONLY curated-panel sources.
+        if name in _CURATED_ONLY_CHANNELS:
+            unique = [c for c in unique
+                      if _candidate_upstream_host(c["url"]).lower() in _HARDCODED_upstream_HOSTS
+                      or c.get("source") == "tvpass"]
         channel_candidates[name] = _sort_by_url_priority(unique, name)
 
     async def _build_one(ch_name: str, candidates: list[dict]) -> dict:
