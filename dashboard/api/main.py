@@ -13049,7 +13049,16 @@ async def _build_lounge_payload() -> dict:
         chosen = ""
         if ch_name in _TSN_NAMES:
             an upstream host_cands = [c for c in candidates if "an upstream host" in c["url"]]
-            if an upstream host_cands:
+            # …but NOT when an upstream host is a single-connection panel. Measured through
+            # the relay 2026-07-25: 25 active connections against max_connections=1,
+            # i.e. a new viewer is 456-busy essentially always — which is what "the
+            # sources don't work" actually was for TSN. When capacity says 1-conn we
+            # fall through to the capacity-aware ranking below (an unlimited panel
+            # wins) and an upstream host stays in the BACKUP list, so it's still reachable.
+            # Self-disabling: with no measured capacity the rank is neutral (3) and
+            # the original override applies unchanged.
+            if an upstream host_cands and _account_cap_rank(
+                    _backup_upstream_host(an upstream host_cands[0]["url"])) > 1:
                 chosen = an upstream host_cands[0]["url"]
         if not chosen:
             # Stream-dead demoted hosts don't get the upstream bias — any working
