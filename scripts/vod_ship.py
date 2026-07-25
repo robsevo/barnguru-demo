@@ -70,6 +70,12 @@ _MIN_KEYS = 50
 # Source verification (same safe host-drop as pool_ship): sample-probe each VOD panel
 # and drop sources from dead SCRAPED panels; never drop hardcoded/curated or tvpass.
 _HOST_SAMPLES = int(os.environ.get("HOST_SAMPLES", "8"))
+# Build DEEPER than the box would: every account, and more sources kept per title.
+# main.py reads these two caps from the env (defaults 5/6 on the box), so setting them
+# before the build is what raises "sources per movie/series".
+_VOD_ALL_ACCOUNTS = os.environ.get("VOD_ALL_ACCOUNTS", "1") != "0"
+os.environ.setdefault("VOD_SOURCES_PER_TITLE", "10")
+os.environ.setdefault("VOD_SERIES_PER_TITLE", "10")
 _VERIFY_CONCURRENCY = int(os.environ.get("VERIFY_CONCURRENCY", "120"))
 
 
@@ -180,9 +186,10 @@ def _load_box_core() -> dict:
               f"building from hardcoded panels only.", file=sys.stderr)
     ns["_upstream_ACCOUNTS"] = accounts
     ns["_HARDCODED_HOSTS"] = {str(r[1]).lower() for r in hardcoded}  # curated panels — never dropped
-    # VOD keeps its quality cap (movies empty out past ~_VOD_MAX_ACCOUNTS) but off
-    # the FULL pool, not the box's memory-capped one.
-    ns["_VOD_ACCOUNTS"] = accounts[: ns["_VOD_MAX_ACCOUNTS"]]
+    # Use EVERY account for VOD, not the box's 16-account slice. That slice exists
+    # because fetching get_vod_streams + get_series per account is what the 2GB box
+    # couldn't afford — this PC can, and each extra panel is more sources per movie.
+    ns["_VOD_ACCOUNTS"] = accounts if _VOD_ALL_ACCOUNTS else accounts[: ns["_VOD_MAX_ACCOUNTS"]]
     print(f"vod-ship: {len(accounts)} total accounts, "
           f"{len(ns['_VOD_ACCOUNTS'])} used for VOD.")
     return ns

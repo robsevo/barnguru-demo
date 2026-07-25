@@ -10176,6 +10176,12 @@ _upstream_HOSTS: frozenset[str] = frozenset(h for _, h, *_ in _upstream_ACCOUNTS
 #     cover the one-time slow cold build.
 # EPG keeps the full pool too (its xmltv fetch is light + 1h-cached).
 _VOD_MAX_ACCOUNTS = 16
+# How many direct sources to keep per VOD title / per series. Env-configurable so the
+# OFF-BOX builder (scripts/vod_ship.py) can go deeper than the box would dare — more
+# sources per movie/series = more failover when one provider is busy or dead. Box
+# defaults are the historical values, so on-box behaviour is unchanged.
+_VOD_SOURCES_PER_TITLE = int(os.environ.get("VOD_SOURCES_PER_TITLE", "5"))
+_VOD_SERIES_PER_TITLE = int(os.environ.get("VOD_SERIES_PER_TITLE", "6"))
 _VOD_ACCOUNTS: list[tuple[str, str, int, str, str]] = _upstream_ACCOUNTS[:_VOD_MAX_ACCOUNTS]
 _LIVE_ACCOUNTS: list[tuple[str, str, int, str, str]] = _upstream_ACCOUNTS
 
@@ -13924,7 +13930,7 @@ async def _build_vod_stream_index() -> dict[str, list[str]]:
                 keys.append("name:" + nm)
             for k in keys:
                 lst = idx.setdefault(k, [])
-                if wrapped not in lst and len(lst) < 5:  # 5 direct (vidlink embed removed)
+                if wrapped not in lst and len(lst) < _VOD_SOURCES_PER_TITLE:
                     lst.append(wrapped)
     return idx
 
@@ -14073,7 +14079,7 @@ async def _build_series_loc_index() -> dict[str, list[dict]]:
                    "user": sv.get("user"), "pw": sv.get("pw"), "series_id": sid}
             for k in keys:
                 lst = idx.setdefault(k, [])
-                if len(lst) < 6:  # more provider options per series = more links
+                if len(lst) < _VOD_SERIES_PER_TITLE:  # more provider options per series
                     lst.append(rec)
     return idx
 
@@ -14175,7 +14181,7 @@ async def _episode_streams_for(tmdb_id: str, name: str = "") -> dict[tuple[int, 
             continue
         for s_i, e_i, url in rows:
             slot = out.setdefault((s_i, e_i), [])
-            if url not in slot and len(slot) < 5:  # 5 direct (vidlink embed removed)
+            if url not in slot and len(slot) < _VOD_SOURCES_PER_TITLE:
                 slot.append(url)
     # Cache only non-empty results (don't pin an empty map while the loc index
     # is still warming — let the next call retry).
