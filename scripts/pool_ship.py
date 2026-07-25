@@ -332,7 +332,7 @@ _RECOVER_RATE = float(os.environ.get("DEMOTE_RECOVER_RATE", "0.5"))
 
 def _relay_stream_url(u: str, relay: str, token: str) -> str:
     """Mirror the box's _rewrite_iptv_url so we probe exactly what it serves."""
-    from urllib.parse import quote
+    from urllib.parse import quote, urlparse  # module has no top-level import
     inner = u
     if (urlparse(u).hostname or "").lower() == "an upstream host.ddns.net":
         pre, sep, rest = inner.partition("?")
@@ -360,19 +360,35 @@ async def _verify_stream_health(channels: list, hosts: set, relay: str, token: s
                                              headers={"Range": "bytes=0-2047"}) as cl:
                     r = await asyncio.wait_for(
                         cl.get(_relay_stream_url(u, relay, token)), timeout=25.0)
-            except Exception:  # noqa: BLE001
-                return False
-            if r.status_code not in (200, 206) or not r.text:
-                return False
-            return "#EXTINF" in r.text or "#EXT-X-MEDIA-SEQUENCE" in r.text
+            # ONLY network/timeout failures mean "stream didn't serve". A broad
+            # `except Exception` here previously swallowed a NameError in
+            # _relay_stream_url and reported every host 0/5 — a code bug that looked
+            # exactly like "all panels are dead". Let programming errors surface.
+            except (httpx.HTTPError, asyncio.TimeoutError, OSError):
+                return False          # relay/tunnel gave up ⇒ host-level failure
+            if r.status_code in (200, 206) and r.text and (
+                    "#EXTINF" in r.text or "#EXT-X-MEDIA-SEQUENCE" in r.text):
+                return True           # served a real manifest ⇒ host is fine
+            # 401/403/404/410 are THIS CHANNEL being dead or auth-gated, not the
+            # panel's stream origin being hung — counting them against the host
+            # would demote a healthy panel that happened to sample dead channels
+            # (bgdc served a manifest on one probe and 401/410 on two). Only
+            # 5xx/timeout means "the origin never produced a stream".
+            if r.status_code in (401, 403, 404, 410):
+                return None
+            return False
 
     out: dict[str, tuple] = {}
     for h, urls in by_host.items():
         step = max(1, len(urls) // _STREAM_PROBES_PER_HOST)
         sample = urls[::step][:_STREAM_PROBES_PER_HOST]
         res = await asyncio.gather(*[_probe(u) for u in sample])
-        out[h] = (sum(res), len(res))
-        print(f"pool-ship:   streams {h:26} {sum(res)}/{len(res)} served a manifest")
+        ok = sum(1 for x in res if x is True)
+        conclusive = sum(1 for x in res if x is not None)   # skip channel-level 4xx
+        skipped = len(res) - conclusive
+        out[h] = (ok, conclusive)
+        print(f"pool-ship:   streams {h:26} {ok}/{conclusive} served a manifest"
+              + (f" ({skipped} channel-level 4xx ignored)" if skipped else ""))
     return out
 
 
