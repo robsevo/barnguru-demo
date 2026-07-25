@@ -275,6 +275,7 @@ async def _verify_accounts_via_relay(accounts: list, relay: str, token: str) -> 
     results = await asyncio.gather(*[_one(*a) for a in accounts])
 
     dead, alive_hosts, probed_hosts, busy, unknown = set(), set(), set(), [], 0
+    capacity: dict[str, int] = {}
     for label, host, user, alive, cons in results:
         h = str(host).lower()
         if alive is None:
@@ -283,15 +284,27 @@ async def _verify_accounts_via_relay(accounts: list, relay: str, token: str) -> 
         probed_hosts.add(h)
         if alive:
             alive_hosts.add(h)
-            if cons and cons[1] > 0 and cons[0] >= cons[1]:
-                busy.append(f"{label}({cons[0]}/{cons[1]})")
+            if cons:
+                # Keep the most permissive capacity seen for a host (0 = unlimited
+                # wins). This is shipped so the box can rank never-busy accounts
+                # first — the actual cause of "source is busy".
+                mx = cons[1]
+                prev = capacity.get(h)
+                if prev is None or mx == 0 or (prev != 0 and mx > prev):
+                    capacity[h] = mx
+                if mx > 0 and cons[0] >= mx:
+                    busy.append(f"{label}({cons[0]}/{mx})")
         else:
             dead.add((h, str(user)))
     print(f"pool-ship: accounts — {len(alive_hosts)} hosts with a live account, "
           f"{len(dead)} dead accounts, {unknown} inconclusive (kept).")
     if busy:
         print(f"pool-ship: at connection limit right now: {', '.join(busy)}")
-    return {"dead": dead, "alive_hosts": alive_hosts, "probed_hosts": probed_hosts}
+    single = sorted(h for h, mx in capacity.items() if mx == 1)
+    if single:
+        print(f"pool-ship: 1-connection hosts (one viewer at a time): {single}")
+    return {"dead": dead, "alive_hosts": alive_hosts, "probed_hosts": probed_hosts,
+            "capacity": capacity}
 
 
 def _prune_by_dead_accounts(channels: list, verdict: dict, protected: set) -> list:
@@ -392,11 +405,11 @@ def main() -> None:
 
     print("pool-ship: building live IPTV pool from all sources …")
 
-    async def _run() -> list:
+    async def _run() -> tuple:
         chans = await ns["_build_iptv_channels"]()
         print(f"pool-ship: built {len(chans)} channels.")
         if len(chans) < _MIN_CHANNELS:
-            return chans  # let main() abort below
+            return chans, {}  # let main() abort below
         creds = _relay_creds()
         if creds:
             # Authoritative path: per-account verdicts from the relay's residential
@@ -408,19 +421,23 @@ def main() -> None:
             before = len(chans)
             chans = _prune_by_dead_accounts(chans, verdict, set())
             print(f"pool-ship: dropped {before - len(chans)} sources from dead accounts.")
-            return chans
+            return chans, verdict.get("capacity") or {}
         print("pool-ship: no relay creds at ~/.config/grtzky/relay.env "
               "(run `make sync-relay-token`) — falling back to direct host-sampling.",
               file=sys.stderr)
-        return await _verify_and_prune(ns, chans)
+        return await _verify_and_prune(ns, chans), {}
 
-    channels: list = asyncio.run(_run())
+    channels, capacity = asyncio.run(_run())
     if len(channels) < _MIN_CHANNELS:
         sys.exit(f"pool-ship: only {len(channels)} channels (< {_MIN_CHANNELS}) — panels "
                  f"likely unreachable; NOT shipping (box keeps its own pool).")
     print(f"pool-ship: {len(channels)} channels after source verification.")
 
+    # `capacity` = {host: max_connections} measured through the relay (0 = unlimited).
+    # The box feeds it into _upstream_CAPACITY so _account_cap_rank puts never-busy
+    # accounts first when picking a primary — the fix for "this source is busy".
     doc = {"built_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+           "capacity": capacity,
            "channels": channels}
     _OUT.parent.mkdir(parents=True, exist_ok=True)
     tmp = _OUT.with_suffix(".json.tmp")

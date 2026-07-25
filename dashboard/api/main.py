@@ -10609,6 +10609,18 @@ def _load_shipped_iptv_pool() -> "list | None":
         if not isinstance(raw, list) or not raw:
             _shipped_iptv_pool_cache = (mtime, [])
             return None
+        # Connection capacity measured through the relay (0 = unlimited). Feeding it
+        # into _upstream_CAPACITY lets _account_cap_rank prefer never-busy accounts for
+        # the primary — 1-connection panels (an upstream host measured 1/1) otherwise become
+        # the default source and 456 the second viewer. Only ADDS knowledge: hosts the
+        # ship didn't measure keep whatever the accounts file already said.
+        cap = doc.get("capacity")
+        if isinstance(cap, dict):
+            for _h, _mx in cap.items():
+                try:
+                    _upstream_CAPACITY[str(_h).lower()] = int(_mx)
+                except (TypeError, ValueError):
+                    pass
         # Pass 1: register upstream-source hosts so their URLs route through the relay
         # (tvpass / m3u sources are served direct, exactly like a self-build).
         hosts: set[str] = set()
