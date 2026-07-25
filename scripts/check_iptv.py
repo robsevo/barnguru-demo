@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -18,11 +19,18 @@ from pathlib import Path
 
 import httpx
 
-_CHANNELS_PATH = (
-    Path(__file__).parent.parent / "dashboard" / "api" / "iptv_paid_channels.json"
+# Both files are GENERATED ON THE PROD BOX (extract-iptv / this script) and are
+# gitignored, so they never exist in a fresh CI checkout — resolving them relative to
+# this script made the nightly's check-iptv step fail every run ("No channel file
+# found at /home/user/…"), and left the /iptv-channel-status endpoint serving stale
+# data. Overridable so the workflow can point at the deployed copies.
+_CHANNELS_PATH = Path(
+    os.environ.get("IPTV_PAID_CHANNELS_FILE")
+    or Path(__file__).parent.parent / "dashboard" / "api" / "iptv_paid_channels.json"
 )
-_STATUS_PATH = (
-    Path(__file__).parent.parent / "dashboard" / "api" / "iptv_status.json"
+_STATUS_PATH = Path(
+    os.environ.get("IPTV_STATUS_FILE")
+    or Path(__file__).parent.parent / "dashboard" / "api" / "iptv_status.json"
 )
 
 _TIMEOUT = 8.0
