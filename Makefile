@@ -1,4 +1,4 @@
-.PHONY: test test-rust test-python test-integration build-engine clean dev gretzky epg-ship vod-ship pool-ship sync-accounts refresh-all
+.PHONY: test test-rust test-python test-integration build-engine clean dev gretzky epg-ship vod-ship pool-ship sync-accounts sync-relay-token refresh-all
 
 ## Run all tests (Rust unit/integration + Python smoke + Python integration)
 test: test-rust build-engine test-python test-integration
@@ -44,6 +44,12 @@ vod-ship:
 ## Ships RAW urls; the box relay-wraps on load. e.g. make pool-ship ARGS=--dry-run
 pool-ship:
 	uv run python scripts/pool_ship.py $(ARGS)
+
+## Pull the relay's base URL + token onto this PC (-> ~/.config/grtzky/relay.env,
+## mode 600). Lets the ships verify sources THROUGH the relay's residential IP —
+## the accurate check, incl. the curated panels a direct probe can't test.
+sync-relay-token:
+	uv run python scripts/sync_relay_token.py
 
 ## Pull the box's CURRENT upstream accounts onto this PC so the *-ship builds run from
 ## fresh accounts (the local copy goes stale). Dispatches push-accounts.yml.

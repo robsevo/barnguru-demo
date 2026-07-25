@@ -200,6 +200,123 @@ def _host_of(url: str) -> str:
     return (urlparse(url or "").hostname or "").lower()
 
 
+# ── relay-based verification (preferred) ─────────────────────────────────────
+# Probing panels DIRECTLY from this PC is unreliable: hosts that block or
+# rate-limit this IP false-negative (an upstream host read "live" one run, "dead" the
+# next), and the box serves through the relay anyway. So ask the relay's
+# /upstream-json to hit each account's player_api.php from its RESIDENTIAL IP —
+# the authoritative "is this account online, and is it busy?" answer, and a plain
+# JSON fetch (no ffmpeg session, no stream bandwidth). Creds come from
+# `make sync-relay-token`; without them we fall back to direct host-sampling.
+_RELAY_ENV = Path.home() / ".config" / "grtzky" / "relay.env"
+_RELAY_CONCURRENCY = int(os.environ.get("RELAY_VERIFY_CONCURRENCY", "6"))
+
+
+def _relay_creds() -> "tuple[str, str] | None":
+    try:
+        kv = dict(
+            ln.split("=", 1) for ln in _RELAY_ENV.read_text().splitlines()
+            if "=" in ln and not ln.lstrip().startswith("#")
+        )
+    except OSError:
+        return None
+    base = (kv.get("IPTV_LOCAL_PROXY_URL") or "").strip().rstrip("/")
+    token = (kv.get("IPTV_RELAY_TOKEN") or "").strip()
+    return (base, token) if base and token else None
+
+
+def _acct_key_from_url(url: str) -> "tuple[str, str | None]":
+    """(host, username) for an upstream stream URL. Username is only trusted when the
+    path follows the /<kind>/<user>/<pass>/<id> convention; hosts like an upstream host use
+    /play/<token>/ts with no user, which yields None (host-level decision instead)."""
+    from urllib.parse import urlparse
+    p = urlparse(url or "")
+    seg = [s for s in (p.path or "").split("/") if s]
+    user = seg[1] if len(seg) >= 3 and seg[0] in ("live", "movie", "series") else None
+    return (p.hostname or "").lower(), user
+
+
+async def _verify_accounts_via_relay(accounts: list, relay: str, token: str) -> dict:
+    """Per-account verdicts from the relay's residential IP.
+    Returns {"dead": {(host,user), …}, "alive_hosts": {…}, "probed_hosts": {…}, "busy": [...]}"""
+    import httpx
+    from urllib.parse import quote
+
+    sem = asyncio.Semaphore(_RELAY_CONCURRENCY)   # relay also serves live TV — be gentle
+
+    async def _one(label, host, port, user, pw):
+        api = f"http://{host}:{port}/player_api.php?username={user}&password={pw}"
+        probe = f"{relay}/upstream-json?u={quote(api, safe='')}&t={quote(token, safe='')}"
+        async with sem:
+            try:
+                async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as cl:
+                    r = await asyncio.wait_for(cl.get(probe), timeout=25.0)
+            except Exception:  # noqa: BLE001 — relay/tunnel hiccup ⇒ inconclusive
+                return (label, host, user, None, None)
+        if r.status_code == 400:
+            return (label, host, user, None, None)   # host not relay-allowlisted ⇒ unknown
+        if r.status_code != 200:
+            return (label, host, user, None, None)   # 502 etc ⇒ inconclusive, never drop
+        try:
+            info = (r.json() or {}).get("user_info") or {}
+        except Exception:  # noqa: BLE001 — non-JSON (panel error page) ⇒ inconclusive
+            return (label, host, user, None, None)
+        if not info:
+            return (label, host, user, None, None)
+        alive = int(info.get("auth") or 0) == 1 and str(info.get("status", "")).lower() == "active"
+        try:
+            act, mx = int(info.get("active_cons") or 0), int(info.get("max_connections") or 0)
+        except (TypeError, ValueError):
+            act, mx = 0, 0
+        return (label, host, user, alive, (act, mx))
+
+    print(f"pool-ship: verifying {len(accounts)} accounts through the relay "
+          f"(residential IP, concurrency {_RELAY_CONCURRENCY}) …")
+    results = await asyncio.gather(*[_one(*a) for a in accounts])
+
+    dead, alive_hosts, probed_hosts, busy, unknown = set(), set(), set(), [], 0
+    for label, host, user, alive, cons in results:
+        h = str(host).lower()
+        if alive is None:
+            unknown += 1
+            continue
+        probed_hosts.add(h)
+        if alive:
+            alive_hosts.add(h)
+            if cons and cons[1] > 0 and cons[0] >= cons[1]:
+                busy.append(f"{label}({cons[0]}/{cons[1]})")
+        else:
+            dead.add((h, str(user)))
+    print(f"pool-ship: accounts — {len(alive_hosts)} hosts with a live account, "
+          f"{len(dead)} dead accounts, {unknown} inconclusive (kept).")
+    if busy:
+        print(f"pool-ship: at connection limit right now: {', '.join(busy)}")
+    return {"dead": dead, "alive_hosts": alive_hosts, "probed_hosts": probed_hosts}
+
+
+def _prune_by_dead_accounts(channels: list, verdict: dict, protected: set) -> list:
+    """Drop sources belonging to accounts the relay says are dead. A source whose
+    username isn't in its URL is dropped only when EVERY probed account on its host
+    is dead. Inconclusive verdicts never drop anything."""
+    dead, alive_hosts, probed = verdict["dead"], verdict["alive_hosts"], verdict["probed_hosts"]
+    kept = []
+    for ch in channels:
+        if ch.get("source") in {"tvpass"}:
+            kept.append(ch)
+            continue
+        host, user = _acct_key_from_url(ch.get("url", ""))
+        if host in protected:
+            kept.append(ch)
+            continue
+        if user is not None:
+            if (host, user) in dead:
+                continue
+        elif host in probed and host not in alive_hosts:
+            continue  # no user in URL and every account on this host is dead
+        kept.append(ch)
+    return kept
+
+
 async def _verify_and_prune(ns: dict, channels: list) -> list:
     """Sample-probe each upstream HOST and drop every source from a dead panel, so
     what ships is only sources whose panel is actually serving. This is what fixes
@@ -280,6 +397,21 @@ def main() -> None:
         print(f"pool-ship: built {len(chans)} channels.")
         if len(chans) < _MIN_CHANNELS:
             return chans  # let main() abort below
+        creds = _relay_creds()
+        if creds:
+            # Authoritative path: per-account verdicts from the relay's residential
+            # IP. This DOES verify the curated panels too (an upstream host et al.) — the
+            # thing direct probing couldn't do — so nothing is blanket-protected
+            # here except tvpass (token flow, no account to query).
+            relay, token = creds
+            verdict = await _verify_accounts_via_relay(ns["_LIVE_ACCOUNTS"], relay, token)
+            before = len(chans)
+            chans = _prune_by_dead_accounts(chans, verdict, set())
+            print(f"pool-ship: dropped {before - len(chans)} sources from dead accounts.")
+            return chans
+        print("pool-ship: no relay creds at ~/.config/grtzky/relay.env "
+              "(run `make sync-relay-token`) — falling back to direct host-sampling.",
+              file=sys.stderr)
         return await _verify_and_prune(ns, chans)
 
     channels: list = asyncio.run(_run())
