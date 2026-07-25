@@ -11335,6 +11335,19 @@ def _candidate_is_english(title: str, category: str = "", trusted: bool = True) 
         return False
     if _FOREIGN_LANG_RE.search(f"{title} {category}"):
         return False
+    # An ALLOWED leading region tag ("CA: CTV News Channel HD", "US | ESPN") IS the
+    # explicit US/CA tag this gate says it wants from scraped panels — previously it
+    # only avoided the reject branch above and then fell through to `trusted`, so
+    # legitimately Canadian scraped sources were thrown away. That left ~35 mostly
+    # Canadian channels (Sportsnet, CTV/CBC, TVA, ICI, LCN) with an upstream host — a
+    # ONE-connection panel — as their only primary, i.e. "the source is busy".
+    if tag and tag in _ALLOWED_REGION_TAGS:
+        return True
+    # Same for an explicitly Canadian/US CATEGORY ("CANADA", "★ CANADA", "USA"):
+    # positive evidence the provider filed this as a US/CA feed. Category was never
+    # consulted for the marker before, only for foreign-language rejection.
+    if _US_CA_MARKER_RE.search(category or ""):
+        return True
     # No explicit US/CA marker and no foreign signal: trust only known-English
     # providers; reject the multi-language scraped ones (can't prove English).
     return bool(trusted)
