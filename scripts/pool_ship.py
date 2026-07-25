@@ -51,11 +51,21 @@ _SEED = [
     "_LIVE_ACCOUNTS",
     "_upstream_ACCOUNTS",
     "_load_dynamic_upstream_accounts",
+    "_verify_stream_alive",    # liveness probe (the check the box can't afford)
 ]
+
+# Sources die at the PANEL (host) level — a down panel returns nothing for ALL its
+# channels (an upstream host = 0 ch today). So we don't probe every candidate; we sample a
+# few URLs per host, decide host live/dead, and drop every source from a dead host.
+# ~16 hosts x this many samples = a tiny, fast, robust probe.
+_HOST_SAMPLES = int(os.environ.get("HOST_SAMPLES", "8"))
 
 # A near-empty pool means the panels were unreachable — don't overwrite the box's
 # working pool with junk (mirrors epg_ship / vod_ship).
 _MIN_CHANNELS = 500
+# How many sources to verify at once on this PC. The box's own _VERIFY_SEM is 20
+# (to protect its 2GB); we have RAM + a residential IP, so go wider.
+_VERIFY_CONCURRENCY = int(os.environ.get("VERIFY_CONCURRENCY", "120"))
 
 
 def _base_ns() -> dict:
@@ -131,7 +141,8 @@ def _load_box_core() -> dict:
 
     # main.py's dynamic-account merge is top-level statements, not a named node, so
     # replicate it — UNCAPPED (this PC has the RAM the box doesn't).
-    accounts = list(ns["_upstream_ACCOUNTS"])
+    hardcoded = list(ns["_upstream_ACCOUNTS"])  # the literal, before the scraped merge
+    accounts = list(hardcoded)
     seen = {(h, u) for _, h, _p, u, _pw in accounts}
     try:
         for row in ns["_load_dynamic_upstream_accounts"]():
@@ -141,9 +152,15 @@ def _load_box_core() -> dict:
     except Exception as e:  # noqa: BLE001
         print(f"pool-ship: WARNING — dynamic account load failed ({e}); "
               f"hardcoded panels only.", file=sys.stderr)
+    # Hosts from the HARDCODED panels (before the scraped merge) are the box's
+    # curated primaries (an upstream host TSN, bgdc, …). They're often served only through
+    # the relay — a direct probe from here false-negatives — and the box already
+    # handles their liveness (demotion + client rotation). Never host-drop them; we
+    # only prune dead SCRAPED panels.
+    ns["_HARDCODED_HOSTS"] = {str(r[1]).lower() for r in hardcoded}
     ns["_upstream_ACCOUNTS"] = accounts
     ns["_LIVE_ACCOUNTS"] = accounts  # live uses the FULL pool
-    print(f"pool-ship: {len(accounts)} accounts in the live pool.")
+    print(f"pool-ship: {len(accounts)} accounts ({len(ns['_HARDCODED_HOSTS'])} hardcoded hosts).")
     return ns
 
 
@@ -178,6 +195,71 @@ def _publish(no_trigger: bool) -> None:
     print(f"pool-ship: dispatched {_SHIP_WORKFLOW} — the box will pull + refresh (no restart).")
 
 
+def _host_of(url: str) -> str:
+    from urllib.parse import urlparse
+    return (urlparse(url or "").hostname or "").lower()
+
+
+async def _verify_and_prune(ns: dict, channels: list) -> list:
+    """Sample-probe each upstream HOST and drop every source from a dead panel, so
+    what ships is only sources whose panel is actually serving. This is what fixes
+    "busy/offline sources": a down panel (an upstream host=0ch today) is dropped wholesale,
+    and channels fall through to the live panels. The 2GB box can't afford any of
+    this; this PC can. Fast + robust: ~16 hosts x a few samples, not thousands."""
+    verify = ns["_verify_stream_alive"]
+    ns["_VERIFY_SEM"] = asyncio.Semaphore(_VERIFY_CONCURRENCY)  # box caps at 20; we have RAM
+
+    # Never host-drop: tvpass (token flow a raw probe can't replicate) and the
+    # hardcoded/curated panels (an upstream host etc. — often relay-only, so a direct probe
+    # false-negatives; the box handles their liveness). We only prune dead SCRAPED
+    # panels, which is where the busy/dead junk actually is.
+    _PROTECTED_SOURCES = {"tvpass"}
+    hardcoded_hosts = ns.get("_HARDCODED_HOSTS", set())
+
+    by_host: dict[str, list] = {}
+    for ch in channels:
+        if ch.get("source") in _PROTECTED_SOURCES:
+            continue
+        h = _host_of(ch.get("url", ""))
+        if h and h not in hardcoded_hosts:
+            by_host.setdefault(h, []).append(ch)
+
+    # Evenly-spaced samples per host (spread across its channel list).
+    sample_host: dict[str, str] = {}   # sample url -> host
+    for h, chans in by_host.items():
+        step = max(1, len(chans) // _HOST_SAMPLES)
+        for c in chans[::step][:_HOST_SAMPLES]:
+            u = c.get("url")
+            if u:
+                sample_host[u] = h
+
+    print(f"pool-ship: probing {len(by_host)} hosts ({len(sample_host)} sample sources) …")
+
+    async def _probe(u: str):
+        try:
+            # Hard cap — _verify_stream_alive GETs the body and a live .ts trickles
+            # forever, so a source that won't answer promptly counts as not working.
+            ok = await asyncio.wait_for(verify(u, timeout=3.0), timeout=4.5)
+        except Exception:  # noqa: BLE001  (incl. asyncio.TimeoutError)
+            ok = False
+        return u, ok
+
+    results = await asyncio.gather(*[_probe(u) for u in sample_host])
+    live_host: dict[str, bool] = {}
+    for u, ok in results:
+        h = sample_host[u]
+        live_host[h] = live_host.get(h, False) or ok  # host live if ANY sample works
+    dead = {h for h, live in live_host.items() if not live}
+    live = [h for h, ok in live_host.items() if ok]
+    print(f"pool-ship: {len(live)} live hosts, {len(dead)} dead panels dropped: {sorted(dead)}")
+    if not dead:
+        return channels
+    return [ch for ch in channels
+            if ch.get("source") in _PROTECTED_SOURCES
+            or _host_of(ch.get("url", "")) in hardcoded_hosts
+            or _host_of(ch.get("url", "")) not in dead]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="pool-ship")
     ap.add_argument("--dry-run", action="store_true", help="build + write the file only")
@@ -192,11 +274,19 @@ def main() -> None:
     _self_test(ns)
 
     print("pool-ship: building live IPTV pool from all sources …")
-    channels: list = asyncio.run(ns["_build_iptv_channels"]())
-    print(f"pool-ship: built {len(channels)} channels.")
+
+    async def _run() -> list:
+        chans = await ns["_build_iptv_channels"]()
+        print(f"pool-ship: built {len(chans)} channels.")
+        if len(chans) < _MIN_CHANNELS:
+            return chans  # let main() abort below
+        return await _verify_and_prune(ns, chans)
+
+    channels: list = asyncio.run(_run())
     if len(channels) < _MIN_CHANNELS:
         sys.exit(f"pool-ship: only {len(channels)} channels (< {_MIN_CHANNELS}) — panels "
                  f"likely unreachable; NOT shipping (box keeps its own pool).")
+    print(f"pool-ship: {len(channels)} channels after source verification.")
 
     doc = {"built_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
            "channels": channels}

@@ -67,6 +67,11 @@ _SEED = [
 # working index with junk (mirrors epg_ship's don't-ship-good-with-empty guard).
 _MIN_KEYS = 50
 
+# Source verification (same safe host-drop as pool_ship): sample-probe each VOD panel
+# and drop sources from dead SCRAPED panels; never drop hardcoded/curated or tvpass.
+_HOST_SAMPLES = int(os.environ.get("HOST_SAMPLES", "8"))
+_VERIFY_CONCURRENCY = int(os.environ.get("VERIFY_CONCURRENCY", "120"))
+
 
 def _base_ns() -> dict:
     """stdlib / third-party names the extracted code references, under the SAME
@@ -162,7 +167,8 @@ def _load_box_core() -> dict:
     # named node, so ast-extraction can't lift it. Replicate it here so the build
     # uses the full pool (hardcoded + scraped), UNCAPPED — this PC has the RAM the
     # box doesn't, which is the whole point.
-    accounts = list(ns["_upstream_ACCOUNTS"])  # hardcoded literal
+    hardcoded = list(ns["_upstream_ACCOUNTS"])  # the literal, before the scraped merge
+    accounts = list(hardcoded)
     seen = {(h, u) for _, h, _p, u, _pw in accounts}
     try:
         for row in ns["_load_dynamic_upstream_accounts"]():
@@ -173,6 +179,7 @@ def _load_box_core() -> dict:
         print(f"vod-ship: WARNING — dynamic account load failed ({e}); "
               f"building from hardcoded panels only.", file=sys.stderr)
     ns["_upstream_ACCOUNTS"] = accounts
+    ns["_HARDCODED_HOSTS"] = {str(r[1]).lower() for r in hardcoded}  # curated panels — never dropped
     # VOD keeps its quality cap (movies empty out past ~_VOD_MAX_ACCOUNTS) but off
     # the FULL pool, not the box's memory-capped one.
     ns["_VOD_ACCOUNTS"] = accounts[: ns["_VOD_MAX_ACCOUNTS"]]
@@ -212,6 +219,68 @@ def _publish(no_trigger: bool) -> None:
     print(f"vod-ship: dispatched {_SHIP_WORKFLOW} — the box will pull + refresh (no restart).")
 
 
+def _host_of(url: str) -> str:
+    from urllib.parse import urlparse
+    return (urlparse(url or "").hostname or "").lower()
+
+
+async def _verify_and_prune_vod(ns: dict, idx: dict) -> dict:
+    """Sample-probe each VOD panel; drop sources from dead SCRAPED panels so the
+    movies/series that appear actually play. Protects hardcoded/curated + tvpass.
+    Same safe host-level approach as pool_ship (the 2GB box can't afford this)."""
+    import httpx
+    hardcoded = ns.get("_HARDCODED_HOSTS", set())
+
+    by_host: dict[str, list] = {}
+    for urls in idx.values():
+        for u in urls:
+            h = _host_of(u)
+            if h and h not in hardcoded and "tvpass" not in h:
+                by_host.setdefault(h, []).append(u)
+
+    sample_host: dict[str, str] = {}
+    for h, us in by_host.items():
+        step = max(1, len(us) // _HOST_SAMPLES)
+        for u in us[::step][:_HOST_SAMPLES]:
+            sample_host[u] = h
+
+    print(f"vod-ship: probing {len(by_host)} scraped VOD panels "
+          f"({len(sample_host)} samples) …")
+    if not sample_host:
+        return idx
+
+    sem = asyncio.Semaphore(_VERIFY_CONCURRENCY)
+
+    async def _probe(u: str):
+        async with sem:
+            ok = False
+            try:  # a 1-byte range GET — cheap, and hard-capped so nothing hangs
+                async with httpx.AsyncClient(timeout=4.0, follow_redirects=True) as cl:
+                    r = await asyncio.wait_for(
+                        cl.get(u, headers={"Range": "bytes=0-1"}), timeout=4.5)
+                ok = r.status_code in (200, 206)
+            except Exception:  # noqa: BLE001  (connection error/timeout = dead)
+                ok = False
+        return sample_host[u], ok
+
+    results = await asyncio.gather(*[_probe(u) for u in sample_host])
+    live_host: dict[str, bool] = {}
+    for h, ok in results:
+        live_host[h] = live_host.get(h, False) or ok
+    dead = {h for h, ok in live_host.items() if not ok}
+    print(f"vod-ship: {len(live_host) - len(dead)} live panels, "
+          f"{len(dead)} dead dropped: {sorted(dead)}")
+    if not dead:
+        return idx
+
+    out = {}
+    for k, urls in idx.items():
+        kept = [u for u in urls if _host_of(u) not in dead]
+        if kept:
+            out[k] = kept
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="vod-ship")
     ap.add_argument("--dry-run", action="store_true", help="build + write the file only")
@@ -228,11 +297,19 @@ def main() -> None:
     _self_test(ns)
 
     print("vod-ship: building VOD stream index from all panels …")
-    idx: dict = asyncio.run(ns["_build_vod_stream_index"]())
-    print(f"vod-ship: built {len(idx)} index keys (tmdb_id + name).")
+
+    async def _run() -> dict:
+        built = await ns["_build_vod_stream_index"]()
+        print(f"vod-ship: built {len(built)} index keys (tmdb_id + name).")
+        if len(built) < _MIN_KEYS:
+            return built  # let main() abort below
+        return await _verify_and_prune_vod(ns, built)
+
+    idx: dict = asyncio.run(_run())
     if len(idx) < _MIN_KEYS:
         sys.exit(f"vod-ship: only {len(idx)} keys (< {_MIN_KEYS}) — panels likely "
                  f"unreachable; NOT shipping (box keeps its own index).")
+    print(f"vod-ship: {len(idx)} index keys after source verification.")
 
     doc = {"built_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
            "index": idx}
