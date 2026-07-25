@@ -13317,8 +13317,12 @@ async def _build_lounge_payload() -> dict:
 
     tasks  = [_build_one(n, c) for n, c in channel_candidates.items()]
     result = list(await _aio_lp.gather(*tasks))
-    order  = {n: i for i, n in enumerate(_LOUNGE_CHANNEL_NAMES)}
-    result.sort(key=lambda ch: order.get(ch["name"], 999))
+    # Sort by the GUIDE order, not by _LOUNGE_CHANNEL_NAMES. That list is ordered
+    # for MATCHING (longest names first) and opens on the whole sports block, and
+    # sorting by it here is why _LOUNGE_GUIDE_BLOCKS appeared to do nothing: the
+    # blocks set channel_number correctly, but the array this endpoint RETURNS —
+    # which is what the clients render in order — was still the matching order.
+    result.sort(key=lambda ch: _LOUNGE_CHANNEL_NUMBER.get(ch["name"], 999))
 
     # Pre-warm relay ffmpeg sessions on the resolved primaries (same trick
     # as BarnCentre — saves 4-7s cold-start on the first click).
