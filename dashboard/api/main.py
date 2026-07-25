@@ -13076,6 +13076,26 @@ async def _build_lounge_payload() -> dict:
                 + _account_cap_rank(_backup_upstream_host(c["url"])),
             )["url"]
 
+        # Final guard: never leave the PRIMARY on a measured single-connection panel
+        # when a multi-connection candidate exists. The upstream bias and the curated
+        # per-channel overrides above can each land on one (an upstream host measures
+        # max_connections=1 and carried the primary for ~35 channels), and one viewer
+        # at a time is exactly what "this source is busy" feels like. The 1-conn
+        # source stays in backup_urls, so it's still reachable. No-op until capacity
+        # is actually measured — unknown hosts are never treated as 1-conn.
+        def _is_one_conn(u: str) -> bool:
+            h = _backup_upstream_host(u)
+            return _upstream_CAPACITY.get(h) == 1
+
+        if chosen and _is_one_conn(chosen):
+            alts = [c for c in candidates
+                    if not _is_one_conn(c["url"]) and not _live_demoted(c["url"])]
+            if alts:
+                chosen = max(
+                    alts,
+                    key=lambda c: _account_cap_rank(_backup_upstream_host(c["url"])),
+                )["url"]
+
         # NO inline verification. Cold-build verification was the OOM root
         # cause: 50+ channels × _verify_stream_alive() against /hls?u=
         # URLs spawned 30+ relay-side ffmpegs and held 50+ concurrent
