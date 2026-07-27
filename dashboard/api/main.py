@@ -8456,9 +8456,16 @@ async def _get_pw_browser():
         if _pw_browser is not None and _pw_browser.is_connected():
             return _pw_browser
         avail = _available_mem_mb()
-        if avail < _PW_MIN_AVAIL_MB:
+        # Budget shared with the resolver's pool. Our own floor is not enough:
+        # both pools used to pass their independent 400MB checks on a box with
+        # ~650MB free and BOTH launch (see chromium_budget for the measurement).
+        from . import chromium_budget
+        need = chromium_budget.required_avail_mb(_PW_MIN_AVAIL_MB, "embed-extract")
+        if avail < need:
             print(f"[pw-extract] skipping Chromium launch — MemAvailable "
-                  f"{avail:.0f}MB < {_PW_MIN_AVAIL_MB:.0f}MB floor", flush=True)
+                  f"{avail:.0f}MB < {need:.0f}MB required "
+                  f"(floor {_PW_MIN_AVAIL_MB:.0f}MB, resident pools: "
+                  f"{sorted(chromium_budget.resident_pools()) or 'none'})", flush=True)
             return None
         from playwright.async_api import async_playwright
         _pw_playwright = await async_playwright().start()
@@ -8470,6 +8477,7 @@ async def _get_pw_browser():
                 "--disable-blink-features=AutomationControlled",
             ],
         )
+        chromium_budget.register("embed-extract")
         if _pw_reaper_task is None or _pw_reaper_task.done():
             _pw_reaper_task = _aio.create_task(_pw_idle_reaper())
     return _pw_browser
@@ -8478,7 +8486,12 @@ async def _get_pw_browser():
 async def _close_pw_browser() -> None:
     """Tear down the resident browser + its driver. Safe when already down."""
     global _pw_browser, _pw_playwright
+    from . import chromium_budget
     async with _pw_lock:
+        # Release the budget slot FIRST: if close() below hangs on a wedged
+        # driver, the resolver must still be able to launch. Over-releasing only
+        # makes the next admission check stricter for us, never looser.
+        chromium_budget.unregister("embed-extract")
         if _pw_browser is not None:
             try:
                 await _pw_browser.close()
