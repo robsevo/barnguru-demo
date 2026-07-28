@@ -144,6 +144,33 @@ def test_rebranded_regional_sports_networks_match():
     assert not _ch_matches("US - FANDUEL RACING", "FanDuel")
 
 
+def test_stream_block_key_identifies_a_stream_across_url_forms():
+    """Some panels title a stream "MTV" and carry MTV Classic or MTV Lebanon. The
+    title matcher cannot see that, so those are pinned by (host, stream id) — which
+    has to survive relay wrapping and the rotating user/pass in an upstream path."""
+    from dashboard.api.main import _stream_block_key
+
+    wrapped = ("http://localhost:8000/m3u8?u=http%3A%2F%2F16k.xyz%3A2082%2Flive"
+               "%2FSalahabdo%2FRKQM8WgeNrFB%2F301892.m3u8&t=tok")
+    assert _stream_block_key(wrapped) == "16k.xyz/301892"
+    # Same stream through a different account on the same panel.
+    assert _stream_block_key(
+        "http://16k.xyz:2082/live/AmirKruger/7gHSMprCzWxp/301892.m3u8") == "16k.xyz/301892"
+    assert _stream_block_key(
+        "http://tvmate.icu:8080/live/caGpK1/499606/53734.m3u8") == "tvmate.icu/53734"
+    # A different stream on a blocked host must NOT collide.
+    assert _stream_block_key(
+        "http://tvmate.icu:8080/live/caGpK1/499606/47366.m3u8") == "tvmate.icu/47366"
+
+
+def test_known_mislabelled_streams_are_blocked_for_their_channel():
+    from dashboard.api.main import _LOUNGE_STREAM_BLOCKLIST
+
+    mtv = _LOUNGE_STREAM_BLOCKLIST["MTV"]
+    assert "16k.xyz/301892" in mtv      # MTV Lebanon
+    assert "tvmate.icu/53734" in mtv    # MTV Classic
+
+
 def test_espn_plus_event_feeds_are_not_the_linear_channel():
     assert _ch_matches("ESPN Plus", "ESPN+")
     assert not _ch_matches(

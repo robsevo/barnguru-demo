@@ -12877,6 +12877,41 @@ def _lounge_foreign_ok(ch_name: str) -> bool:
 # Bob populates as he discovers them.
 _LOUNGE_HOST_BLOCKLIST: dict[str, set[str]] = {}
 
+# Individual upstream streams that LIE about what they carry. The sub-brand guard
+# in _ch_matches works on titles, so it cannot help here: these are titled exactly
+# "MTV" / "MTV USA" and carry a different channel entirely. Verified by grabbing a
+# frame and reading the on-screen logo bug — the only ground truth there is.
+#
+# Keyed by curated channel name; entries are "<upstream host>/<stream id>", which
+# survives the credential rotation in the middle of an upstream path
+# (http://host:8080/live/USER/PASS/<id>.m3u8). Host-level blocking is too blunt:
+# tvmate and 16k.xyz both serve plenty of other channels correctly.
+#
+# Keep this list SHORT and evidence-based. If a channel needs more than a couple
+# of entries, the panel is probably unreliable enough to belong in
+# _LOUNGE_HOST_BLOCKLIST or _CURATED_ONLY_CHANNELS instead.
+_LOUNGE_STREAM_BLOCKLIST: dict[str, set[str]] = {
+    "MTV": {
+        "tvmate.icu/53734",   # logo bug reads "MTV CLASSIC" (checked 2026-07-28)
+        "1tvnow.icu/53734",   # same upstream feed, pixel-identical frame
+        "16k.xyz/301892",     # MTV Lebanon — Arabic programming, "mtv" boxed logo
+    },
+}
+
+
+def _stream_block_key(url: str) -> str:
+    """"<upstream host>/<stream id>" for a candidate URL, relay-wrapped or raw."""
+    inner = url
+    if "localhost:8000" in url and "u=" in url:
+        try:
+            from urllib.parse import parse_qs as _sb_qs, unquote as _sb_unq
+            inner = _sb_unq(_sb_qs(urlparse(url).query).get("u", [""])[0])
+        except Exception:  # noqa: BLE001
+            return ""
+    p = urlparse(inner)
+    last = (p.path or "").rsplit("/", 1)[-1]
+    return f"{p.hostname}/{last.rsplit('.', 1)[0]}" if last else ""
+
 # Channels whose SCRAPED copies are unreliable — the panels label something "RDS"
 # that isn't the French-Quebec sports channel (it's usually the Italian music
 # station "Radio Dimensione Suono"). Serve these ONLY from the hardcoded/curated
@@ -13338,6 +13373,10 @@ async def _build_lounge_payload() -> dict:
         blocked = _LOUNGE_HOST_BLOCKLIST.get(name) or _active_blocklist(name)
         if blocked:
             unique = [c for c in unique if _candidate_upstream_host(c["url"]) not in blocked]
+        # Individually mislabelled streams — see _LOUNGE_STREAM_BLOCKLIST.
+        stream_blocked = _LOUNGE_STREAM_BLOCKLIST.get(name)
+        if stream_blocked:
+            unique = [c for c in unique if _stream_block_key(c["url"]) not in stream_blocked]
         # Mislabel-prone channels (French RDS/TVA): keep ONLY curated-panel sources.
         if name in _CURATED_ONLY_CHANNELS:
             unique = [c for c in unique
