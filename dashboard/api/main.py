@@ -13963,6 +13963,15 @@ async def _build_lounge_epg() -> dict:
         merged[k] = [p for p in merged[k] if p.get("stop_utc", "") >= prune_iso]
         if not merged[k]:
             del merged[k]
+    # Guide entries that mirror another channel's SOURCES should mirror its guide
+    # too — otherwise the row plays fine and reads "No guide data". Only ID needs
+    # it in practice (upstream guides list "Investigation Discovery" in full, so
+    # the "ID" row was empty while the identical channel next to it had 148
+    # programmes); TSN/Sportsnet/HBO Max already match a guide name directly, and
+    # the `not merged.get(name)` guard leaves those alone.
+    for name, canonical in _LOUNGE_CHANNEL_MIRRORS.items():
+        if not merged.get(name) and merged.get(canonical):
+            merged[name] = list(merged[canonical])
     return merged
 
 

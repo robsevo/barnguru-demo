@@ -43,9 +43,17 @@ _OUT = _REPO / "data" / "lounge_epg.json"
 _RELEASE_TAG = "epg-latest"
 _SHIP_WORKFLOW = "ship-epg.yml"
 
-# Top-level names lifted verbatim from main.py (in source order — assignment deps
-# like _LOUNGE_CHANNEL_NAMES -> _BARNCENTRE_CHANNEL_NAMES resolve naturally).
-_NEEDED = [
+# Seed names lifted from main.py; _closure() pulls in everything they transitively
+# reference, so a new private helper in main.py can't break the ship.
+#
+# This was a hand-listed FLAT set until 2026-07-28, and it failed exactly the way
+# vod_ship.py's docstring warned it would: _ch_matches gained helpers
+# (_CHANNEL_NAME_ALIASES, _tail_is_feed_only, …) for the sub-brand guard, they
+# weren't in the list, and the ship died with `NameError: _CHANNEL_NAME_ALIASES`.
+# The self-test caught it and correctly refused to publish — but the box then sat
+# on a day-old guide, which is what "channels missing information" looked like on
+# the TV. Walking the closure removes the whole failure mode.
+_SEED = [
     "_BROWSER_HEADERS",
     "_upstream_ACCOUNTS",            # the hardcoded literal only (no dynamic scraped merge)
     "_BARNCENTRE_CHANNEL_NAMES",
@@ -68,13 +76,9 @@ _NEEDED = [
 _MIN_FUTURE_CHANNELS = 10
 
 
-def _load_box_epg_core() -> dict:
-    """Return a namespace holding the box's exact EPG-merge functions, exec'd from
-    main.py's source (no import of the running module)."""
-    src = _MAIN.read_text()
-    tree = ast.parse(src)
-    nodes: dict[str, ast.AST] = {}
-    for node in tree.body:
+def _index_top_level(src: str) -> dict[str, ast.AST]:
+    out: dict[str, ast.AST] = {}
+    for node in ast.parse(src).body:
         name = None
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             name = node.name
@@ -82,14 +86,48 @@ def _load_box_epg_core() -> dict:
             name = node.targets[0].id
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             name = node.target.id
-        if name and name in _NEEDED and name not in nodes:
-            nodes[name] = node
-    missing = [n for n in _NEEDED if n not in nodes]
+        if name and name not in out:
+            out[name] = node
+    return out
+
+
+def _closure(seed: list[str], by_name: dict[str, ast.AST]) -> dict[str, ast.AST]:
+    """Seed names plus everything they transitively reference that main.py defines
+    at top level. Names we don't own (builtins, import aliases) simply aren't in
+    `by_name` and are expected to come from the base namespace."""
+    included: dict[str, ast.AST] = {}
+    stack = list(seed)
+    while stack:
+        name = stack.pop()
+        if name in included:
+            continue
+        node = by_name.get(name)
+        if node is None:
+            continue  # not first-party — provided by the base namespace
+        included[name] = node
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Name) and sub.id not in included:
+                stack.append(sub.id)
+    return included
+
+
+def _load_box_epg_core() -> dict:
+    """Return a namespace holding the box's exact EPG-merge functions, exec'd from
+    main.py's source (no import of the running module)."""
+    src = _MAIN.read_text()
+    by_name = _index_top_level(src)
+    missing = [n for n in _SEED if n not in by_name]
     if missing:
         sys.exit(f"epg-ship: could not locate in main.py: {missing} — refusing to ship.")
     ns: dict = {"_re_bc": _re_bc, "asyncio": asyncio, "re": _re_bc}
-    for node in sorted(nodes.values(), key=lambda n: n.lineno):
-        exec(ast.get_source_segment(src, node), ns)  # noqa: S102 — trusted first-party source
+    for node in sorted(_closure(_SEED, by_name).values(), key=lambda n: n.lineno):
+        seg = ast.get_source_segment(src, node)
+        try:
+            exec(seg, ns)  # noqa: S102 — trusted first-party source
+        except Exception as e:  # noqa: BLE001
+            label = getattr(node, "name", None) or "<assignment>"
+            sys.exit(f"epg-ship: failed to exec '{label}': {type(e).__name__}: {e}\n"
+                     f"  (a name it references is missing from the base namespace)")
     return ns
 
 
