@@ -11204,6 +11204,13 @@ def _normalize_ch(title: str) -> str:
     t = _re_bc.sub(r"\s*\([a-z0-9._-]{3,30}\)\s*$", "", t, flags=_re_bc.I)
     # Strip playlist/thetvapp suffixes
     t = _re_bc.sub(r"\s*\(thetvapp\)|\s*\(playlist\)", "", t, flags=_re_bc.I)
+    # Strip a trailing decoration glyph, INCLUDING one glued straight onto the
+    # quality flag ("CA - TSN 2 SD²"). Panels use these to tell duplicate rows
+    # apart. Done before the quality strip below, whose `$` anchor the glyph would
+    # otherwise defeat — leaving "tsn 2 sd²", which matched no curated name and so
+    # fell to whatever merely started with "tsn ". Deliberately a fixed glyph set,
+    # not "any punctuation": "ESPN+" ends in a meaningful "+".
+    t = _re_bc.sub(r"[²³¹⁰⁴⁵⁶⁷⁸⁹◉★☆✤•·]+\s*$", "", t).rstrip()
     # Strip trailing quality flags: HD, SD, FHD, UHD, (B), (R), (E), (D)
     t = _re_bc.sub(r"\s+(?:fhd|uhd|hd|sd)\s*$", "", t, flags=_re_bc.I)
     t = _re_bc.sub(r"\s*\([a-z]\)\s*$", "", t, flags=_re_bc.I)
@@ -11278,7 +11285,126 @@ def _normalize_ch(title: str) -> str:
     return t.strip().lower()
 
 
-_SHORT_FR_DISPLAYS = {"rds", "rds2", "rds info", "tva sports"}
+# French-Canadian displays that need the loose token match in _ch_matches. "rds 2"
+# is in here because these panels label it "CAFR - RDS 2 HD": _normalize_ch leaves
+# the "CAFR" tag in place, so the strict prefix rule can't see the name and every
+# RDS 2 feed fell through to plain RDS.
+_SHORT_FR_DISPLAYS = {"rds", "rds2", "rds 2", "rds info", "tva sports"}
+
+# ── Sub-brand guard: what may follow a channel name and still BE that channel ──
+#
+# _ch_matches used to accept any title starting with the curated name + a space,
+# on the theory that the tail was only ever a quality flag. It isn't. Providers
+# carry whole families of sibling channels under one prefix, and every one of them
+# was landing on the parent (measured against the shipped pool, 2026-07-28):
+#
+#   MTV        164 candidates — MTV Classic, MTV 2, MTV U, MTV Dating, MTV Reality,
+#                               and "MTV USA" from an Arabic panel that is MTV LEBANON
+#   Lifetime   106 — 20 of them Lifetime Movie Network
+#   Discovery  200 — Discovery Life, Discovery Family
+#   TSN        135 — all of them TSN1-5 or "TSN The Ocho" (= ESPN8)
+#   ESPN      5798 — ESPN SEC Network, ESPN ACCN, ESPN Big Ten, every PPV event feed
+#
+# The user-visible symptom was "MTV plays some Arab or Indian channel" and
+# "Showcase doesn't work": the wrong-channel sources rank alongside the right ones,
+# so which channel you actually get is luck of the probe.
+#
+# The rule now: the tail must consist ONLY of tokens that name a FEED of the same
+# channel (quality, timezone, region) — never a word that names a different one.
+_FEED_QUALIFIER_TOKENS: frozenset[str] = frozenset({
+    # quality / encoding
+    "hd", "sd", "fhd", "uhd", "shd", "lhd", "mhd", "hevc", "h265", "h264",
+    "4k", "8k", "1080p", "1080", "720p", "720", "576p", "480p", "raw", "hq",
+    # timezone feed of the same network
+    "east", "west", "eastern", "western", "feed",
+    # country tag a provider tacks on ("MTV USA", "CBS Sports Network USA")
+    "us", "usa", "ca", "can", "canada", "america", "american",
+    # generic channel words ("History Channel", "Bloomberg Television")
+    "tv", "television", "channel", "network", "networks", "the",
+    # provider bookkeeping ("NFL RedZone HD [BK]", "… ALT")
+    # NOT "live": "MTV Live" is a different channel from "MTV".
+    "bk", "backup", "alt", "alternate", "main",
+})
+
+# Canadian networks have no national feed in these pools — the LOCAL AFFILIATE is
+# the channel ("CBC Toronto", "CTV Ottawa", "Citytv Montreal"). Listed explicitly
+# rather than allowing any tail, because the same prefix also carries genuinely
+# different channels (CTV Drama, CTV Sci-Fi, CTV Comedy, CBC News).
+_CA_LOCAL_FEED_TOKENS: frozenset[str] = frozenset({
+    "vancouver", "calgary", "toronto", "montreal", "halifax", "windsor",
+    "charlottetown", "ottawa", "winnipeg", "edmonton", "fredericton", "regina",
+    "yellowknife", "st", "johns", "kitchener", "timmins", "sudbury", "north",
+    "bay", "lethbridge", "moncton", "sault", "ste", "marie", "sydney", "yorkton",
+    "saskatoon", "prince", "albert", "barrie", "london", "peterborough",
+    "maritimes", "durham", "bc", "okanagan", "kingston", "national",
+    "atlantic", "pacific", "quebec", "acadie", "alberta", "cb-yukon", "estrie",
+    "manitoba", "mauricie", "ontario", "ottawa-gatineau", "saguenay",
+    "saskatchewan", "hull", "chot", "cftm", "cimt", "riviere-du-loup", "v-tele",
+})
+
+# Extra tokens allowed for ONE channel only.
+_CHANNEL_FEED_TOKENS: dict[str, frozenset[str]] = {
+    "CBC": _CA_LOCAL_FEED_TOKENS, "CTV": _CA_LOCAL_FEED_TOKENS,
+    "CTV 2": _CA_LOCAL_FEED_TOKENS, "Global": _CA_LOCAL_FEED_TOKENS,
+    "Citytv": _CA_LOCAL_FEED_TOKENS, "TVA": _CA_LOCAL_FEED_TOKENS,
+    "ICI Tele": _CA_LOCAL_FEED_TOKENS, "Noovo": _CA_LOCAL_FEED_TOKENS,
+    "TV5": _CA_LOCAL_FEED_TOKENS, "CBC News Network": _CA_LOCAL_FEED_TOKENS,
+    "CTV News": _CA_LOCAL_FEED_TOKENS, "Global News": _CA_LOCAL_FEED_TOKENS,
+    "MLS": frozenset({"soccer", "yes"}),          # "MLS Soccer 07", "MLS YES Network"
+    "LaLiga TV": frozenset({"bar", "hypermotion"}),
+}
+
+# Channels that pool their NUMBERED sub-feeds on purpose — see the DAZN / beIN note
+# in _LOUNGE_CHANNEL_NAMES: one channel whose candidate pool is the union of every
+# numbered feed beats five flaky single-source channels. For these (and only these)
+# a bare number in the tail is a feed, not another channel.
+_UNION_NUMBERED_FEEDS: frozenset[str] = frozenset({
+    "DAZN", "beIN Sports", "MLS", "Serie A", "LaLiga TV",
+    "Sky Sport Bundesliga", "Champions League",
+})
+
+# Alternate names the SAME channel ships under: rebrands the providers have picked
+# up (Bally Sports North/Detroit became FanDuel Sports Network in 2025 — the Bally
+# titles are still listed but dead, which is why both channels had no working
+# source), and provider spellings that normalise to something else.
+_CHANNEL_NAME_ALIASES: dict[str, tuple[str, ...]] = {
+    "Bally Sports North":   ("fanduel sports network north",),
+    "Bally Sports Detroit": ("fanduel sports network detroit",),
+    "ID":                   ("id investigation discovery",),
+    "Paramount+":           ("paramount+ with showtime",),
+    "National Geographic":  ("nat geo",),
+    "CBC News Network":     ("cbc news",),
+}
+
+_DECOR_ONLY_RE = _re_bc.compile(r"^[^0-9a-z]+$", _re_bc.I)
+_PAREN_TOKEN_RE = _re_bc.compile(r"^[\(\[]([0-9a-z]+)[\)\]]$", _re_bc.I)
+
+
+def _tail_is_feed_only(tail: str, ch_name: str) -> bool:
+    """True if everything after the channel name only names a FEED of that channel.
+
+    "mtv classic" -> False (a different channel); "mtv east hd" -> True;
+    "dazn 1" -> True for DAZN only; "cbc toronto" -> True for CBC only.
+    """
+    allowed = _FEED_QUALIFIER_TOKENS | _CHANNEL_FEED_TOKENS.get(ch_name, frozenset())
+    numbered_ok = ch_name in _UNION_NUMBERED_FEEDS
+    saw_token = False
+    for tok in tail.split():
+        m = _PAREN_TOKEN_RE.match(tok)
+        if m:
+            tok = m.group(1)
+        # Panels distinguish duplicate rows with decoration ("TSN 2 SD²", "… ◉").
+        tok = tok.strip("²³¹◉★☆*.,:;-")
+        if not tok or _DECOR_ONLY_RE.match(tok):
+            continue
+        saw_token = True
+        if tok in allowed:
+            continue
+        if numbered_ok and tok.isdigit():
+            continue
+        return False
+    return saw_token
+
 
 # Foreign-feed guard. Scraped upstream providers carry Latin-American / Brazilian /
 # other-region duplicates of US channels ("ESPN Brasil 2", "ESPN HD OP 2" =
@@ -11396,19 +11522,34 @@ def _ch_matches(raw_title: str, ch_name: str) -> bool:
     # name itself contains the marker (none currently do).
     if _FOREIGN_FEED_RE.search(norm) and not _FOREIGN_FEED_RE.search(want):
         return False
-    # Exact match or starts with name + space (e.g. "tsn1" or "tsn1 hd")
-    if norm == want or norm.startswith(want + " "):
-        return True
-    # Also handle "espn+" ↔ "espnplus" / "espn plus"
+    # Exact match, or the name followed ONLY by feed qualifiers ("tsn1 hd",
+    # "mtv east", "cbc toronto"). A tail carrying any other word names a DIFFERENT
+    # channel — "mtv classic", "lifetime movie network", "tsn the ocho" — and must
+    # not be pooled onto the parent. See _FEED_QUALIFIER_TOKENS.
+    for base in (want, *_CHANNEL_NAME_ALIASES.get(ch_name, ())):
+        if norm == base:
+            return True
+        if norm.startswith(base + " ") and _tail_is_feed_only(norm[len(base) + 1:], ch_name):
+            return True
+    # Also handle "espn+" ↔ "espnplus" / "espn plus". Exact spellings only: the
+    # pool's "espn+ 01 : surfing – 2026 wsl…" rows are per-event PPV feeds, a
+    # separate service from the ESPN+ linear channel.
     if want == "espn+":
-        return norm in ("espnplus", "espn plus", "espn+") or norm.startswith("espn+ ") or norm.startswith("espnplus ")
+        return norm in ("espnplus", "espn plus", "espn+")
     # French-network fallback: providers label RDS as "Canal RDS HD" etc. which
     # normalises to "canal rds" ≠ "rds". Accept if every token of the display
     # name appears in the normalised title. Narrow to French displays so ESPN /
     # Sportsnet don't over-match.
+    #
+    # Word-boundaried: a bare substring test made "rds" match "24/7: Drug LoRDS -
+    # The Takedown" and "NBA Washington Wizards", which is how 395 candidates
+    # (mostly cartoons and NBA feeds) ended up pooled onto RDS.
     if want in _SHORT_FR_DISPLAYS:
-        tokens = [t for t in want.split() if len(t) >= 2]
-        if tokens and all(tok in norm for tok in tokens):
+        # Every token, INCLUDING a single-digit feed number: dropping short tokens
+        # made "rds 2" degenerate to "rds", so RDS 2 matched plain-RDS titles and
+        # (losing the race to the longer name) left its own feeds to RDS.
+        tokens = want.split()
+        if tokens and all(_re_bc.search(rf"\b{_re_bc.escape(tok)}\b", norm) for tok in tokens):
             return True
     return False
 
@@ -12746,6 +12887,23 @@ _CURATED_ONLY_CHANNELS: frozenset[str] = frozenset({
     "RDS", "RDS 2", "RDS INFO", "TVA Sports",
 })
 
+# Guide entries that are the SAME channel as another entry, or an umbrella brand
+# with no distinct feed of its own. They inherit the canonical entry's sources
+# (appended after their own, deduped) instead of going dark or running on one
+# fragile link. Keys and values must be _LOUNGE_CHANNEL_NAMES.
+#
+#   TSN / Sportsnet  umbrella names — every real feed is a numbered or regional
+#                    sibling that is already its own channel here.
+#   HBO Max          exists in these pools only as VOD menu rows.
+#   ID               Investigation Discovery renamed; providers use both titles,
+#                    so each name saw only its half of the sources.
+_LOUNGE_CHANNEL_MIRRORS: dict[str, str] = {
+    "TSN": "TSN1",
+    "Sportsnet": "Sportsnet Ontario",
+    "HBO Max": "HBO",
+    "ID": "Investigation Discovery",
+}
+
 # Guide adjacency: keep sub-brand channels next to their parent in the guide.
 # The guide sorts by (type, channel_number); some siblings were appended to the
 # list far from their parent (ESPNU/ESPNews/ESPN+ ended up at the bottom of the
@@ -13186,6 +13344,20 @@ async def _build_lounge_payload() -> dict:
                       if _candidate_upstream_host(c["url"]).lower() in _HARDCODED_upstream_HOSTS
                       or c.get("source") == "tvpass"]
         channel_candidates[name] = _sort_by_url_priority(unique, name)
+
+    # Duplicate/umbrella guide entries inherit their canonical channel's sources —
+    # see _LOUNGE_CHANNEL_MIRRORS. Before the sub-brand guard these filled up with
+    # whatever merely started with the same word (TSN was serving ESPN8 "The
+    # Ocho"); now they share the real feed instead of going dark. Own sources keep
+    # priority; the mirror's are appended as extra failover depth.
+    for name, mirrors in _LOUNGE_CHANNEL_MIRRORS.items():
+        extra = channel_candidates.get(mirrors) or []
+        if not extra:
+            continue
+        own = channel_candidates.get(name) or []
+        seen = {_dedup_key(c["url"]) for c in own}
+        channel_candidates[name] = own + [c for c in extra
+                                          if _dedup_key(c["url"]) not in seen]
 
     async def _build_one(ch_name: str, candidates: list[dict]) -> dict:
         # Same upstream-bias logic as barncentre — the verifier's 10s window
