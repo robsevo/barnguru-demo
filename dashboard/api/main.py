@@ -11515,12 +11515,31 @@ def _candidate_is_english(title: str, category: str = "", trusted: bool = True) 
 
 def _ch_matches(raw_title: str, ch_name: str) -> bool:
     """Return True if an IPTV channel title matches our BarnCentre channel name."""
-    norm  = _normalize_ch(raw_title)
+    return _ch_matches_norm(_normalize_ch(raw_title), ch_name)
+
+
+def _ch_matches_norm(
+    norm: str, ch_name: str, norm_is_foreign: "bool | None" = None
+) -> bool:
+    """`_ch_matches` on an ALREADY-normalised title.
+
+    Exists because normalising is 90% of the cost and depends only on the title,
+    while the lounge build asks "does this title match?" once per curated NAME —
+    145 times per channel. Callers that match a whole pool normalise once up
+    front and come here; `_ch_matches` above is the unchanged one-shot entry
+    point for everyone else.
+
+    `norm_is_foreign` likewise: the foreign-feed test reads only `norm`, so a
+    bulk caller precomputes it per channel instead of per (channel, name) pair.
+    Passing None keeps this function standalone and exact.
+    """
     want  = ch_name.lower()
+    if norm_is_foreign is None:
+        norm_is_foreign = bool(_FOREIGN_FEED_RE.search(norm))
     # Reject foreign-region/language feeds outright (e.g. "ESPN Brasil",
     # "ESPN HD OP 2") so they don't shadow the US channel — unless the curated
     # name itself contains the marker (none currently do).
-    if _FOREIGN_FEED_RE.search(norm) and not _FOREIGN_FEED_RE.search(want):
+    if norm_is_foreign and not _FOREIGN_FEED_RE.search(want):
         return False
     # Exact match, or the name followed ONLY by feed qualifiers ("tsn1 hd",
     # "mtv east", "cbc toronto"). A tail carrying any other word names a DIFFERENT
@@ -13272,23 +13291,49 @@ def _derive_lounge_lineup(all_channels: list[dict]) -> list[dict]:
     # Match candidates to curated names — longer/more-specific names first
     # so "HBO Max" and "FXX" claim before "HBO" / "FX".
     sorted_names = sorted(_LOUNGE_CHANNEL_NAMES, key=lambda n: -len(n))
+
+    # ONE pass over the pool for everything that depends only on the CHANNEL.
+    # Matching asks 145 curated names about each of ~110k pool entries, and both
+    # of these were being recomputed inside that product: normalising a title is
+    # ~57us (it runs 20 regex subs) and the English gate ~16us, which is where
+    # essentially all of the old ~10 minutes went. Hoisted, each runs 110k times
+    # instead of ~16M. Same inputs, same values, same order — this changes only
+    # HOW OFTEN they are evaluated.
+    titles  = [ch.get("title", "") for ch in all_channels]
+    norms   = [_normalize_ch(t) for t in titles]
+    foreign = [bool(_FOREIGN_FEED_RE.search(n)) for n in norms]
+    english = [
+        _candidate_is_english(t, ch.get("category", ""), ch.get("english_default", True))
+        for t, ch in zip(titles, all_channels)
+    ]
+
     assigned: dict[int, str] = {}
+    # Indices still up for grabs. The old loop re-walked all 110k every name and
+    # skipped the taken ones via `id(ch) in assigned`; carrying the survivors
+    # forward is the same traversal with the taken ones already dropped.
+    pending = list(range(len(all_channels)))
     for ch_name in sorted_names:
-        for ch in all_channels:
-            if id(ch) in assigned:
-                continue
+        # Per-NAME, not per-pair: it only reads ch_name.
+        foreign_ok = _lounge_foreign_ok(ch_name)
+        survivors: list[int] = []
+        for i in pending:
             # English/US-CA allowlist gate (rigorous) — reject foreign-region or
             # foreign-language-category streams BEFORE name matching so a Danish
             # "DK| DISCOVERY" or a Latino "Discovery Channel HD" (cat=CULTURA)
             # can never land on a US/CA channel. Channels in _LOUNGE_FOREIGN_OK
             # (native-language league feeds) skip the gate — foreign audio IS
             # the channel there.
-            if not _lounge_foreign_ok(ch_name) and not _candidate_is_english(
-                ch.get("title", ""), ch.get("category", ""), ch.get("english_default", True)
-            ):
+            #
+            # Rejected here it stays PENDING, not dropped: a later curated name
+            # may be foreign-ok and want exactly this stream.
+            if not foreign_ok and not english[i]:
+                survivors.append(i)
                 continue
-            if _ch_matches(ch.get("title", ""), ch_name):
-                assigned[id(ch)] = ch_name
+            if _ch_matches_norm(norms[i], ch_name, foreign[i]):
+                assigned[id(all_channels[i])] = ch_name
+            else:
+                survivors.append(i)
+        pending = survivors
 
     channel_candidates: dict[str, list[dict]] = {}
     for ch in all_channels:
