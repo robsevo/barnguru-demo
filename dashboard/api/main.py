@@ -13246,65 +13246,29 @@ def _kick_epg_prewarm() -> None:
         pass
 
 
-async def _build_lounge_payload() -> dict:
-    """Builder for /lounge/live-channels. Models `_build_barncentre_payload`
-    closely — same IPTV pool, same matching/normalisation, but uses the
-    lounge's broader curated list and per-channel blocklist.
+def _derive_lounge_lineup(all_channels: list[dict]) -> list[dict]:
+    """The EXPENSIVE half of the lounge build: pool -> ranked per-channel lineup.
+
+    Pure and CPU-bound — no network, no awaits, no runtime state. The matching
+    pass alone is O(len(_LOUNGE_CHANNEL_NAMES) x len(all_channels)); against the
+    ~110k-entry shipped pool that is 5-12 MINUTES of solid Python on the 1-vCPU box.
+
+    This used to run inline in `_build_lounge_payload`'s background refresh, and
+    because `_build_one` was `async def` with ZERO awaits, `gather()` never yielded
+    — so once an hour (_LOUNGE_TTL) the single uvicorn event loop went dead for the
+    whole build and the API answered NOTHING, not even /health. Measured 2026-07-31:
+    45 blackouts in 4 days, 6h41m total, and lengthening as the pool grew.
+
+    So it lives here, off the request path: `scripts/lineup_build.py` runs it in a
+    SEPARATE PROCESS whenever the pool ships and writes data/lounge_lineup.json,
+    which `_load_shipped_lounge_lineup` then serves in milliseconds. The self-build
+    fallback still exists for a cold box, but `_lounge_lineup` runs it via
+    `asyncio.to_thread` so the GIL hands the event loop a slice every few ms —
+    slow, but never a blackout again.
+
+    Returns channels with `programs` EMPTY: programs are today's games — cheap,
+    time-sensitive, and re-attached on every build by `_build_lounge_payload`.
     """
-    import time as _t_lp
-    import asyncio as _aio_lp
-    now_ts = _t_lp.time()
-
-    iptv_result = await iptv_channels()
-    # tvpass dropped wholesale; see `_is_tvpass` for context. Filter happens
-    # here too so /lounge/* mirrors /barncentre-channels.
-    all_channels: list[dict] = iptv_result.get("channels", [])
-    all_channels = [ch for ch in all_channels if not _is_tvpass(ch)]
-
-    # Programs source: today's NHL/ESPN/MLB/NBA from the existing helpers
-    # (sports channels in _LOUNGE_CHANNEL_NAMES still want their game guide).
-    # Cable channels get programs[] populated by the EPG endpoint
-    # (/lounge/epg) once it lands; the channel list itself stays light.
-    import datetime as _dt_lp
-    today = _dt_lp.date.today().isoformat()
-    programs: dict[str, list] = {}
-    try:
-        import httpx as _hx_lp
-        async with _hx_lp.AsyncClient(timeout=8) as _cl:
-            resp = await _cl.get(f"https://api-web.nhle.com/v1/score/{today}")
-            if resp.status_code == 200:
-                for game in (resp.json().get("games") or []):
-                    gid        = game.get("id")
-                    away       = (game.get("awayTeam") or {}).get("abbrev", "")
-                    home       = (game.get("homeTeam") or {}).get("abbrev", "")
-                    start_utc  = game.get("startTimeUTC", "")
-                    game_state = game.get("gameState", "PRE")
-                    away_score = (game.get("awayTeam") or {}).get("score")
-                    home_score = (game.get("homeTeam") or {}).get("score")
-                    for b in (game.get("tvBroadcasts") or []):
-                        code    = b.get("network", "")
-                        display = cast(str, _BROADCAST_CODE_MAP.get(code, code))
-                        programs.setdefault(display, []).append({
-                            "game_id":    gid,
-                            "title":      f"{away} @ {home}",
-                            "start_utc":  start_utc,
-                            "state":      game_state,
-                            "market":     b.get("market", "N"),
-                            "away_score": away_score,
-                            "home_score": home_score,
-                        })
-    except Exception:
-        pass
-
-    epg_data, mlb_data, nba_data = await _aio_lp.gather(
-        _fetch_espn_schedule(), _fetch_mlb_schedule(), _fetch_nba_schedule(),
-    )
-    for sport in (epg_data, mlb_data, nba_data):
-        for ch_name, progs in sport.items():
-            programs.setdefault(ch_name, []).extend(progs)
-    for ch_name in programs:
-        programs[ch_name].sort(key=lambda p: p.get("start_utc", ""))
-
     # Match candidates to curated names — longer/more-specific names first
     # so "HBO Max" and "FXX" claim before "HBO" / "FX".
     sorted_names = sorted(_LOUNGE_CHANNEL_NAMES, key=lambda n: -len(n))
@@ -13398,7 +13362,7 @@ async def _build_lounge_payload() -> dict:
         channel_candidates[name] = own + [c for c in extra
                                           if _dedup_key(c["url"]) not in seen]
 
-    async def _build_one(ch_name: str, candidates: list[dict]) -> dict:
+    def _build_one(ch_name: str, candidates: list[dict]) -> dict:
         # Same upstream-bias logic as barncentre — the verifier's 10s window
         # routinely demotes valid upstream chips on cold start, so we trust
         # the field-tested order.
@@ -13413,7 +13377,7 @@ async def _build_lounge_payload() -> dict:
                 "primary_url":    "",
                 "backup_urls":    [],
                 "category":       "live",
-                "programs":       programs.get(ch_name, []),
+                "programs":       [],
                 "online":         False,
             }
 
@@ -13535,18 +13499,142 @@ async def _build_lounge_payload() -> dict:
             "primary_url":    chosen_out,
             "backup_urls":    backups_out,
             "category":       "live",
-            "programs":       programs.get(ch_name, []),
+            "programs":       [],
             "online":         verified_primary is not None,
         }
 
-    tasks  = [_build_one(n, c) for n, c in channel_candidates.items()]
-    result = list(await _aio_lp.gather(*tasks))
+    result = [_build_one(n, c) for n, c in channel_candidates.items()]
     # Sort by the GUIDE order, not by _LOUNGE_CHANNEL_NAMES. That list is ordered
     # for MATCHING (longest names first) and opens on the whole sports block, and
     # sorting by it here is why _LOUNGE_GUIDE_BLOCKS appeared to do nothing: the
     # blocks set channel_number correctly, but the array this endpoint RETURNS —
     # which is what the clients render in order — was still the matching order.
     result.sort(key=lambda ch: _LOUNGE_CHANNEL_NUMBER.get(ch["name"], 999))
+    return result
+
+
+# Precomputed output of _derive_lounge_lineup, built off the event loop by
+# scripts/lineup_build.py (see ship-pool.yml). Same contract as the shipped IPTV
+# pool: missing / empty / too old falls through to the on-box self-build, so the
+# box never hard-depends on the producer. mtime-cached.
+_LOUNGE_LINEUP_SHIP_FILE = Path(os.environ.get(
+    "LOUNGE_LINEUP_SHIP_FILE",
+    str(Path(__file__).resolve().parents[2] / "data" / "lounge_lineup.json")))
+_LOUNGE_LINEUP_MAX_AGE = 36 * 3600
+_shipped_lineup_cache: "tuple[float, list]" = (0.0, [])
+
+
+def _load_shipped_lounge_lineup() -> "list | None":
+    """The precomputed lineup, or None when missing / empty / too old."""
+    global _shipped_lineup_cache
+    try:
+        mtime = _LOUNGE_LINEUP_SHIP_FILE.stat().st_mtime
+    except OSError:
+        return None
+    if _time_iptv.time() - mtime > _LOUNGE_LINEUP_MAX_AGE:
+        return None  # stale ship — self-build fresh
+    if mtime == _shipped_lineup_cache[0]:
+        return _shipped_lineup_cache[1] or None
+    try:
+        doc = json.loads(_LOUNGE_LINEUP_SHIP_FILE.read_text())
+        raw = doc.get("channels")
+        if not isinstance(raw, list) or not raw:
+            _shipped_lineup_cache = (mtime, [])
+            return None
+        # A lineup with nothing playable is worse than rebuilding — same guard the
+        # cache-write path uses, so a bad ship can't strand the Lounge all-dead.
+        if not any(ch.get("primary_url") for ch in raw):
+            _shipped_lineup_cache = (mtime, [])
+            return None
+    except Exception:
+        _shipped_lineup_cache = (mtime, [])
+        return None
+    _shipped_lineup_cache = (mtime, raw)
+    return raw
+
+
+async def _lounge_lineup(all_channels: list[dict]) -> list[dict]:
+    """Precomputed lineup if one shipped, else self-build IN A THREAD.
+
+    The thread is the whole point of the fallback: `_derive_lounge_lineup` is
+    minutes of pure Python, and running it inline is what blacked out the API
+    every hour. Under the GIL a CPU-bound thread still yields every few ms
+    (sys.getswitchinterval), so the loop keeps answering while it grinds.
+    """
+    shipped = _load_shipped_lounge_lineup()
+    if shipped is not None:
+        return shipped
+    return await asyncio.to_thread(_derive_lounge_lineup, all_channels)
+
+
+async def _build_lounge_payload() -> dict:
+    """Builder for /lounge/live-channels. Models `_build_barncentre_payload`
+    closely — same IPTV pool, same matching/normalisation, but uses the
+    lounge's broader curated list and per-channel blocklist.
+    """
+    import time as _t_lp
+    import asyncio as _aio_lp
+    now_ts = _t_lp.time()
+
+    iptv_result = await iptv_channels()
+    # tvpass dropped wholesale; see `_is_tvpass` for context. Filter happens
+    # here too so /lounge/* mirrors /barncentre-channels.
+    all_channels: list[dict] = iptv_result.get("channels", [])
+    all_channels = [ch for ch in all_channels if not _is_tvpass(ch)]
+
+    # Programs source: today's NHL/ESPN/MLB/NBA from the existing helpers
+    # (sports channels in _LOUNGE_CHANNEL_NAMES still want their game guide).
+    # Cable channels get programs[] populated by the EPG endpoint
+    # (/lounge/epg) once it lands; the channel list itself stays light.
+    import datetime as _dt_lp
+    today = _dt_lp.date.today().isoformat()
+    programs: dict[str, list] = {}
+    try:
+        import httpx as _hx_lp
+        async with _hx_lp.AsyncClient(timeout=8) as _cl:
+            resp = await _cl.get(f"https://api-web.nhle.com/v1/score/{today}")
+            if resp.status_code == 200:
+                for game in (resp.json().get("games") or []):
+                    gid        = game.get("id")
+                    away       = (game.get("awayTeam") or {}).get("abbrev", "")
+                    home       = (game.get("homeTeam") or {}).get("abbrev", "")
+                    start_utc  = game.get("startTimeUTC", "")
+                    game_state = game.get("gameState", "PRE")
+                    away_score = (game.get("awayTeam") or {}).get("score")
+                    home_score = (game.get("homeTeam") or {}).get("score")
+                    for b in (game.get("tvBroadcasts") or []):
+                        code    = b.get("network", "")
+                        display = cast(str, _BROADCAST_CODE_MAP.get(code, code))
+                        programs.setdefault(display, []).append({
+                            "game_id":    gid,
+                            "title":      f"{away} @ {home}",
+                            "start_utc":  start_utc,
+                            "state":      game_state,
+                            "market":     b.get("market", "N"),
+                            "away_score": away_score,
+                            "home_score": home_score,
+                        })
+    except Exception:
+        pass
+
+    epg_data, mlb_data, nba_data = await _aio_lp.gather(
+        _fetch_espn_schedule(), _fetch_mlb_schedule(), _fetch_nba_schedule(),
+    )
+    for sport in (epg_data, mlb_data, nba_data):
+        for ch_name, progs in sport.items():
+            programs.setdefault(ch_name, []).extend(progs)
+    for ch_name in programs:
+        programs[ch_name].sort(key=lambda p: p.get("start_utc", ""))
+
+    # The expensive pool -> lineup derivation is PRECOMPUTED off the request path
+    # (see _derive_lounge_lineup); only a cold box pays to build it, and even then
+    # in a thread so the event loop keeps getting slices.
+    lineup = await _lounge_lineup(all_channels)
+
+    # Programs are today's games: cheap and time-sensitive, so they are attached
+    # per build rather than baked into the shipped lineup. New dicts — never mutate
+    # the shipped/cached lineup in place, it is shared across requests.
+    result = [{**ch, "programs": programs.get(ch["name"], [])} for ch in lineup]
 
     # Pre-warm relay ffmpeg sessions on the resolved primaries (same trick
     # as BarnCentre — saves 4-7s cold-start on the first click).
