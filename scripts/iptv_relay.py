@@ -867,19 +867,47 @@ def _probe_audio_tracks(url: str) -> list:
     return _probe_audio_meta(url)["tracks"]
 
 
+# Track titles that mark an English stream as something OTHER than the feature
+# audio: director's commentary, described video for the visually impaired, an
+# isolated score. Defaulting to one of those is as wrong as defaulting to German
+# — you get a voice talking over the film, or narration describing it. Real
+# example from our own panels: a Blu-ray rip laid out
+#   0:eng "Commentary with George Lucas…"  1:eng ""  2:eng "Commentary with Cast…"
+# where "first English track" is the commentary.
+#
+# Kept deliberately in step with tvspot's lib/audioLang.ts (isAlternateCut). The
+# two MUST agree: the relay decides what actually plays, while the player marks a
+# row as "playing" based on its own reading of the same track list. If they
+# diverge, the menu shows English selected while a commentary is audible.
+_ALT_CUT_RE = re.compile(
+    r"commentary|described|description|\bad\b|narrat|karaoke|instrumental|isolated score",
+    re.IGNORECASE,
+)
+
+
 def _probe_english_audio_index(url: str) -> "int | None":
-    """Audio-relative index of the first ENGLISH audio stream, or None.
+    """Audio-relative index of the ENGLISH audio stream to play, or None.
 
     The auto-default: these panels serve multi-audio rips (titles tagged
     "MULTI"), and ffmpeg's default picks the highest-channel track — routinely a
     French/German 5.1 sitting ahead of English stereo, so the remux comes out in
     the wrong language. None means "no opinion" → ffmpeg's default is left alone.
     A caller can override this entirely by passing an explicit aidx.
+
+    Prefers the first English MAIN track over an English alternate cut; falls
+    back to the first English track of any kind, since a commentary in English
+    still beats the German dub ffmpeg would otherwise choose.
     """
-    for t in _probe_audio_tracks(url):
-        if t["lang"] in _ENGLISH_LANG_TAGS or "english" in t["title"].lower():
+    english = [
+        t for t in _probe_audio_tracks(url)
+        if t["lang"] in _ENGLISH_LANG_TAGS or "english" in t["title"].lower()
+    ]
+    if not english:
+        return None
+    for t in english:
+        if not _ALT_CUT_RE.search(t["title"]):
             return t["rel"]
-    return None
+    return english[0]["rel"]
 
 
 # Per-URL probe results (video codec + English audio index). Seeking a remux
