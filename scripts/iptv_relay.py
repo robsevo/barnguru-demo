@@ -185,6 +185,47 @@ def _vod_pacing_args() -> list[str]:
     return ["-re"]
 
 
+# ── observed per-panel VOD cold-start cost ───────────────────────────────────
+#
+# How long a movie takes to START is dominated by the PANEL, not by us. After
+# the probe merge and the initial burst, cold time-to-manifest still measured
+# 1.6s on 103.176.90.182 and ~15s on 103.176.90.100 — because the latter serves
+# ~2 MB/s and no amount of pacing reads faster than the wire.
+#
+# tvspot ranks VOD sources with a 2-byte range probe (lib/vodScore), which
+# measures CONNECT latency and is blind to throughput: the slow panel answers
+# two bytes promptly and then crawls. The relay is the only party that observes
+# the real number, because it is the one doing the reading. So record it here
+# and publish it, and let the resolver order remux sources by evidence.
+#
+# EWMA rather than a running mean: panels change (load, time of day), and we
+# want the recent past to dominate without a single outlier flipping an order.
+_PANEL_START_MS: "dict[str, tuple[float, int]]" = {}   # host -> (ewma_ms, samples)
+_PANEL_EWMA_ALPHA = 0.3
+_PANEL_MAX_HOSTS = 300
+
+
+def _record_panel_start(url: str, elapsed_ms: float) -> None:
+    """Fold one observed cold start into the panel's EWMA."""
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return
+    if not host:
+        return
+    prev = _PANEL_START_MS.get(host)
+    if prev is None:
+        if len(_PANEL_START_MS) >= _PANEL_MAX_HOSTS:
+            _PANEL_START_MS.clear()  # tiny table, cheap reset; not worth an LRU
+        _PANEL_START_MS[host] = (elapsed_ms, 1)
+    else:
+        ewma, n = prev
+        _PANEL_START_MS[host] = (
+            _PANEL_EWMA_ALPHA * elapsed_ms + (1 - _PANEL_EWMA_ALPHA) * ewma,
+            n + 1,
+        )
+
+
 def _encode_args(quality: str, encoder: str) -> list[str]:
     """ffmpeg args between `-i <url>` and the HLS muxer for the given tier.
 
@@ -999,6 +1040,10 @@ def _vod_probe_store(url: str, vcodec: "str | None", eng_aidx: "int | None") -> 
 
 async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode: str = "live", start: float = 0.0, aidx: "int | None" = None) -> _HLSSession:
     sid = _hls_session_id(url, quality, mode, start, aidx)
+    # Wall clock for the WHOLE cold start (container probe included) — that is
+    # what a viewer waits through, so it's what gets published per panel.
+    t_enter = time.monotonic()
+    spawned = False
 
     # VOD: probe the codec BEFORE taking the lock (ffprobe can take seconds and
     # must not stall live session ops). ONLY H.264 is remuxable: copy-mode
@@ -1199,6 +1244,7 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
         sess = _HLSSession(sid, url, workdir, mode)
         sess.proc = proc
         _HLS_SESSIONS[sid] = sess
+        spawned = True
 
     manifest = sess.workdir / "live.m3u8"
     # VOD gets a longer runway: `-re` paces the input, so the first segment
@@ -1208,6 +1254,11 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
     while time.monotonic() < deadline:
         if manifest.exists() and manifest.stat().st_size > 0:
             _remember_hls_url(sid, url, quality, mode, start)
+            # Only a session WE just spawned measures the panel; an early return
+            # on an existing session would record ~0ms and make a slow panel look
+            # like the fastest one we have.
+            if spawned and mode == "vod":
+                _record_panel_start(url, (time.monotonic() - t_enter) * 1000.0)
             return sess
         if sess.proc is not None and sess.proc.poll() is not None:
             stderr_tail = b""
@@ -1233,6 +1284,11 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
     async with _HLS_LOCK:
         _HLS_SESSIONS.pop(sid, None)
     _kill_session(sess)
+    # A panel that never produced a manifest is the WORST case, and recording
+    # only successes would leave it looking unmeasured — i.e. neutral — to the
+    # resolver. Charge it the full startup budget.
+    if spawned and mode == "vod":
+        _record_panel_start(url, startup_s * 1000.0)
     raise HTTPException(status_code=504, detail="ffmpeg did not produce manifest in time")
 
 
@@ -1340,6 +1396,35 @@ async def remux_vod(u: str, request: Request, start: float = 0, aidx: "int | Non
     sess = await _start_or_get_hls_session(url, "passthrough", "vod", max(0.0, start), aidx)
     sess.last_access = time.monotonic()
     return _session_manifest_response(sess, request)
+
+
+@app.get("/panel-stats")
+async def panel_stats(request: Request) -> Response:
+    """Observed VOD cold-start cost per upstream panel, in ms.
+
+        {"panels": {"103.176.90.182": {"start_ms": 1642, "n": 7}, …}}
+
+    Consumed by tvspot's VOD resolver to ORDER remux sources (see lib/vodScore).
+    That scorer ranks on a 2-byte range probe, which measures CONNECT latency and
+    is blind to throughput — a slow panel answers two bytes promptly and then
+    serves the file at 2 MB/s. We are the only party that observes the real cost,
+    because we are the one reading the file.
+
+    In-memory, so empty after a restart; the resolver treats an unknown panel as
+    neutral, which means a cold relay falls back to the previous ordering rather
+    than mis-ranking anything.
+    """
+    _check_token(request)
+    return Response(
+        content=json.dumps({
+            "panels": {
+                h: {"start_ms": round(ms), "n": n}
+                for h, (ms, n) in _PANEL_START_MS.items()
+            }
+        }),
+        media_type="application/json",
+        headers={**_CORS, "Cache-Control": "no-store"},
+    )
 
 
 @app.get("/hls-seg/{session_id}/{segment}")
