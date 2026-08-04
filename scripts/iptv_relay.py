@@ -142,6 +142,49 @@ def _get_encoder() -> str:
     return _ENCODER
 
 
+# Seconds of MEDIA the VOD remux is allowed to ingest at full speed before it
+# settles to real-time pacing. Two segments' worth: enough that the manifest and
+# a playable head exist almost immediately, small enough that we never race far
+# ahead of the viewer (which is what `-re` is protecting against).
+VOD_INITIAL_BURST_S = 12
+
+_READRATE_BURST: "bool | None" = None
+
+
+def _supports_readrate_burst() -> bool:
+    """Does this ffmpeg have `-readrate_initial_burst` (6.1+)?
+
+    WHY IT MATTERS: the VOD remux paced its input with `-re` from the very first
+    frame, so ffmpeg could not finish segment 0 any sooner than
+    HLS_SEGMENT_SECONDS of WALL time — and the HLS muxer only writes live.m3u8
+    once a segment closes. The relay therefore sat on the request for that whole
+    window before it had a manifest to return. Measured on this box against a
+    live panel: 14.06s to first manifest with `-re`, 7.35s with a burst.
+
+    Probed once and cached. An ffmpeg without the flag would fail EVERY VOD play
+    (unrecognised option), so this falls back to plain `-re` rather than
+    assuming — the box is 6.1.1 today, but that is not a thing to hard-code.
+    """
+    global _READRATE_BURST
+    if _READRATE_BURST is None:
+        try:
+            r = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-h", "full"],
+                capture_output=True, timeout=15,
+            )
+            _READRATE_BURST = b"readrate_initial_burst" in (r.stdout or b"")
+        except Exception:
+            _READRATE_BURST = False
+    return _READRATE_BURST
+
+
+def _vod_pacing_args() -> list[str]:
+    """Input pacing for the VOD remux: burst the head, then real-time."""
+    if _supports_readrate_burst():
+        return ["-readrate", "1", "-readrate_initial_burst", str(VOD_INITIAL_BURST_S)]
+    return ["-re"]
+
+
 def _encode_args(quality: str, encoder: str) -> list[str]:
     """ffmpeg args between `-i <url>` and the HLS muxer for the given tier.
 
@@ -779,18 +822,15 @@ def _kill_session(sess: _HLSSession) -> None:
 
 def _probe_video_codec(url: str) -> "str | None":
     """codec_name of the first video stream (h264/hevc/…), None on failure.
-    Bounded: reads only the container header over HTTP."""
-    try:
-        r = subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "v:0",
-             "-show_entries", "stream=codec_name", "-of", "csv=p=0",
-             "-user_agent", _BROWSER_UA, url],
-            capture_output=True, timeout=10,
-        )
-        lines = r.stdout.decode(errors="replace").strip().splitlines()
-        return lines[0].strip() or None if lines else None
-    except Exception:
-        return None
+
+    Rides the SAME single header read as the audio/duration probe — see
+    _probe_audio_meta_uncached. It used to be its own ffprobe, which meant every
+    cold VOD play opened the container over HTTP TWICE, back to back. Measured
+    against a real panel from the relay box: 3.92s for this probe plus 4.60s for
+    the audio one, 8.52s of pure serial latency before ffmpeg was even spawned.
+    One combined read answers both in 4.99s.
+    """
+    return _probe_audio_meta(url)["vcodec"]
 
 
 _ENGLISH_LANG_TAGS = {"eng", "en", "english", "en-us", "en-gb"}
@@ -811,8 +851,10 @@ def _probe_audio_meta(url: str) -> dict:
         return hit[1]
     meta = _probe_audio_meta_uncached(url)
     # Don't cache a total failure — a panel hiccup shouldn't pin "no tracks,
-    # no duration" (i.e. no seeking) for an hour.
-    if meta["tracks"] or meta["duration"] is not None:
+    # no duration" (i.e. no seeking) for an hour. `vcodec` counts as a real
+    # answer too: a silent/single-track rip legitimately has no audio tags and
+    # no duration, and without this it would re-probe on every play.
+    if meta["tracks"] or meta["duration"] is not None or meta.get("vcodec"):
         if len(_AUDIO_META_CACHE) >= _AUDIO_META_MAX:
             for k in sorted(_AUDIO_META_CACHE, key=lambda k: _AUDIO_META_CACHE[k][0])[: _AUDIO_META_MAX // 4]:
                 _AUDIO_META_CACHE.pop(k, None)
@@ -821,30 +863,49 @@ def _probe_audio_meta(url: str) -> dict:
 
 
 def _probe_audio_meta_uncached(url: str) -> dict:
-    """Audio streams + container duration in ONE header read:
-        {"tracks": [{"rel": 0, "lang": "ger", ...}], "duration": 5423.2|None}
-    `rel` is the AUDIO-RELATIVE index — exactly what `-map 0:a:<rel>` wants.
+    """Everything we need about a VOD container in ONE header read:
+        {"tracks": [{"rel": 0, "lang": "ger", ...}],
+         "duration": 5423.2|None,
+         "vcodec": "h264"|None}
+    `rel` is the AUDIO-RELATIVE index — exactly what `-map 0:a:<rel>` wants, so
+    it must count audio streams only even though we now select all of them.
     Duration is what lets the player treat the rolling remux as seekable
-    (seek = re-request with &start=), so it rides the same ffprobe rather
-    than costing a second one.
+    (seek = re-request with &start=). `vcodec` gates the remux entirely (only
+    H.264 is copyable; anything else 415s).
 
-    Bounded like _probe_video_codec: reads only the container header over HTTP.
-    Returns empty/None fields on any failure, which callers treat as "no info".
+    All three ride ONE ffprobe on purpose. They used to be two separate reads of
+    the same container over HTTP, run back to back — 8.52s of serial latency
+    before ffmpeg spawned, measured from the relay box against a live panel.
+    Merged: 4.99s. These panels are also connection-limited, so one read is
+    safer than two concurrent ones, which is why this is a merge rather than an
+    asyncio.gather.
+
+    Bounded: reads only the container header. Returns empty/None fields on any
+    failure, which callers treat as "no info".
     """
     try:
         r = subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "a",
-             "-show_entries", "stream=index,channels:stream_tags=language,title:format=duration",
+            ["ffprobe", "-v", "error",
+             "-show_entries",
+             "stream=index,codec_type,codec_name,channels:stream_tags=language,title:format=duration",
              "-of", "json", "-user_agent", _BROWSER_UA, url],
-            capture_output=True, timeout=12,
+            capture_output=True, timeout=15,
         )
         data = json.loads(r.stdout.decode(errors="replace") or "{}") or {}
         streams = data.get("streams") or []
         out = []
-        for rel, st in enumerate(streams):
+        vcodec: "str | None" = None
+        for st in streams:
+            kind = (st.get("codec_type") or "").lower()
+            if kind == "video" and vcodec is None:
+                vcodec = (st.get("codec_name") or "").strip() or None
+                continue
+            if kind != "audio":
+                continue
             tags = {str(k).lower(): str(v) for k, v in (st.get("tags") or {}).items()}
             out.append({
-                "rel": rel,
+                # Audio-relative: position among AUDIO streams, not among all.
+                "rel": len(out),
                 "lang": (tags.get("language") or "").strip().lower(),
                 "title": (tags.get("title") or "").strip(),
                 "channels": st.get("channels") or 0,
@@ -858,9 +919,9 @@ def _probe_audio_meta_uncached(url: str) -> dict:
                     duration = None
         except (TypeError, ValueError):
             duration = None
-        return {"tracks": out, "duration": duration}
+        return {"tracks": out, "duration": duration, "vcodec": vcodec}
     except Exception:
-        return {"tracks": [], "duration": None}
+        return {"tracks": [], "duration": None, "vcodec": None}
 
 
 def _probe_audio_tracks(url: str) -> list:
@@ -1041,11 +1102,14 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
         # of course; we should too.
         if mode == "vod":
             # VOD container remux (mkv/ts movie files over HTTP) → the SAME
-            # rolling live-style HLS as the live path. `-re` paces input at
-            # native speed so the rolling window tracks the viewer instead of
-            # racing to EOF in minutes; the cost is NO seeking — it plays like
-            # a live channel. This is the tvspot resolver's LAST-RESORT
-            # fallback when a title has no browser-playable mp4 anywhere.
+            # rolling live-style HLS as the live path. Input is paced at native
+            # speed so the rolling window tracks the viewer instead of racing to
+            # EOF in minutes — but only AFTER an initial burst (see
+            # _vod_pacing_args): pacing from frame zero meant segment 0 took a
+            # full HLS_SEGMENT_SECONDS of wall time to close, and the manifest
+            # this endpoint returns doesn't exist until it does. This is the
+            # tvspot resolver's LAST-RESORT fallback when a title has no
+            # browser-playable mp4 anywhere.
             # H.264 video copies straight through; HEVC/VP9 (x265 rips — TLOU
             # was hevc Main10, undecodable in HLS-TS on every real player)
             # re-encode at 720p via the shared live tier. Audio always → AAC
@@ -1066,7 +1130,7 @@ async def _start_or_get_hls_session(url: str, quality: str = "passthrough", mode
                 # Input seek BEFORE -i: fast keyframe seek, so a resume/failover
                 # can pick up mid-file instead of always restarting at 0:00.
                 *(["-ss", f"{start:g}"] if start > 0 else []),
-                "-re",
+                *_vod_pacing_args(),
                 "-user_agent", _BROWSER_UA,
                 "-reconnect", "1",
                 "-reconnect_streamed", "1",
