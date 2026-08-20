@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from "react";
 import { PiPProvider } from "@/utils/pipContext";
 import { ThemeProvider, useTheme } from "@/utils/themeContext";
 import { SeasonContextProvider } from "@/utils/contextToggle";
-import FloatingPlayer   from "./FloatingPlayer";
 import ThemeInjector    from "./ThemeInjector";
 import TeamThemeLoader  from "./TeamThemeLoader";
 import { AnimatePresence, motion } from "framer-motion";
@@ -113,12 +112,10 @@ const NAME_CLASS: Record<PhaseStatus, string> = {
 // Nav items — Live Games dot is rendered dynamically based on live status
 const NAV_ITEMS = [
   { href: "/",             label: "Home",          dot: "static", dotClass: "bg-[#22d3ee]/75 shadow-[0_0_5px_rgba(34,211,238,0.55)]",               active: (p: string) => p === "/" },
-  { href: "/gamecentre",   label: "Games",         dot: "live",   dotClass: "",                                                                      active: (p: string) => p === "/gamecentre" || p.startsWith("/game/") },
   { href: "/league/teams", label: "Teams",         dot: "static", dotClass: "bg-[#fb923c]/75 shadow-[0_0_5px_rgba(251,146,60,0.55)]",               active: (p: string) => p.startsWith("/league") || p.startsWith("/teams/") },
   { href: "/stats",        label: "Stats Leaders", dot: "static", dotClass: "bg-[#f472b6]/70 shadow-[0_0_5px_rgba(244,114,182,0.55)]",              active: (p: string) => p === "/stats" },
   { href: "/standings",    label: "Standings",     dot: "static", dotClass: "bg-[#fbbf24]/70 shadow-[0_0_5px_rgba(251,191,36,0.6)]",                active: (p: string) => p === "/standings" },
   { href: "/players",      label: "Cortex",        dot: "static", dotClass: "bg-[#a78bfa] shadow-[0_0_6px_rgba(167,139,250,0.8)]",                  active: (p: string) => p === "/players" || p.startsWith("/players/") },
-  { href: "/barncentre",   label: "BarnCentre",    dot: "static", dotClass: "bg-[#C9A84C]/70 shadow-[0_0_5px_rgba(201,168,76,0.6)]",                active: (p: string) => p === "/barncentre" },
 ];
 
 function NavIcon({ label }: { label: string }) {
@@ -261,7 +258,6 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
       <ThemeInjector />
       <TeamThemeLoader />
       <PiPProvider>
-      <FloatingPlayer />
       <div className="relative flex min-h-screen overflow-x-hidden">
         {/* Backdrop */}
         {open && (
@@ -417,61 +413,6 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
               </>
             )}
 
-            {/* Dev + Phases — rob only */}
-            {username === "rob" && (
-              <>
-                <div className="mx-3 mt-3 mb-1.5 border-t border-white/[0.06]" />
-                <p className="px-3 pt-1 pb-1.5 text-[9px] font-semibold uppercase tracking-[0.22em] text-white/15">
-                  Dev
-                </p>
-                <Link
-                  href="/dev"
-                  onClick={() => setOpen(false)}
-                  className="block"
-                >
-                  <div className={`flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all duration-150
-                    ${pathname === "/dev" ? "bg-white/[0.08]" : "hover:bg-white/[0.04]"}`}>
-                    <span className="h-1.5 w-1.5 rounded-full shrink-0 bg-white/20" />
-                    <span className="text-[9px] font-semibold font-mono text-white/15 w-5 shrink-0">—</span>
-                    <span className="text-[11px] font-medium leading-tight text-white/40">Dev Dashboard</span>
-                  </div>
-                </Link>
-
-                <p className="px-3 pt-3 pb-1.5 text-[9px] font-semibold uppercase tracking-[0.22em] text-white/15">
-                  Phases
-                </p>
-                {PHASES.map((p) => {
-                  const href = `/phase${p.num}`;
-                  const active = pathname === href;
-                  const linkable = p.status !== "not_started";
-
-                  const row = (
-                    <div
-                      className={`flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all duration-150
-                        ${active ? "bg-white/[0.08]" : linkable ? "hover:bg-white/[0.04]" : ""}`}
-                    >
-                      <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${DOT_CLASS[p.status]}`} />
-                      <span className="text-[9px] font-semibold font-mono text-white/15 w-5 shrink-0 tabular-nums">
-                        P{p.num}
-                      </span>
-                      <span className={`text-[11px] font-medium leading-tight ${NAME_CLASS[p.status]}`}>
-                        {p.name}
-                      </span>
-                    </div>
-                  );
-
-                  return linkable ? (
-                    <Link key={p.num} href={href} onClick={() => setOpen(false)} className="block">
-                      {row}
-                    </Link>
-                  ) : (
-                    <div key={p.num} className="cursor-default">
-                      {row}
-                    </div>
-                  );
-                })}
-              </>
-            )}
           </nav>
 
           {/* About / disclaimer */}
@@ -630,9 +571,7 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
             {/* Quick-nav buttons */}
             <div className="ml-auto flex items-center gap-0.5 sm:gap-1 shrink-0">
               {(
-                [
-                  { href: "/gamecentre",   labelSm: "Games",  label: "Games",  active: pathname === "/gamecentre" || pathname.startsWith("/game/") },
-                ] as const
+                [] as const
               ).map(({ href, labelSm, label, active }) => {
                 return (
                   <Link
@@ -779,28 +718,7 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                 );
               })()}
 
-              {/* BarnCentre — TV icon (metallic) */}
-              <Link
-                href="/barncentre"
-                className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md transition-all duration-150 border flex items-center justify-center text-[#C9A84C]/85 border-[#C9A84C]/35 hover:text-[#C9A84C] hover:border-[#C9A84C]/60"
-                style={{
-                  background: "linear-gradient(180deg, rgba(201,168,76,0.16) 0%, rgba(201,168,76,0.05) 50%, rgba(0,0,0,0.25) 100%)",
-                  boxShadow: "inset 0 1px 0 rgba(255,228,170,0.15), inset 0 -1px 0 rgba(0,0,0,0.45)",
-                }}
-                title="BarnCentre"
-              >
-                {/* TV icon */}
-                <svg width="14" height="13" viewBox="0 0 14 13" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <rect x="1" y="2" width="12" height="7.5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
-                  <line x1="4.5" y1="9.5" x2="3.5" y2="12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                  <line x1="9.5" y1="9.5" x2="10.5" y2="12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                  <line x1="3" y1="12" x2="11" y2="12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                  <line x1="4.5" y1="2" x2="2.5" y2="0.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                  <line x1="9.5" y1="2" x2="11.5" y2="0.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                </svg>
-              </Link>
-
-              {/* Cortex button — after BarnCentre */}
+              {/* Cortex button */}
               {(() => {
                 const cortexActive = pathname === "/players" || pathname.startsWith("/players/");
                 return (

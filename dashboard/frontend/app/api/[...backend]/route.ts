@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Vercel proxy timeout. Default is 10s on Hobby tier and trips on the
-// /lounge/epg cold-cache build (8-15s direct + Vercel cold-start). The
-// 60s ceiling lets cold builds complete; the FastAPI startup hook
-// pre-warms the EPG cache so this rarely matters in practice.
+// Vercel proxy timeout. The default 10s on the Hobby tier is tight for a cold
+// serverless start plus a first model-parquet read; 60s gives that room.
 export const maxDuration = 60;
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";

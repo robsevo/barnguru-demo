@@ -178,19 +178,19 @@ export default function LandingPage() {
       {/* Choice cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl">
 
-        {/* GameCentre card */}
-        <Link href="/gamecentre" className="group jarvis-lift jarvis-tilt jarvis-boot" style={{ animationDelay: "60ms" }}>
+        {/* Teams card */}
+        <Link href="/league/teams" className="group jarvis-lift jarvis-tilt jarvis-boot" style={{ animationDelay: "60ms" }}>
           <div className="relative h-44 rounded-2xl border border-[#C9A84C]/[0.18] bg-gradient-to-b from-white/[0.015] via-white/[0.005] to-transparent hover:border-white/[0.36] transition-all duration-200 p-6 flex flex-col justify-between overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.80),0_2px_6px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.06),inset_0_-1px_0_rgba(0,0,0,0.35),inset_1px_0_0_rgba(255,255,255,0.01),inset_-1px_0_0_rgba(255,255,255,0.01)]">
             <div className="absolute -top-8 -right-8 w-40 h-40 rounded-full bg-white/[0.04] blur-2xl pointer-events-none group-hover:bg-white/[0.08] transition-all duration-300" />
             <div>
-              <span className="text-[9px] font-black uppercase tracking-[0.3em] text-white/30 block mb-3">Live &amp; Scheduled</span>
+              <span className="text-[9px] font-black uppercase tracking-[0.3em] text-white/30 block mb-3">All 32 Clubs</span>
               <h2 className="text-[28px] font-black tracking-[0.08em] uppercase text-white leading-none">
-                Live<br />Games
+                Teams
               </h2>
             </div>
             <div className="flex items-end justify-between">
               <p className="text-[11px] text-white/35 leading-relaxed max-w-[160px]">
-                Live scores, play-by-play, skater stats, and shot maps for every game.
+                Rosters, depth charts, coaching profiles, and team-level rate stats.
               </p>
               <span className="text-white/30 group-hover:text-white/70 text-xl transition-all duration-200 group-hover:translate-x-1">→</span>
             </div>
@@ -255,38 +255,10 @@ export default function LandingPage() {
         </Link>
       </div>
 
-      {/* Phase progress strip */}
-      <div className="mt-6 w-full max-w-2xl">
-        <div className="w-full h-px bg-gradient-to-r from-transparent via-white/[0.10] to-transparent mb-3" />
-        <div className="flex flex-col items-center gap-2">
-          <div className="flex items-center gap-2">
-            {[
-              { status: "complete",    n: 2  },
-              { status: "in_progress", n: 1  },
-              { status: "not_started", n: 12 },
-              { status: "complete",    n: 1  },
-            ].map(({ status, n }) =>
-              Array.from({ length: n }).map((_, i) => (
-                <span
-                  key={`${status}-${i}`}
-                  className={`h-1 rounded-full transition-all ${
-                    status === "complete"    ? "w-5 bg-[#4ade80] shadow-[0_0_6px_rgba(74,222,128,0.7)]" :
-                    status === "in_progress" ? "w-5 bg-[#fbbf24] shadow-[0_0_6px_rgba(251,191,36,0.7)]" :
-                    "w-3 bg-white/[0.08]"
-                  }`}
-                />
-              ))
-            )}
-          </div>
-          <span className="text-[9px] font-semibold uppercase tracking-[0.2em] text-white/20 text-center">
-            3 of 16 phases complete<br />CV tracking active
-          </span>
-        </div>
-      </div>
-
       <p className="mt-3 max-w-xl text-center text-[9px] text-white/12 leading-relaxed">
-        GRTZKY is a private research and analytics tool for informational purposes only. Nothing on this platform constitutes financial, betting, or investment advice. All simulation outputs and edge signals are experimental and unverified. Use your own judgement. The Dev is not responsible for any decisions made based on information presented here.
-      </p>
+        A statistics and analytics demo. Ratings shown here are produced by the
+        models in this repository from a generated dataset, and are not a
+        prediction of real-world outcomes.</p>
     </main>
   );
 }

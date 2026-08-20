@@ -147,18 +147,10 @@ export default function LeagueTeamsPage() {
   const [fatigue, setFatigue] = useState<Record<string, TeamFatigueRow> | null>(null);
   const [fatigueMeta, setFatigueMeta] = useState<{ window_start?: string; window_end?: string } | null>(null);
 
-  useEffect(() => {
-    fetch("/api/phase3/team-fatigue?window_days=21")
-      .then((r) => r.json())
-      .then((d) => {
-        if (!d || d.status !== "ok") return;
-        const map: Record<string, TeamFatigueRow> = {};
-        for (const t of d.teams ?? []) map[t.team] = t;
-        setFatigue(map);
-        setFatigueMeta({ window_start: d.window_start, window_end: d.window_end });
-      })
-      .catch(() => {});
-  }, []);
+  // Team fatigue came from a scheduling model that is not part of this build,
+  // so nothing populates these. The panels below already treat the map as
+  // optional; leaving the fetch in would only add a 404 to every page load.
+
 
   function handleTeamClick(abbrev: string) {
     router.push(`/teams/${abbrev}`);

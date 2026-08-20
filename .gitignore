@@ -1,92 +1,25 @@
-# Rust
-/target/
-engine/target/
 
-# Python
+# Environment files. A real one leaked into an early copy of this build — it
+# carried a signing secret, live credentials and a Vercel OIDC token — so the
+# rule is broad and the template is the single exception.
+.env
+.env.*
+!.env.example
+
+# Compiled PyO3 extension. Build it with:
+#   uv run maturin develop --manifest-path engine/Cargo.toml --release
+# It is NOT committed: the Rust toolchain bakes absolute build paths into the
+# binary (the copy removed here carried 126 references to a developer's home
+# directory), and a 9 MB artifact has no business in source control.
 *.so
 *.pyd
-.venv/
+target/
+
+# Generated demo dataset — reproduce with: uv run python scripts/make_demo_data.py
+/data/
+
+# Python bytecode. Not just clutter: .pyc files embed the absolute path of the
+# source they were compiled from, so committing them leaks the build machine's
+# directory layout. Six of them were staged before this rule existed.
 __pycache__/
-*.pyc
-dist/
-*.egg-info/
-.pytest_cache/
-
-# Data files
-data/*.db
-data/*.parquet
-*.parquet
-*.pkl
-~/.gretzky/
-
-# Frontend
-# Frontend - Next.js
-# Only ignore build files and dependencies — never ignore the source code
-dashboard/frontend/node_modules/
-dashboard/frontend/.next/
-dashboard/frontend/.vercel/
-dashboard/frontend/out/
-dashboard/frontend/.swc/
-dashboard/frontend/tsconfig.tsbuildinfo
-dashboard/frontend/package-lock.json
-dashboard/frontend/.env
-dashboard/frontend/.env.local
-dashboard/frontend/.env.*.local
-
-# IPTV — generated on server by nightly deploy / check-iptv, never commit
-dashboard/api/iptv_status.json
-dashboard/api/iptv.env
-
-# Environment / secrets
-.env
-.env.local
-.env.*.local
-
-# CV training data (large, regeneratable via build-cv-dataset)
-data/cv_training/raw/
-data/cv_training/aug_images/
-data/cv_training/frames/
-data/cv_training/aug_labels/
-data/cv_training/yolo_split/
-data/cv_training/jersey_crops/
-data/cv_training/labels/
-data/cv_training/external/
-data/cv_training/images/
-data/cv_training/pseudo_labels/
-data/cv_training/labelled/
-data/cv_training/.bak_full/
-data/cv_clip_cache/
-
-# Trained model weights (regeneratable via train-* commands)
-runs/
-yolov8n.pt
-yolov8s.pt
-models/cv/*.pt
-models/cv/*.onnx
-models/cv/*.onnx.data
-
-# Frontend CV bundles — hosted on Cloudflare Pages once deployed, not Vercel
-dashboard/frontend/public/cv/*.onnx
-dashboard/frontend/public/cv/*.onnx.data
-
-# Cloudflare Pages deploy staging — built locally, uploaded via dashboard.
-# Not versioned; the source of truth is models/cv/*.int8.onnx.
-cv-static/
-
-# Serena MCP (machine-local config)
-.serena/
-
-# Editor / OS
-.DS_Store
-.idea/
-.vscode/
-*.swp
-*.swo
-.vercel
-
-# IPTV freshness runtime artifacts (regenerated on the self-hosted runner; contain creds)
-data/dynamic_upstream_accounts.json
-data/relay_allowed_hosts.json
-# Off-box EPG snapshot: built by `make epg-ship` on a laptop, shipped to the box as
-# a GitHub Release asset (not via git). Never committed. See scripts/epg_ship.py.
-data/lounge_epg.json
+*.py[cod]

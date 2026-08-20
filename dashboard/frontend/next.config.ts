@@ -5,11 +5,10 @@ const nextConfig: NextConfig = {
   // points at a chunk hash which still references last week's model URL. Next
   // writes `_next/static/<buildId>/...` into every HTML response; with a fresh
   // buildId, the browser is forced to re-fetch HTML + JS on the next visit.
-  // VERCEL_GIT_COMMIT_SHA is injected by Vercel; falls back to timestamp in
-  // local dev.
-  async generateBuildId() {
-    return process.env.VERCEL_GIT_COMMIT_SHA || String(Date.now());
-  },
+  // VERCEL_GIT_COMMIT_SHA is injected by Vercel; falls back to GITHUB_SHA or
+  // "dev" in local dev.
+  generateBuildId: async () =>
+    process.env.VERCEL_GIT_COMMIT_SHA || process.env.GITHUB_SHA || "dev",
   // Hard cache policy: HTML short-lived (so a new deploy propagates fast),
   // static chunks + CV model files immutable (their names already contain
   // content hashes / explicit version tags like `.v2.`). This replaces the

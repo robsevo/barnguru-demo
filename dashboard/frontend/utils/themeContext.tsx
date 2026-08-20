@@ -17,7 +17,7 @@ interface ThemeContextValue {
   cortexPinned: boolean;
   setCortexPinned: (v: boolean) => void;
   isCortexLoading: boolean;
-  isGrtzkyLoading: boolean;
+  isAppLoading: boolean;
   previewActive: boolean;
   setPreviewTheme: (theme: TeamTheme) => void;
   clearPreview: () => void;
@@ -31,7 +31,7 @@ export const ThemeContext = createContext<ThemeContextValue>({
   cortexPinned: false,
   setCortexPinned: () => {},
   isCortexLoading: false,
-  isGrtzkyLoading: false,
+  isAppLoading: false,
   previewActive: false,
   setPreviewTheme: () => {},
   clearPreview: () => {},
@@ -42,7 +42,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [isShowingLoader, setIsShowingLoader] = useState(false);
   const [cortexPinned, setCortexPinnedState] = useState(false);
   const [isCortexLoading, setIsCortexLoading] = useState(false);
-  const [isGrtzkyLoading, setIsGrtzkyLoading] = useState(false);
+  const [isAppLoading, setIsGrtzkyLoading] = useState(false);
   const [previewActive, setPreviewActive] = useState(false);
   // Stable ref so clearPreview always sees the current value without re-creating
   const previewActiveRef = useRef(false);
@@ -117,7 +117,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <ThemeContext.Provider value={{ theme, setTeamTheme, clearTheme, isShowingLoader, cortexPinned, setCortexPinned, isCortexLoading, isGrtzkyLoading, previewActive, setPreviewTheme, clearPreview }}>
+    <ThemeContext.Provider value={{ theme, setTeamTheme, clearTheme, isShowingLoader, cortexPinned, setCortexPinned, isCortexLoading, isAppLoading, previewActive, setPreviewTheme, clearPreview }}>
       {children}
     </ThemeContext.Provider>
   );

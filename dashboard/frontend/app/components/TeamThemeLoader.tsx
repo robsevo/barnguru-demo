@@ -4,12 +4,12 @@ import { useEffect, useState } from "react";
 import { useTheme } from "@/utils/themeContext";
 
 export default function TeamThemeLoader() {
-  const { theme, isShowingLoader, isCortexLoading, isGrtzkyLoading } = useTheme();
+  const { theme, isShowingLoader, isCortexLoading, isAppLoading } = useTheme();
   const [progress, setProgress] = useState(0);
   const [visible, setVisible] = useState(false);
   const [exiting, setExiting] = useState(false);
 
-  const activeLoader = isShowingLoader || isCortexLoading || isGrtzkyLoading;
+  const activeLoader = isShowingLoader || isCortexLoading || isAppLoading;
 
   useEffect(() => {
     if (!activeLoader) {
@@ -105,7 +105,7 @@ export default function TeamThemeLoader() {
   }
 
   // GRTZKY restore loader — takes priority over any active team theme
-  if (isGrtzkyLoading) {
+  if (isAppLoading) {
     const gold = "#C9A84C";
     return (
       <div
