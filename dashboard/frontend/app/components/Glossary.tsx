@@ -68,7 +68,7 @@ export const GLOSSARY_MAP: Record<string, string> = {
   "IR":           "Injured Reserve — player placed on IR, ineligible to play for at least 7 days",
   // Market
   "Kelly":        "Kelly Criterion — bankroll sizing formula: bet size = edge / odds; maximises long-run growth",
-  "Edge":         "Model edge — the gap between GRTZKY's win probability and Polymarket's implied probability",
+  "Edge":         "Model edge — the gap between BarnGuru's win probability and Polymarket's implied probability",
   // Contract
   "AAV":          "Average Annual Value — yearly cap hit of a player's contract",
   "Cap Efficiency": "WAR per $1M of AAV — measures how much value a player delivers relative to their cap cost",

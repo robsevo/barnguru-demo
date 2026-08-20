@@ -1,1 +1,1 @@
-"""GRTZKY player/team/coaching/fatigue models."""
+"""BarnGuru player/team/coaching/fatigue models."""

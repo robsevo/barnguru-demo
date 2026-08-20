@@ -57,7 +57,7 @@ export default function LoginPage() {
       <div className="fixed top-3 left-3 right-3 z-20 flex items-center gap-2 flex-wrap">
         <span className="hud-mono text-[10px] uppercase tracking-[0.20em] text-[#C9A84C]" aria-hidden>◢</span>
         <span className="hud-mono text-[10px] uppercase tracking-[0.20em] text-[#C9A84C]">
-          GRTZKY · ACCESS PORTAL
+          BARNGURU · ACCESS PORTAL
         </span>
         <span className="hud-mono text-[9px] uppercase tracking-[0.16em] text-white/40">· auth required</span>
         <span className="ml-auto flex items-center gap-1">
@@ -80,11 +80,11 @@ export default function LoginPage() {
           >
             <div className="flex items-center gap-3">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/logo-circle.png" alt="GRTZKY" className="h-14 w-auto" />
+              <img src="/logo-circle.png" alt="BarnGuru" className="h-14 w-auto" />
               <span className="text-white/15 font-thin text-lg">|</span>
               <div className="text-left">
                 <div className="text-[22px] font-semibold tracking-[0.14em] uppercase bg-gradient-to-r from-white via-[#e8eaec] to-[#b0b8c2] bg-clip-text text-transparent leading-none">
-                  GRTZKY
+                  BarnGuru
                 </div>
                 <div className="text-[8px] font-semibold uppercase tracking-[0.22em] text-white/20 mt-1">
                   Bayesian Analytics and Rating Network
@@ -187,7 +187,7 @@ export default function LoginPage() {
               <div className="rounded-xl border border-white/[0.05] bg-white/[0.02] px-3.5 py-3">
                 <p className="text-[8px] font-black uppercase tracking-[0.2em] text-white/20 mb-1.5">Pro tip</p>
                 <p className="text-[10px] text-white/25 leading-relaxed">
-                  Open GRTZKY in your browser, tap <span className="text-white/40 font-semibold">Share → Add to Home Screen</span> and you get the app icon, full-screen mode, and instant access — no App Store needed.
+                  Open BarnGuru in your browser, tap <span className="text-white/40 font-semibold">Share → Add to Home Screen</span> and you get the app icon, full-screen mode, and instant access — no App Store needed.
                 </p>
               </div>
             </form>

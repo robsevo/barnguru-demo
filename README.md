@@ -1,4 +1,4 @@
-# GRTZKY
+# BarnGuru
 
 Hockey analytics: a library of statistical models, a simulation engine, and a
 statistics dashboard that reads what the models produce.

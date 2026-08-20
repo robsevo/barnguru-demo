@@ -1,4 +1,4 @@
-"""GRTZKY demo API.
+"""BarnGuru demo API.
 
 Serves the statistics dashboard from the generated dataset in `data/`.
 
@@ -31,7 +31,7 @@ DATA_DIR = REPO_ROOT / "data"
 DEMO_DIR = DATA_DIR / "demo"
 
 app = FastAPI(
-    title="GRTZKY demo API",
+    title="BarnGuru demo API",
     description="Hockey statistics and model output over a generated league.",
     version="0.1.0",
 )

@@ -1,6 +1,6 @@
 """WAR (Wins Above Replacement) + Contract Efficiency Model — Feature 2.25.
 
-Synthesises all GRTZKY player ratings into a single Wins Above Replacement
+Synthesises all BarnGuru player ratings into a single Wins Above Replacement
 score per player per season, then computes contract efficiency relative to
 a player's WAR-implied value.
 

@@ -1,6 +1,6 @@
 """Model Snapshot System — Feature 2.16.
 
-Full GRTZKY system state snapshot: serialises all running model states
+Full BarnGuru system state snapshot: serialises all running model states
 into one ``GRETZKY_as_of_{date}.pkl`` file for reproducible replay and
 historical comparison.
 
@@ -62,7 +62,7 @@ DEFAULT_SNAPSHOT_DIR = Path.home() / ".gretzky" / "snapshots"
 # ---------------------------------------------------------------------------
 
 class GRETZKYSnapshot:
-    """Complete serialised GRTZKY system state at a point in time.
+    """Complete serialised BarnGuru system state at a point in time.
 
     Attributes:
         name:          Human-readable snapshot name (auto-generated if not given).
@@ -309,7 +309,7 @@ class GRETZKYSnapshot:
 # ---------------------------------------------------------------------------
 
 class SnapshotIndex:
-    """Manages a directory of GRTZKY snapshots.
+    """Manages a directory of BarnGuru snapshots.
 
     Usage::
 

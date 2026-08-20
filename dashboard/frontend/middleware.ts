@@ -14,7 +14,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const token   = request.cookies.get("grtzky_session")?.value;
+  const token   = request.cookies.get("barnguru_session")?.value;
   const payload = token ? await verifyToken(token) : null;
 
   if (!payload) {

@@ -4,12 +4,12 @@ import { useEffect, useState } from "react";
 import { useTheme } from "@/utils/themeContext";
 
 export default function TeamThemeLoader() {
-  const { theme, isShowingLoader, isCortexLoading, isAppLoading } = useTheme();
+  const { theme, isShowingLoader, isCortexLoading, isBarnGuruLoading } = useTheme();
   const [progress, setProgress] = useState(0);
   const [visible, setVisible] = useState(false);
   const [exiting, setExiting] = useState(false);
 
-  const activeLoader = isShowingLoader || isCortexLoading || isAppLoading;
+  const activeLoader = isShowingLoader || isCortexLoading || isBarnGuruLoading;
 
   useEffect(() => {
     if (!activeLoader) {
@@ -104,8 +104,8 @@ export default function TeamThemeLoader() {
     );
   }
 
-  // GRTZKY restore loader — takes priority over any active team theme
-  if (isAppLoading) {
+  // BarnGuru restore loader — takes priority over any active team theme
+  if (isBarnGuruLoading) {
     const gold = "#C9A84C";
     return (
       <div
@@ -135,12 +135,12 @@ export default function TeamThemeLoader() {
           <div className="rounded-full flex items-center justify-center"
             style={{ width: 96, height: 96, background: `radial-gradient(circle at 40% 35%, rgba(201,168,76,0.18) 0%, rgba(0,0,0,0.6) 100%)`, boxShadow: `0 0 40px rgba(201,168,76,0.25), inset 0 1px 0 rgba(255,255,255,0.08)` }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo-circle.png" alt="GRTZKY" width={88} height={88} className="object-contain"
+            <img src="/logo-circle.png" alt="BarnGuru" width={88} height={88} className="object-contain"
               style={{ filter: `drop-shadow(0 2px 12px rgba(201,168,76,0.5))` }} />
           </div>
         </div>
         <p className="mt-6 text-[13px] font-black uppercase tracking-[0.28em]" style={{ color: gold }}>
-          GRTZKY
+          BarnGuru
         </p>
         <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.2em] text-white/30">
           Theme Restored

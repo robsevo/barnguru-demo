@@ -17,7 +17,7 @@ interface ThemeContextValue {
   cortexPinned: boolean;
   setCortexPinned: (v: boolean) => void;
   isCortexLoading: boolean;
-  isAppLoading: boolean;
+  isBarnGuruLoading: boolean;
   previewActive: boolean;
   setPreviewTheme: (theme: TeamTheme) => void;
   clearPreview: () => void;
@@ -31,7 +31,7 @@ export const ThemeContext = createContext<ThemeContextValue>({
   cortexPinned: false,
   setCortexPinned: () => {},
   isCortexLoading: false,
-  isAppLoading: false,
+  isBarnGuruLoading: false,
   previewActive: false,
   setPreviewTheme: () => {},
   clearPreview: () => {},
@@ -42,24 +42,24 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [isShowingLoader, setIsShowingLoader] = useState(false);
   const [cortexPinned, setCortexPinnedState] = useState(false);
   const [isCortexLoading, setIsCortexLoading] = useState(false);
-  const [isAppLoading, setIsGrtzkyLoading] = useState(false);
+  const [isBarnGuruLoading, setIsBarnGuruLoading] = useState(false);
   const [previewActive, setPreviewActive] = useState(false);
   // Stable ref so clearPreview always sees the current value without re-creating
   const previewActiveRef = useRef(false);
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("grtzky_teamTheme");
+      const saved = localStorage.getItem("barnguru_teamTheme");
       if (saved) setThemeState(JSON.parse(saved));
-      setCortexPinnedState(localStorage.getItem("grtzky_cortexPinned") === "1");
+      setCortexPinnedState(localStorage.getItem("barnguru_cortexPinned") === "1");
     } catch {}
   }, []);
 
   const setTeamTheme = useCallback((newTheme: TeamTheme) => {
     // Selecting a team theme clears Cortex pin so the two never coexist
-    localStorage.removeItem("grtzky_cortexPinned");
+    localStorage.removeItem("barnguru_cortexPinned");
     setCortexPinnedState(false);
-    localStorage.setItem("grtzky_teamTheme", JSON.stringify(newTheme));
+    localStorage.setItem("barnguru_teamTheme", JSON.stringify(newTheme));
     setThemeState(newTheme);
     setPreviewActive(false);
     setIsShowingLoader(true);
@@ -68,10 +68,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const clearTheme = useCallback(() => {
-    localStorage.removeItem("grtzky_teamTheme");
+    localStorage.removeItem("barnguru_teamTheme");
     setThemeState(null);
-    setIsGrtzkyLoading(true);
-    const t = setTimeout(() => setIsGrtzkyLoading(false), 6000);
+    setIsBarnGuruLoading(true);
+    const t = setTimeout(() => setIsBarnGuruLoading(false), 6000);
     return () => clearTimeout(t);
   }, []);
 
@@ -90,7 +90,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     previewActiveRef.current = false;
     setPreviewActive(false);
     try {
-      const saved = localStorage.getItem("grtzky_teamTheme");
+      const saved = localStorage.getItem("barnguru_teamTheme");
       setThemeState(saved ? JSON.parse(saved) : null);
     } catch {
       setThemeState(null);
@@ -100,24 +100,24 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const setCortexPinned = useCallback((v: boolean) => {
     if (v) {
       // Switching to Cortex — clear any active team theme first
-      localStorage.removeItem("grtzky_teamTheme");
+      localStorage.removeItem("barnguru_teamTheme");
       setThemeState(null);
-      localStorage.setItem("grtzky_cortexPinned", "1");
+      localStorage.setItem("barnguru_cortexPinned", "1");
       setIsCortexLoading(true);
       const t = setTimeout(() => setIsCortexLoading(false), 6000);
       setCortexPinnedState(true);
       return () => clearTimeout(t);
     } else {
-      localStorage.removeItem("grtzky_cortexPinned");
+      localStorage.removeItem("barnguru_cortexPinned");
       setCortexPinnedState(false);
-      setIsGrtzkyLoading(true);
-      const t = setTimeout(() => setIsGrtzkyLoading(false), 6000);
+      setIsBarnGuruLoading(true);
+      const t = setTimeout(() => setIsBarnGuruLoading(false), 6000);
       return () => clearTimeout(t);
     }
   }, []);
 
   return (
-    <ThemeContext.Provider value={{ theme, setTeamTheme, clearTheme, isShowingLoader, cortexPinned, setCortexPinned, isCortexLoading, isAppLoading, previewActive, setPreviewTheme, clearPreview }}>
+    <ThemeContext.Provider value={{ theme, setTeamTheme, clearTheme, isShowingLoader, cortexPinned, setCortexPinned, isCortexLoading, isBarnGuruLoading, previewActive, setPreviewTheme, clearPreview }}>
       {children}
     </ThemeContext.Provider>
   );

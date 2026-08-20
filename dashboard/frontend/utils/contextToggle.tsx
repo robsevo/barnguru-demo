@@ -25,7 +25,7 @@ interface CtxValue {
 // Bumped to v2 so any stale "season" value persisted before the playoff
 // window opened gets discarded — every visitor is re-evaluated against the
 // month-based default below on next load.
-const STORAGE_KEY = "GRTZKY:season-context:v2";
+const STORAGE_KEY = "BarnGuru:season-context:v2";
 
 function defaultContext(): SeasonContext {
   if (typeof window === "undefined") return "playoffs";

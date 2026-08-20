@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
   const token = await signToken(candidate!.username);
 
   const res = NextResponse.json({ ok: true });
-  res.cookies.set("grtzky_session", token, {
+  res.cookies.set("barnguru_session", token, {
     httpOnly: true,
     secure:   process.env.NODE_ENV === "production",
     sameSite: "lax",

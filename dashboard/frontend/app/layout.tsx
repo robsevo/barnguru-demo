@@ -18,7 +18,7 @@ const barlowCondensed = Barlow_Condensed({
 });
 
 export const metadata: Metadata = {
-  title: "GRTZKY",
+  title: "BarnGuru",
   description: "Bayesian Analytics and Rating Network",
   icons: {
     icon: [
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "GRTZKY",
+    title: "BarnGuru",
   },
 };
 

@@ -15,7 +15,7 @@ export default function LandingPage() {
       <div className="relative z-10 w-full max-w-2xl mb-3 flex items-center gap-2">
         <span className="hud-mono text-[10px] uppercase tracking-[0.20em] text-[var(--brand-hex)]" aria-hidden>◢</span>
         <span className="hud-mono text-[10px] uppercase tracking-[0.20em] text-[var(--brand-hex)]">
-          GRTZKY · HOME
+          BarnGuru · HOME
         </span>
         <span className="hud-mono text-[9px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">· welcome</span>
         <span className="ml-auto flex items-center gap-1">
@@ -87,7 +87,7 @@ export default function LandingPage() {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/hero.png"
-          alt="GRTZKY"
+          alt="BarnGuru"
           className="relative z-10 mx-auto w-full max-w-[420px] sm:max-w-[620px] lg:max-w-[760px] h-auto drop-shadow-2xl -mt-3"
         />
 
@@ -152,7 +152,7 @@ export default function LandingPage() {
           >
             <div className="w-12 h-px bg-white/[0.12] mx-auto mb-3" />
             <p className="text-[13px] text-white/60 leading-relaxed max-w-lg mx-auto mb-3">
-              If the Dev handed you a username, a password, and a secret phrase — count yourself among a very small group with access to something genuinely new. GRTZKY is the first platform of its kind: real AI-native hockey intelligence, built from the ice up, designed to find the edges the market will never see coming. Keep your credentials to yourself — access is tracked, and sharing gets your account pulled. If someone wants in, they ask the Dev.
+              If the Dev handed you a username, a password, and a secret phrase — count yourself among a very small group with access to something genuinely new. BarnGuru is the first platform of its kind: real AI-native hockey intelligence, built from the ice up, designed to find the edges the market will never see coming. Keep your credentials to yourself — access is tracked, and sharing gets your account pulled. If someone wants in, they ask the Dev.
             </p>
             <div className="w-12 h-px bg-white/[0.12] mx-auto mb-3" />
             <p className="text-[13px] text-white/60 leading-relaxed max-w-lg mx-auto mb-3">

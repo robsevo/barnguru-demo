@@ -1,6 +1,6 @@
 {
-  "name": "GRTZKY",
-  "short_name": "GRTZKY",
+  "name": "BarnGuru",
+  "short_name": "BarnGuru",
   "description": "Bayesian Analytics and Rating Network",
   "start_url": "/",
   "display": "standalone",

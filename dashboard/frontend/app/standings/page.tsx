@@ -1054,7 +1054,7 @@ function StandingsPageInner() {
       <div className="flex items-end justify-between mb-4 relative z-10 flex-wrap gap-3">
         <div>
           <Link href="/" className="hud-mono text-[9px] uppercase tracking-[0.28em] text-white/30 hover:text-[var(--brand-hex)] transition-colors mb-1.5 block">
-            ← GRTZKY
+            ← BarnGuru
           </Link>
           <h1 className="text-[22px] sm:text-[34px] font-black tracking-[0.10em] uppercase leading-none bg-clip-text text-transparent"
             style={{ backgroundImage: "linear-gradient(180deg, #ffffff 0%, #E8D090 38%, #C9A84C 58%, #6a5728 78%, #E8D090 100%)", filter: "drop-shadow(0 1px 0 rgba(0,0,0,0.85))" }}>

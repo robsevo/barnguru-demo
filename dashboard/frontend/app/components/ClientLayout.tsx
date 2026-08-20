@@ -22,7 +22,7 @@ function AboutDisclaimer() {
       {open && (
         <div className="px-4 pb-3 space-y-2.5">
           <p className="text-[9px] font-mono leading-relaxed text-white/40">
-            GRTZKY is a possession-level NHL game simulator built for research and pre-game analysis.
+            BarnGuru is a possession-level NHL game simulator built for research and pre-game analysis.
             It is not an automated betting tool — every market position requires human review.
           </p>
           <div className="rounded-lg border border-[#fbbf24]/20 bg-[#fbbf24]/[0.04] px-3 py-2 space-y-1.5">
@@ -296,7 +296,7 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                   <circle cx="24" cy="24" r="1.6" fill="white"   fillOpacity="0.72"/>
                 </svg>
               ) : (
-                <img src="/logo-circle.png" alt="GRTZKY" className="h-8 w-auto" />
+                <img src="/logo-circle.png" alt="BarnGuru" className="h-8 w-auto" />
               )}
               <span className="text-white/20 font-thin text-sm">|</span>
               <span
@@ -306,7 +306,7 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                   backgroundImage: `linear-gradient(to right, #fff, ${brandHex2}, ${brandHex})`,
                 }}
               >
-                {theme ? theme.abbrev : isCortexMode ? "CORTEX" : "GRTZKY"}
+                {theme ? theme.abbrev : isCortexMode ? "CORTEX" : "BarnGuru"}
               </span>
             </Link>
             <button
@@ -406,7 +406,7 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                       onClick={() => { setCortexPinned(false); setOpen(false); }}
                       className="text-[8px] font-semibold uppercase tracking-wider px-2 py-1 rounded border text-white/30 border-white/[0.10] hover:text-[#f87171]/70 hover:border-[#f87171]/30 transition-all duration-150"
                     >
-                      GRTZKY
+                      BarnGuru
                     </button>
                   </div>
                 </div>
@@ -423,7 +423,7 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
           {/* Sidebar footer */}
           <div className="px-4 py-3 border-t border-white/[0.10] shrink-0 flex items-center justify-center">
             <p className="text-[8px] font-semibold uppercase tracking-[0.2em] text-white/10">
-              GRTZKY
+              BarnGuru
             </p>
           </div>
         </aside>
@@ -517,7 +517,7 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
               ) : (
                 <img
                   src="/logo-circle.png"
-                  alt="GRTZKY"
+                  alt="BarnGuru"
                   className="h-9 sm:h-8 w-auto block"
                   style={{
                     filter: `drop-shadow(0 1px 1px rgba(0,0,0,0.65))
@@ -556,7 +556,7 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
                     : `drop-shadow(0 1px 0 rgba(0,0,0,0.85)) drop-shadow(0 0 6px ${brandShadow})`,
                 }}
               >
-                {theme ? theme.abbrev : isCortexMode ? "CORTEX" : "GRTZKY"}
+                {theme ? theme.abbrev : isCortexMode ? "CORTEX" : "BarnGuru"}
               </span>
             </Link>
 
