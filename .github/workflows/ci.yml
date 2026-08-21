@@ -38,6 +38,11 @@ jobs:
       - name: The API serves what the generator wrote
         if: steps.fetch.outcome == 'success'
         run: |
+          # The server must not outlive this step. An orphaned `uv run` keeps the
+          # uv cache locked, so the post-run `uv cache prune` stalled for five
+          # minutes and exited 2 — which is what turned this job red while every
+          # step inside it reported green.
+          trap 'pkill -f "uvicorn dashboard.api.main:app" 2>/dev/null || true' EXIT
           uv run uvicorn dashboard.api.main:app --port 8000 &
           for i in $(seq 1 30); do
             curl -sf -o /dev/null http://localhost:8000/health && break
@@ -49,8 +54,11 @@ jobs:
             [ "$code" = "200" ] || { echo "::error::$path returned $code"; exit 1; }
           done
 
-      - run: uv run pytest -q
-        continue-on-error: true   # upstream suite covers models not wired here
+      # Deliberately outside the `if:` guard above — nothing in tests/ reads the
+      # generated dataset, so the suite still has to pass on a day the NHL's
+      # public API is down.
+      - name: Model and API tests
+        run: uv run pytest -q
 
   frontend:
     name: Dashboard
@@ -89,7 +97,9 @@ jobs:
             "JWT":                 re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\."),
             "assigned secret":     re.compile(r"(?i)^\s*(password|secret|token|api_?key|auth_users|[a-z_]*_secret)\s*=\s*[\"']?[^\s\"'{},#]{8,}", re.M),
             "absolute home path":  re.compile(r"/(?:home|Users)/(?!runner\b)[a-z][a-z0-9_-]{1,31}/"),
-            "personal identifier": re.compile(r"(?i)\b(barn\.?guru|robsevo|ovrsv|2chepp)\b"),
+            # The dot is required: "barn.guru" is the private host and stays out of
+            # this build, while "BarnGuru" is the project's own public name.
+            "personal identifier": re.compile(r"(?i)\b(barn\.guru|robsevo|ovrsv|2chepp)\b"),
           }
           # Scan what git would PUBLISH, not what happens to be on disk. An
           # os.walk version of this flagged a git-ignored .env.local and this
