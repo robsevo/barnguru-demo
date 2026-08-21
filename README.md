@@ -129,10 +129,12 @@ uv run python scripts/make_demo_data.py --games 1312   # a full season
 npm run build                       # dashboard production build
 ```
 
-The Rust engine in `engine/` is optional and not required by anything above:
+The Rust engine in `engine/` is optional and not required by anything above.
+`maturin` is not a declared dependency for that reason, so it is fetched for the
+build rather than installed:
 
 ```bash
-uv run maturin develop --manifest-path engine/Cargo.toml --release
+make build-engine    # uv run --with maturin maturin develop --release
 ```
 
 ---

@@ -1,48 +1,44 @@
-.PHONY: test test-rust test-python test-integration build-engine clean dev gretzky epg-ship vod-ship pool-ship sync-accounts sync-relay-token refresh-all
+# Targets for the public demo build. Everything here runs against what is in
+# this repository — the upstream project's shipping and sync targets are not
+# reproduced, because their dispatcher is not part of this build and a target
+# that cannot run is worse than an absent one.
 
-## Run all tests (Rust unit/integration + Python smoke + Python integration)
-test: test-rust build-engine test-python test-integration
+.PHONY: help test data dev build-engine test-engine clean
 
-## Rust: unit tests + integration tests
-test-rust:
-	cargo test --manifest-path engine/Cargo.toml --all-features
+## List these targets
+help:
+	@awk 'BEGIN {FS = ":"} \
+	     /^## / {desc = substr($$0, 4); next} \
+	     /^[a-z][a-z-]*:/ && desc {printf "  \033[1m%-13s\033[0m %s\n", $$1, desc; desc = ""}' \
+	     $(MAKEFILE_LIST)
 
-## Build the PyO3 extension into the local venv (required before test-integration)
-build-engine:
-	uv run maturin develop --manifest-path engine/Cargo.toml
+## Model and API tests — needs no generated data
+test:
+	uv run pytest -q
 
-## Python: smoke tests
-test-python:
-	uv run pytest tests/python/ -v
+## Rebuild the dataset: real NHL rosters, then the models over them
+data:
+	uv run python scripts/fetch_nhl.py
+	uv run python scripts/make_demo_data.py
 
-## Python: integration tests (requires build-engine first)
-test-integration:
-	uv run pytest tests/integration/ -v
-
-## Start FastAPI (:8000) + Next.js (:3000) dev servers with hot-reload
-dev: build-engine
+## Start FastAPI on :8000 and Next.js on :3000, both with hot reload
+dev:
 	uv run uvicorn dashboard.api.main:app --reload --port 8000 &
 	cd dashboard/frontend && npm run dev
 
-## Run GRETZKY dispatcher (e.g. make gretzky CMD=sync  or  make gretzky CMD=all)
-gretzky:
-	uv run python scripts/gretzky.py $(CMD)
+# maturin is not a declared dependency of this build — nothing above needs the
+# engine — so it is fetched for the duration of the run rather than installed.
+## Build the optional Rust possession simulator into the venv
+build-engine:
+	uv run --with maturin maturin develop --manifest-path engine/Cargo.toml --release
 
-## Build the merged cable EPG locally + ship it to the box (daily; offloads the
-## OOM-prone on-box XMLTV build). Pass flags via ARGS, e.g. make epg-ship ARGS=--dry-run
-epg-ship:
-	uv run python scripts/gretzky.py epg-ship -- $(ARGS)
+## Rust unit + integration tests (needs a cargo toolchain)
+test-engine:
+	cargo test --manifest-path engine/Cargo.toml --all-features
 
-
-
-
-
-## One command to refresh everything the box serves: sync fresh accounts, then build
-## + ship the EPG, VOD index, and live pool. Run periodically (or wire to a timer).
-refresh-all: sync-accounts epg-ship vod-ship pool-ship
-
-## Clean build artifacts
+## Remove build artifacts, caches, and the generated dataset
 clean:
-	cargo clean --manifest-path engine/Cargo.toml
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	cargo clean --manifest-path engine/Cargo.toml 2>/dev/null || true
+	find . -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
 	find . -name "*.pyc" -delete 2>/dev/null || true
+	rm -rf data/
