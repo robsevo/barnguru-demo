@@ -318,7 +318,7 @@ filling.
 
 ## 10. License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Notes on what the licence covers: [NOTICE](NOTICE).
 
 Player names, club names and statistics are factual records retrieved from the
 NHL's public API at runtime. They are not redistributed by this repository and

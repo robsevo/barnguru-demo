@@ -1,0 +1,3 @@
+The league this project generates is fictional. Club names, player names and all
+statistics in `data/` are produced by scripts/make_demo_data.py and describe no
+real person, team or season.
